@@ -1,15 +1,18 @@
-# FeedDock 1.8.0 验证范围
+# FeedDock v1.8.1 验证报告
 
-自动化测试覆盖：
+修复内容：
 
-- 首次登录与强制修改密码；
-- 修改密码后旧会话失效；
-- Mikan 独立图片卡片在星期区块外时按 `bangumi_id` 回填；
-- 相对封面路径使用 HTTP 最终响应域名；
-- 每星期隐藏记录持久化；
-- 保存某星期不会清空其他星期；
-- 普通模式移除隐藏番剧；
-- 编辑模式返回全部番剧并标记 `hidden=true`；
-- 清空单星期隐藏设置；
-- RSS/Atom 解析、规则过滤和集数偏移；
-- Python 编译、JavaScript 语法、Compose 和 Actions YAML。
+- `requirements.txt` 补充 `SQLAlchemy>=2.0,<3.0`。
+- 新增 `requirements-test.txt`，集中安装应用与测试依赖。
+- GitHub Actions 使用 `python -m pip` 和 `python -m pytest`，避免解释器环境不一致。
+- 测试前显式验证 FastAPI、HTTPX、BeautifulSoup 与 SQLAlchemy 导入。
+- 新增旧版残留文件清理说明，防止网页覆盖上传造成新旧代码混用。
+- 保留按星期编辑、隐藏和恢复 Mikan 番剧的持久化过滤功能。
+
+本地检查：
+
+- Python 3.12 项目编译通过。
+- JavaScript 语法检查通过。
+- YAML 解析通过。
+- 项目现有自动化测试通过。
+- SQLAlchemy 导入验证通过。

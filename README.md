@@ -4,6 +4,10 @@ FeedDock 是一个可通过 Docker 部署的自托管 RSS 规则处理与 qBitto
 
 > 本项目不提供、存储或分发任何媒体资源。请只添加你有权访问的 RSS，并遵守当地法律、源站条款与版权要求。
 
+## 从旧版覆盖升级的重要说明
+
+GitHub 网页上传不会删除旧文件。若仓库中仍存在 `app/discovery.py`、`app/database.py` 或旧的 `tests/test_discovery.py` 等文件，请按 [`LEGACY_CLEANUP.md`](LEGACY_CLEANUP.md) 清理，并使用 `git add -A` 提交删除记录。v1.8.1 同时补齐了 SQLAlchemy 测试依赖，避免 GitHub Actions 在测试收集阶段报 `ModuleNotFoundError: No module named 'sqlalchemy'`。
+
 ## 1.8.0 新增：按星期过滤隐藏番剧
 
 Mikan 目录中的每个星期均有“编辑过滤”按钮：
