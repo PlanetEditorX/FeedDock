@@ -1,8 +1,8 @@
-# FeedDock v1.8.1 验证报告
+# FeedDock v1.8.2 验证报告
 
 ## 结论
 
-FeedDock v1.8.1 已通过 55 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
+FeedDock v1.8.2 已通过 57 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
 
 
 ## Mikan 封面域名修复
@@ -47,7 +47,10 @@ FeedDock v1.8.1 已通过 55 项自动化测试，并完成 Python 编译、Java
 - Mikan 封面通过 FeedDock 同源接口加载。
 - 首次加载写入 `/data/mikan-image-cache`。
 - 后续加载直接读取磁盘，不再次请求来源图片。
-- 默认缓存时间为 7 天，可通过 `MIKAN_IMAGE_CACHE_DAYS` 修改。
+- 默认生成 240×320 WebP 缩略图，可通过 `MIKAN_THUMBNAIL_WIDTH` 和 `MIKAN_THUMBNAIL_HEIGHT` 修改。
+- 本地文件即使超过浏览器缓存时间仍优先使用，不会因为年龄重新请求 Mikan。
+- 本地文件为空或损坏时会删除坏缓存并重新下载。
+- 浏览器默认缓存 30 天，可通过 `MIKAN_IMAGE_CACHE_DAYS` 修改。
 - 保留来源主机、图片类型和大小安全校验。
 
 ## 页面行为
@@ -60,7 +63,7 @@ FeedDock v1.8.1 已通过 55 项自动化测试，并完成 Python 编译、Java
 - 页面显示缓存时间和下次后台刷新时间。
 - 标题搜索使用同一季度缓存。
 - 番剧弹窗提供单独的“强制更新字幕组”按钮。
-- 静态资源版本已更新为 1.8.1，避免飞牛浏览器使用旧 JavaScript。
+- 静态资源版本已更新为 1.8.2，避免飞牛浏览器使用旧 JavaScript。
 
 ## 飞牛部署
 
@@ -68,7 +71,9 @@ FeedDock v1.8.1 已通过 55 项自动化测试，并完成 Python 编译、Java
 
 ```yaml
 MIKAN_CACHE_HOURS: "6"
-MIKAN_IMAGE_CACHE_DAYS: "7"
+MIKAN_IMAGE_CACHE_DAYS: "30"
+MIKAN_THUMBNAIL_WIDTH: "240"
+MIKAN_THUMBNAIL_HEIGHT: "320"
 ```
 
 缓存数据库和封面均位于已经挂载的 `/data` 中，对应宿主机：
@@ -96,14 +101,14 @@ MIKAN_IMAGE_CACHE_DAYS: "7"
 当前构建环境不能直接访问线上 Mikan。来源解析测试使用符合当前页面结构的 HTML 样本和 `httpx.MockTransport`；缓存层使用临时 SQLite、模拟来源客户端和临时磁盘目录完成真实读写验证。
 
 
-## v1.8.1 新增验证
+## v1.8.2 新增验证
 
 - 按星期保存隐藏番剧并保持其他星期不变。
 - 清空某星期过滤后可恢复显示。
 - API 目录保留隐藏项目并附加 `hidden` 状态，编辑模式无需再次请求 Mikan。
 - 前端包含编辑、保存、取消和本周全部显示操作。
 
-## v1.8.1 官网桌面目录封面修复
+## v1.8.2 官网桌面目录封面修复
 
 已使用用户提供的 Mikan 官网完整 HTML 响应直接验证：
 
@@ -114,4 +119,14 @@ MIKAN_IMAGE_CACHE_DAYS: "7"
 - 完整官网样本识别 87 个番剧，87 个均获得非空封面地址。
 - `bangumi_id=681` 正确解析为 `/images/Bangumi/200504/1df90634.jpg?...`。
 - `bangumi_id=3920` 正确解析为 `/images/Bangumi/202604/edeef072.jpg?...`。
-- 目录缓存 schema 从 2 升级为 3，已有空封面缓存会自动迁移刷新。
+- 目录缓存 schema 升级为 4，已有目录会自动迁移为缩略图 URL。
+
+
+## v1.8.2 本地缩略图缓存
+
+- 官网 400×400 封面 URL 会规范化为 240×320 WebP 缩略图。
+- 第一次请求写入 `/data/mikan-image-cache`，第二次直接读取本地文件。
+- 将缓存元数据改为一年前后，仍然命中本地文件且不调用来源客户端。
+- 将本地图片截断为空文件后，会重新下载并原子替换缓存。
+- 浏览器端使用异步解码、原生懒加载和长期 Cache-Control。
+- 前端图片错误不会绕过 FeedDock 代理直接请求 Mikan。

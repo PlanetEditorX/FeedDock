@@ -4,11 +4,16 @@ FeedDock 是一个自托管 RSS 规则处理与 qBittorrent 自动化服务。�
 
 > 本项目不提供、存储或分发媒体资源。请只处理你有权访问和下载的内容，并遵守所在地区法律、源站规则及版权要求。
 
-当前版本：`1.8.1`
+当前版本：`1.8.2`
 
 
-## v1.8.1
+## v1.8.2
 
+- Mikan 封面改为请求 `240×320` WebP 缩略图，显著减少首次加载的数据量。
+- 封面采用本地磁盘优先策略：只要 `/data/mikan-image-cache` 中的文件有效，就直接读取，不因时间到期重新访问 Mikan。
+- 只有本地文件缺失、为空或元数据损坏时，才重新从 Mikan 获取并原子替换缓存。
+- 浏览器封面缓存默认延长到 30 天；前端失败时不再绕过代理直接访问 Mikan。
+- 目录缓存升级到 schema 4，旧目录会自动刷新一次并切换为缩略图 URL。
 - 修复 Mikan 官网桌面目录封面解析：官网将封面放在列表项中的 `span.js-expand_bangumi[data-src]`，标题则位于兄弟节点 `div.an-info-group` 内。
 - 解析器现在优先以完整 `<li>` 作为番剧卡片，能够同时读取番剧 ID、标题、更新时间和封面。
 - Mikan 目录缓存结构升级到 schema 3，旧的空封面缓存会在升级后自动重新获取一次。
@@ -41,7 +46,7 @@ FeedDock 是一个自托管 RSS 规则处理与 qBittorrent 自动化服务。�
 - 标题搜索改为在本地缓存中筛选，不产生额外来源请求。
 - 新增“强制更新”按钮，可立即更新所选年份和季度。
 - 字幕组详情首次读取后写入缓存，重复打开不再请求 Mikan，并可单独强制更新。
-- 番剧封面写入 `/data/mikan-image-cache`，默认缓存 7 天。
+- 番剧封面写入 `/data/mikan-image-cache`，后续优先从本地读取。
 - 缓存数据、时间和上次刷新错误会显示在页面中。
 
 ## 主要功能
@@ -124,8 +129,12 @@ ADMIN_PASSWORD=change-this-to-a-strong-password
 
 ```dotenv
 MIKAN_CACHE_HOURS=6
-MIKAN_IMAGE_CACHE_DAYS=7
+MIKAN_IMAGE_CACHE_DAYS=30
+MIKAN_THUMBNAIL_WIDTH=240
+MIKAN_THUMBNAIL_HEIGHT=320
 ```
+
+`MIKAN_IMAGE_CACHE_DAYS` 控制浏览器缓存响应时间。服务端磁盘缓存采用本地优先策略：本地文件有效时直接读取；只有本地文件缺失、为空或元数据损坏时才访问 Mikan。Mikan 封面路径发生变化时会自然生成新的缓存文件。
 
 默认来源地址：
 
@@ -138,7 +147,7 @@ MIKAN_FALLBACK_URLS=https://mikanani.me,https://mikanani.kas.pub
 
 后台只自动刷新已经浏览过的季度，不会遍历全部年份，也不会每 6 小时批量刷新所有番剧详情。这样可以降低来源请求数量。字幕组详情默认使用已有缓存，需要最新数据时手动强制更新。
 
-若旧页面仍显示旧按钮，请先确认镜像版本为 `1.7.1`，再使用 `Ctrl + F5` 强制刷新浏览器缓存。
+若旧页面仍显示旧按钮，请先确认镜像版本为 `1.8.2`，再使用 `Ctrl + F5` 强制刷新浏览器缓存。
 
 ## qBittorrent
 

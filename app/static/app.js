@@ -393,12 +393,13 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
     image.src = coverSource;
     image.alt = item.title;
     image.loading = 'lazy';
+    image.decoding = 'async';
+    image.width = 66;
+    image.height = 88;
     image.referrerPolicy = 'no-referrer';
     image.addEventListener('error', () => {
-      if (item.cover_proxy_url && item.cover_url && image.src !== item.cover_url) {
-        image.src = item.cover_url;
-        return;
-      }
+      // The proxy already performs local-first cache lookup and remote fallback.
+      // Do not bypass it with a direct Mikan request when an image fails.
       image.remove();
       cover.append(text('span', item.title.slice(0, 1) || '番'));
     });

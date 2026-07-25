@@ -119,7 +119,7 @@ class MikanCacheTests(unittest.TestCase):
         self.assertEqual(migrated["cache_status"], "cache_migrated")
         self.assertEqual(cached["cache_status"], "cache")
         assert row is not None
-        self.assertEqual(json.loads(row.params_json)["schema_version"], 3)
+        self.assertEqual(json.loads(row.params_json)["schema_version"], 4)
 
     def test_force_refresh_replaces_catalog_cache(self) -> None:
         with self.Session() as db:
@@ -202,6 +202,79 @@ class MikanCacheTests(unittest.TestCase):
         self.assertFalse(first[2])
         self.assertTrue(second[2])
         self.assertEqual(second[:2], (b"fake-image", "image/jpeg"))
+
+
+    def test_expired_image_metadata_still_uses_local_file(self) -> None:
+        class FakeImageDiscovery:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def fetch_image(self, base_url: str, image_url: str):
+                self.calls += 1
+                return b"remote-image", "image/webp"
+
+        fake = FakeImageDiscovery()
+        with tempfile.TemporaryDirectory() as directory:
+            fake_settings = SimpleNamespace(
+                data_dir=Path(directory),
+                mikan_image_cache_days=1,
+            )
+            with patch.object(mikan_cache_module, "settings", fake_settings):
+                first = fetch_cached_mikan_image(
+                    "https://mikan.test",
+                    "https://mikan.test/cover.webp",
+                    discovery=fake,  # type: ignore[arg-type]
+                )
+                cache_dir = Path(directory) / "mikan-image-cache"
+                meta_path = next(cache_dir.glob("*.json"))
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                metadata["cached_at"] = (
+                    datetime.now(timezone.utc) - timedelta(days=365)
+                ).isoformat()
+                meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+                second = fetch_cached_mikan_image(
+                    "https://mikan.test",
+                    "https://mikan.test/cover.webp",
+                    discovery=fake,  # type: ignore[arg-type]
+                )
+
+        self.assertEqual(fake.calls, 1)
+        self.assertFalse(first[2])
+        self.assertTrue(second[2])
+        self.assertEqual(second[0], b"remote-image")
+
+    def test_corrupt_local_image_is_replaced_from_remote(self) -> None:
+        class FakeImageDiscovery:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def fetch_image(self, base_url: str, image_url: str):
+                self.calls += 1
+                return f"image-{self.calls}".encode(), "image/webp"
+
+        fake = FakeImageDiscovery()
+        with tempfile.TemporaryDirectory() as directory:
+            fake_settings = SimpleNamespace(
+                data_dir=Path(directory),
+                mikan_image_cache_days=30,
+            )
+            with patch.object(mikan_cache_module, "settings", fake_settings):
+                fetch_cached_mikan_image(
+                    "https://mikan.test",
+                    "https://mikan.test/cover.webp",
+                    discovery=fake,  # type: ignore[arg-type]
+                )
+                cache_dir = Path(directory) / "mikan-image-cache"
+                next(cache_dir.glob("*.bin")).write_bytes(b"")
+                repaired = fetch_cached_mikan_image(
+                    "https://mikan.test",
+                    "https://mikan.test/cover.webp",
+                    discovery=fake,  # type: ignore[arg-type]
+                )
+
+        self.assertEqual(fake.calls, 2)
+        self.assertFalse(repaired[2])
+        self.assertEqual(repaired[0], b"image-2")
 
     def test_stale_cache_is_still_served_without_network(self) -> None:
         with self.Session() as db:

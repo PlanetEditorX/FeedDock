@@ -19,7 +19,7 @@ from .models import MikanCacheEntry, SystemLog, utcnow
 
 _CATALOG_KIND = "catalog"
 _DETAIL_KIND = "detail"
-_CATALOG_SCHEMA_VERSION = 3
+_CATALOG_SCHEMA_VERSION = 4
 _DETAIL_SCHEMA_VERSION = 2
 _refresh_lock = threading.Lock()
 _image_lock = threading.Lock()
@@ -350,14 +350,14 @@ def fetch_cached_mikan_image(
     digest = hashlib.sha256(f"{base_url}\n{image_url}".encode("utf-8")).hexdigest()
     data_path = cache_dir / f"{digest}.bin"
     meta_path = cache_dir / f"{digest}.json"
-    max_age = timedelta(days=settings.mikan_image_cache_days)
-
     def read_cache() -> tuple[bytes, str, bool] | None:
         try:
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            cached_at = datetime.fromisoformat(str(metadata["cached_at"]))
-            if _aware(cached_at) + max_age <= datetime.now(timezone.utc):
-                return None
+            # Cover paths published by Mikan are content-address-like and normally
+            # change when artwork changes. Keep every valid local file regardless
+            # of age; a new upstream URL naturally creates a new cache key. Remote
+            # access is therefore only needed when local bytes or metadata fail.
+            datetime.fromisoformat(str(metadata["cached_at"]))
             content_type = str(metadata.get("content_type", ""))
             content = data_path.read_bytes()
             if not content or not content_type.startswith("image/"):
@@ -377,6 +377,12 @@ def fetch_cached_mikan_image(
         cached = read_cache()
         if cached is not None:
             return cached
+        # Remove an incomplete/corrupt pair before replacing it atomically.
+        for path in (data_path, meta_path):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
         service = discovery or DiscoveryService()
         content, content_type = service.fetch_image(base_url, image_url)
         temporary_data = data_path.with_name(data_path.name + ".tmp")

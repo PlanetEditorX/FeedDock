@@ -134,7 +134,7 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(rows[0]["items"][0]["title"], "金牌得主 第二季")
         self.assertEqual(
             rows[0]["items"][0]["cover_url"],
-            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240",
+            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240&height=320&format=webp",
         )
         self.assertEqual(rows[0]["items"][0]["update_at"], "7/24/2026")
 
@@ -160,7 +160,7 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(rows[0]["items"][0]["title"], "摩绪")
         self.assertEqual(
             rows[0]["items"][0]["cover_url"],
-            "https://mikan.test/images/Bangumi/202607/681.jpg?width=240",
+            "https://mikan.test/images/Bangumi/202607/681.jpg?width=240&height=320&format=webp",
         )
 
 
@@ -176,7 +176,7 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(item["title"], "摩绪")
         self.assertEqual(
             item["cover_url"],
-            "https://mikanani.me/images/Bangumi/202604/edeef072.jpg?width=400&height=400&format=webp",
+            "https://mikanani.me/images/Bangumi/202604/edeef072.jpg?width=240&height=320&format=webp",
         )
 
 
@@ -194,7 +194,7 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(item["update_at"], "2026/07/23 更新")
         self.assertEqual(
             item["cover_url"],
-            "https://mikanani.me/images/Bangumi/200504/1df90634.jpg?width=400&height=400&format=webp",
+            "https://mikanani.me/images/Bangumi/200504/1df90634.jpg?width=240&height=320&format=webp",
         )
 
     def test_mikan_search_extracts_unique_bangumi(self) -> None:
@@ -284,7 +284,7 @@ class DiscoveryServiceTests(unittest.TestCase):
     def test_cover_proxy_fetches_same_host_image(self) -> None:
         content, content_type = self.service.fetch_image(
             "https://mikan.test",
-            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240",
+            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240&height=320&format=webp",
         )
         self.assertTrue(content.startswith(b"\x89PNG"))
         self.assertEqual(content_type, "image/png")

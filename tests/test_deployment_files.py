@@ -22,7 +22,9 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)
         self.assertIn('MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"', compose)
         self.assertIn('MIKAN_CACHE_HOURS: "6"', compose)
-        self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "7"', compose)
+        self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "30"', compose)
+        self.assertIn('MIKAN_THUMBNAIL_WIDTH: "240"', compose)
+        self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "320"', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
     def test_frontend_has_manual_mikan_catalog(self) -> None:

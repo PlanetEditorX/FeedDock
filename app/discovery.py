@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Iterable
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 import httpx
 
@@ -318,6 +318,29 @@ def _usable_image_url(value: str) -> str:
     return value
 
 
+def _thumbnail_image_url(value: str) -> str:
+    """Request a small WebP cover from Mikan instead of the 400px source.
+
+    The official catalog already exposes an image-resize query. Replacing only
+    these parameters keeps the original path stable while cutting transfer size
+    for the 66x88px cards used by FeedDock.
+    """
+
+    value = _usable_image_url(value)
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    params.update(
+        {
+            "width": str(settings.mikan_thumbnail_width),
+            "height": str(settings.mikan_thumbnail_height),
+            "format": "webp",
+        }
+    )
+    return parsed._replace(query=urlencode(params)).geturl()
+
+
 def _extract_image_candidate(node: _HtmlNode) -> str:
     for candidate in (node, *node.descendants()):
         for attribute in _IMAGE_ATTRIBUTES:
@@ -433,7 +456,7 @@ def parse_mikan_catalog_html(
                 continue
 
             date_node = _first_descendant(item_node, class_name="date-text")
-            cover_raw = _extract_image_candidate(item_node)
+            cover_raw = _thumbnail_image_url(_extract_image_candidate(item_node))
             detail_url = f"{base_url}/Home/Bangumi/{bangumi_id}"
             items.append(
                 {

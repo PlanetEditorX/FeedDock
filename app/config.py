@@ -49,6 +49,8 @@ class Settings:
     mikan_fallback_urls: tuple[str, ...]
     mikan_cache_hours: int
     mikan_image_cache_days: int
+    mikan_thumbnail_width: int
+    mikan_thumbnail_height: int
 
 
 def load_settings() -> Settings:
@@ -58,7 +60,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.8.1"),
+        app_version=os.getenv("APP_VERSION", "1.8.2"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -69,7 +71,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.8.1 (+self-hosted RSS automation)",
+            "FeedDock/1.8.2 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -93,7 +95,9 @@ def load_settings() -> Settings:
             if value.strip()
         ),
         mikan_cache_hours=_as_int("MIKAN_CACHE_HOURS", 6),
-        mikan_image_cache_days=_as_int("MIKAN_IMAGE_CACHE_DAYS", 7),
+        mikan_image_cache_days=_as_int("MIKAN_IMAGE_CACHE_DAYS", 30),
+        mikan_thumbnail_width=_as_int("MIKAN_THUMBNAIL_WIDTH", 240, minimum=80),
+        mikan_thumbnail_height=_as_int("MIKAN_THUMBNAIL_HEIGHT", 320, minimum=80),
     )
 
 

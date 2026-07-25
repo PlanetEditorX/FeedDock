@@ -24,7 +24,9 @@ services:
       MIKAN_BASE_URL: "https://mikanime.tv"
       MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
       MIKAN_CACHE_HOURS: "6"
-      MIKAN_IMAGE_CACHE_DAYS: "7"
+      MIKAN_IMAGE_CACHE_DAYS: "30"
+      MIKAN_THUMBNAIL_WIDTH: "240"
+      MIKAN_THUMBNAIL_HEIGHT: "320"
 
       # 先不配置 qBittorrent
       QBIT_URL: ""

@@ -399,7 +399,10 @@ def mikan_cover_image(
             content=content,
             media_type=content_type,
             headers={
-                "Cache-Control": "private, max-age=86400",
+                "Cache-Control": (
+                    f"private, max-age={settings.mikan_image_cache_days * 86400}, "
+                    "immutable, stale-if-error=604800"
+                ),
                 "X-FeedDock-Cache": "HIT" if cache_hit else "MISS",
             },
         )

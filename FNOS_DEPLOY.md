@@ -83,14 +83,16 @@ http://192.168.1.20:8080
 MIKAN_BASE_URL: "https://mikanime.tv"
 MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
 MIKAN_CACHE_HOURS: "6"
-MIKAN_IMAGE_CACHE_DAYS: "7"
+MIKAN_IMAGE_CACHE_DAYS: "30"
+MIKAN_THUMBNAIL_WIDTH: "240"
+MIKAN_THUMBNAIL_HEIGHT: "320"
 ```
 
-季度目录和字幕组详情保存在 `feeddock.db`，封面保存在 `data/mikan-image-cache`。后台只刷新已经浏览过的季度，每轮最多处理少量到期缓存；不会遍历全部年份和所有番剧详情。刷新失败后至少等待 1 小时再尝试，避免连续请求来源站。
+季度目录和字幕组详情保存在 `feeddock.db`，240×320 WebP 缩略图保存在 `data/mikan-image-cache`。本地文件有效时直接读取，只有缺失或损坏时才重新访问 Mikan。后台只刷新已经浏览过的季度，每轮最多处理少量到期缓存；不会遍历全部年份和所有番剧详情。刷新失败后至少等待 1 小时再尝试，避免连续请求来源站。
 
 修改 `MIKAN_CACHE_HOURS` 后重新部署即可调整刷新间隔。建议不要设置得过短。部署新版本后请执行一次 `Ctrl + F5` 强制刷新页面。
 
-升级到 v1.7.1 后，旧季度缓存会自动刷新一次，以修复旧缓存中的空封面或错误域名。Mikan 的相对图片路径会按最终响应域名拼接；例如页面从 `mikanime.tv` 重定向到 `mikanani.me`，封面也会使用 `mikanani.me/images/...`。
+升级到 v1.8.2 后，旧季度缓存会自动刷新一次并切换为缩略图 URL，以修复旧缓存中的空封面或错误域名。Mikan 的相对图片路径会按最终响应域名拼接；例如页面从 `mikanime.tv` 重定向到 `mikanani.me`，封面也会使用 `mikanani.me/images/...`。
 
 ## 五、更新
 
