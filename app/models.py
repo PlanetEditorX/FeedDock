@@ -41,16 +41,42 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Metadata used to identify and organize a title. These fields are optional
+    # and do not call third-party metadata APIs by themselves.
+    reference_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    tmdb_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    bgm_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    air_date: Mapped[str] = mapped_column(String(10), default="", nullable=False)
+    season: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    # rss_url remains the primary URL for backward compatibility.
+    primary_rss_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     rss_url: Mapped[str] = mapped_column(Text, nullable=False)
+    backup_rss_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    backup_rss_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
     include_keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
     exclude_keywords: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    # episode_group=0 means the entire custom regex match; 1 means the first
+    # capture group. Invalid group indexes safely fall back to the first usable
+    # value.
     episode_regex: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    episode_group: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    episode_offset: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_episodes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     save_path_template: Mapped[str] = mapped_column(
         Text,
-        default="{base}/{subscription}",
+        default="{base}/{subscription}/Season {season}",
         nullable=False,
     )
+    custom_download_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    missing_detection: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    only_latest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False

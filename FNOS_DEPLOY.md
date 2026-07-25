@@ -104,7 +104,7 @@ http://飞牛IP:7789/health
 
 ## 五、更新
 
-GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.3.2` 时，会自动发布 `v1.3.2`。相同版本重复构建不会重复创建。
+GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.4.0` 时，会自动发布 `v1.4.0`。相同版本重复构建不会重复创建。
 
 当前默认配置支持在 FeedDock 页面检查 GitHub Release 是否有新版本：
 
@@ -139,3 +139,10 @@ WATCHTOWER_TOKEN: ""
 4. 重新部署。
 
 这样会重新使用 `admin / password` 初始化，但同时会清空订阅和任务记录。
+
+
+## 手动检查更新与高级订阅
+
+FeedDock v1.4.0 不会在页面打开或订阅轮询时自动访问 GitHub。需要检查时，手动点击顶部“检查更新”。如果公网 IP 的 GitHub API 限额已用完，等待提示的恢复时间后再点。可选在 Compose 的环境变量中填写 `UPDATE_GITHUB_TOKEN` 提高限额。
+
+添加订阅页面现已支持主/备用 RSS、日期、季、集数偏移、总集数、正则捕获组、自定义下载路径、遗漏检测和只下载最新集。保存前先使用“预览规则和路径”。旧数据目录会自动迁移，无需删除 `/vol1/1000/应用/feeddock/data`。

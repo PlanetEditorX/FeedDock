@@ -44,6 +44,7 @@ class Settings:
     watchtower_url: str
     watchtower_token: str
     deployed_image: str
+    update_github_token: str
 
 
 def load_settings() -> Settings:
@@ -53,7 +54,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.3.2"),
+        app_version=os.getenv("APP_VERSION", "1.4.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -64,7 +65,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.3 (+self-hosted RSS automation)",
+            "FeedDock/1.4 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -77,6 +78,7 @@ def load_settings() -> Settings:
         watchtower_url=os.getenv("WATCHTOWER_URL", "").strip().rstrip("/"),
         watchtower_token=os.getenv("WATCHTOWER_TOKEN", ""),
         deployed_image=os.getenv("FEEDDOCK_IMAGE", "ghcr.io/planeteditorx/feeddock:latest").strip(),
+        update_github_token=os.getenv("UPDATE_GITHUB_TOKEN", "").strip(),
     )
 
 

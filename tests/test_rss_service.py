@@ -2,7 +2,14 @@ import unittest
 
 from app.rss_parser import parse_feed
 from app.models import Subscription
-from app.rss_service import extract_download_url, match_title, parse_episode, render_save_path
+from app.rss_service import (
+    apply_episode_offset,
+    extract_download_url,
+    match_title,
+    parse_episode,
+    preview_subscription,
+    render_save_path,
+)
 
 
 class RSSServiceTests(unittest.TestCase):
@@ -39,6 +46,40 @@ class RSSServiceTests(unittest.TestCase):
         entries = parse_feed(content)
         self.assertEqual(entries[0]["id"], "x2")
         self.assertEqual(extract_download_url(entries[0]), "https://example.com/2.torrent")
+
+    def test_advanced_rules_offset_and_custom_path(self):
+        sub = Subscription(
+            name="金牌得主 第二季",
+            reference_title="金牌得主 (2025)",
+            rss_url="https://example.com/feed.xml",
+            include_keywords="",
+            exclude_keywords="720\n\\d-\\d\n合集\n特别篇",
+            episode_regex=r"\d+(\.5)?",
+            episode_group=0,
+            episode_offset=-13,
+            total_episodes=9,
+            season=2,
+            custom_download_path="/vol2/1000/影视/金牌得主 (2025)/Season 2",
+            save_path_template="{base}/{subscription}/Season {season}",
+        )
+        result = preview_subscription(
+            sub,
+            "[LoliHouse] 金牌得主 - 14 [1080p]",
+        )
+        self.assertTrue(result["matched"])
+        self.assertEqual(result["parsed_episode"], "14")
+        self.assertEqual(result["adjusted_episode"], "1")
+        self.assertEqual(result["save_path"], "/vol2/1000/影视/金牌得主 (2025)/Season 2")
+
+    def test_regex_and_global_exclusion(self):
+        self.assertFalse(match_title("Demo 01-02 1080p", "", r"\d-\d", "")[0])
+        matched, reason = match_title("金牌得主 剧场版 1080p", "", "", "剧场版")
+        self.assertFalse(matched)
+        self.assertIn("全局排除", reason)
+
+    def test_decimal_episode_offset(self):
+        self.assertEqual(parse_episode("Demo 13.5", r"\d+(\.5)?", 0), "13.5")
+        self.assertEqual(apply_episode_offset("13.5", -13), "0.5")
 
     def test_path_traversal_is_confined(self):
         sub = Subscription(name="Demo", rss_url="https://example.com/feed.xml", save_path_template="{base}/../../etc")

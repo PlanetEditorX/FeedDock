@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
@@ -10,40 +11,50 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import Base, SessionLocal, engine, get_db
+from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .downloader import QBittorrentClient
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
-from .rss_service import refresh_all, retry_item
+from .rss_service import (
+    calculate_missing_episodes,
+    preview_subscription,
+    refresh_all,
+    retry_item,
+)
+from .runtime_config import (
+    get_app_setting,
+    load_qbittorrent_config,
+    reset_qbittorrent_config,
+    save_qbittorrent_config,
+    set_app_setting,
+)
 from .scheduler import start_scheduler, stop_scheduler
 from .schemas import (
     AuthStatusOut,
     ChangePasswordRequest,
     FeedItemOut,
+    GlobalRulesUpdate,
     LoginRequest,
-    QBittorrentSettingsUpdate,
     LogOut,
+    QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
+    SubscriptionPreviewOut,
+    SubscriptionPreviewRequest,
     SubscriptionUpdate,
     UpdateStatusOut,
 )
 from .security import (
     SESSION_COOKIE,
     create_session_token,
+    hash_password,
     initialize_admin,
     require_admin,
     require_authenticated,
     resolve_admin,
     validate_new_password,
     verify_password,
-    hash_password,
 )
 from .update_service import UpdateService
-from .runtime_config import (
-    load_qbittorrent_config,
-    reset_qbittorrent_config,
-    save_qbittorrent_config,
-)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -61,9 +72,32 @@ def _set_session_cookie(response: Response, account: AdminAccount) -> None:
     )
 
 
+def _subscription_values(payload: SubscriptionCreate | SubscriptionUpdate | SubscriptionPreviewRequest) -> dict[str, Any]:
+    values = payload.model_dump(exclude_unset=isinstance(payload, SubscriptionUpdate), exclude={"sample_title"})
+    for key in ("rss_url", "backup_rss_url"):
+        if key in values:
+            values[key] = str(values[key]) if values[key] is not None else ""
+    if "air_date" in values:
+        values["air_date"] = values["air_date"].isoformat() if values["air_date"] else ""
+    for key, value in list(values.items()):
+        if isinstance(value, str):
+            values[key] = value.strip()
+    if values.get("include_keywords") in {"无", "none", "None"}:
+        values["include_keywords"] = ""
+    return values
+
+
+def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
+    output = SubscriptionOut.model_validate(subscription)
+    if subscription.missing_detection:
+        output.missing_episodes = calculate_missing_episodes(db, subscription)
+    return output
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     with SessionLocal() as db:
         initialize_admin(db)
     start_scheduler()
@@ -177,6 +211,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
         "timezone": settings.timezone,
         "update_repository": settings.update_repository,
         "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
+        "deployed_image": settings.deployed_image,
     }
 
 
@@ -210,6 +245,17 @@ def restore_downloader_settings(db: Session = Depends(get_db)) -> dict[str, str 
     return reset_qbittorrent_config(db).public_dict()
 
 
+@app.get("/api/rules/global", dependencies=[Depends(require_admin)])
+def get_global_rules(db: Session = Depends(get_db)) -> dict[str, str]:
+    return {"exclude_rules": get_app_setting("global_exclude_rules", "", db)}
+
+
+@app.put("/api/rules/global", dependencies=[Depends(require_admin)])
+def update_global_rules(payload: GlobalRulesUpdate, db: Session = Depends(get_db)) -> dict[str, str]:
+    value = set_app_setting(db, "global_exclude_rules", payload.exclude_rules.strip())
+    return {"exclude_rules": value}
+
+
 @app.get("/api/dashboard", dependencies=[Depends(require_admin)])
 def dashboard(db: Session = Depends(get_db)) -> dict[str, int]:
     statuses = dict(db.execute(select(FeedItem.status, func.count()).group_by(FeedItem.status)).all())
@@ -226,25 +272,29 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, int]:
 
 
 @app.get("/api/subscriptions", response_model=list[SubscriptionOut], dependencies=[Depends(require_admin)])
-def list_subscriptions(db: Session = Depends(get_db)) -> list[Subscription]:
-    return list(db.scalars(select(Subscription).order_by(desc(Subscription.id))))
+def list_subscriptions(db: Session = Depends(get_db)) -> list[SubscriptionOut]:
+    subscriptions = list(db.scalars(select(Subscription).order_by(desc(Subscription.id))))
+    return [_subscription_out(db, subscription) for subscription in subscriptions]
+
+
+@app.post("/api/subscriptions/preview", response_model=SubscriptionPreviewOut, dependencies=[Depends(require_admin)])
+def preview_subscription_route(
+    payload: SubscriptionPreviewRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, str | bool]:
+    values = _subscription_values(payload)
+    subscription = Subscription(**values)
+    sample_title = payload.sample_title or payload.reference_title or payload.name
+    return preview_subscription(subscription, sample_title, db)
 
 
 @app.post("/api/subscriptions", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
-def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db)) -> Subscription:
-    subscription = Subscription(
-        name=payload.name,
-        rss_url=str(payload.rss_url),
-        include_keywords=payload.include_keywords,
-        exclude_keywords=payload.exclude_keywords,
-        episode_regex=payload.episode_regex,
-        save_path_template=payload.save_path_template,
-        enabled=payload.enabled,
-    )
+def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db)) -> SubscriptionOut:
+    subscription = Subscription(**_subscription_values(payload))
     db.add(subscription)
     db.commit()
     db.refresh(subscription)
-    return subscription
+    return _subscription_out(db, subscription)
 
 
 @app.patch(
@@ -256,20 +306,15 @@ def update_subscription(
     subscription_id: int,
     payload: SubscriptionUpdate,
     db: Session = Depends(get_db),
-) -> Subscription:
+) -> SubscriptionOut:
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    values = payload.model_dump(exclude_unset=True)
-    if "rss_url" in values:
-        values["rss_url"] = str(values["rss_url"])
-    for key, value in values.items():
-        if isinstance(value, str):
-            value = value.strip()
+    for key, value in _subscription_values(payload).items():
         setattr(subscription, key, value)
     db.commit()
     db.refresh(subscription)
-    return subscription
+    return _subscription_out(db, subscription)
 
 
 @app.delete("/api/subscriptions/{subscription_id}", dependencies=[Depends(require_admin)])
@@ -329,6 +374,7 @@ def test_downloader() -> dict[str, bool | str]:
     dependencies=[Depends(require_admin)],
 )
 def update_status() -> dict[str, str | bool]:
+    # This endpoint is intentionally only called by an explicit button click.
     return UpdateService().check().as_dict()
 
 

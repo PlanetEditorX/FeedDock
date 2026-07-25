@@ -7,7 +7,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.3.2"
+os.environ["APP_VERSION"] = "1.4.0"
 
 from fastapi.testclient import TestClient
 
@@ -82,6 +82,51 @@ class AuthFlowTests(unittest.TestCase):
             self.assertTrue(
                 any(item["name"] == "Frontend regression feed" for item in subscriptions.json())
             )
+
+            global_rules = client.put(
+                "/api/rules/global",
+                json={"exclude_rules": "剧场版"},
+            )
+            self.assertEqual(global_rules.status_code, 200)
+
+            advanced_payload = {
+                "name": "金牌得主 第二季",
+                "reference_title": "金牌得主 (2025)",
+                "tmdb_title": "金牌得主 (2025)",
+                "bgm_url": "https://bgm.tv/subject/548818",
+                "air_date": "2026-01-24",
+                "season": 2,
+                "primary_rss_name": "LoliHouse",
+                "rss_url": "https://mikanime.tv/RSS/Bangumi?bangumiId=3822&subgroupid=370",
+                "backup_rss_name": "",
+                "backup_rss_url": None,
+                "include_keywords": "无",
+                "exclude_keywords": "720\n\\d-\\d\n合集\n特别篇",
+                "episode_regex": "\\d+(\\.5)?",
+                "episode_group": 0,
+                "episode_offset": -13,
+                "total_episodes": 9,
+                "save_path_template": "{base}/{subscription}/Season {season}",
+                "custom_download_path": "/vol2/1000/影视/金牌得主 (2025)/Season 2",
+                "missing_detection": True,
+                "only_latest": True,
+                "enabled": True,
+            }
+            preview_payload = dict(advanced_payload)
+            preview_payload["sample_title"] = "[LoliHouse] 金牌得主 - 14 [1080p]"
+            preview = client.post("/api/subscriptions/preview", json=preview_payload)
+            self.assertEqual(preview.status_code, 200, preview.text)
+            self.assertEqual(preview.json()["adjusted_episode"], "1")
+            self.assertEqual(
+                preview.json()["save_path"],
+                "/vol2/1000/影视/金牌得主 (2025)/Season 2",
+            )
+
+            advanced = client.post("/api/subscriptions", json=advanced_payload)
+            self.assertEqual(advanced.status_code, 200, advanced.text)
+            self.assertEqual(advanced.json()["season"], 2)
+            self.assertEqual(advanced.json()["include_keywords"], "")
+            self.assertEqual(advanced.json()["missing_episodes"], list(range(1, 10)))
 
             saved_qbit = client.put(
                 "/api/downloader/settings",

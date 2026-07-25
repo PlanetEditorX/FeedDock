@@ -15,9 +15,11 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
     def log_message(self, _format, *_args):
         return
 
-    def _write(self, code, body=b"", content_type="text/plain"):
+    def _write(self, code, body=b"", content_type="text/plain", headers=None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -26,10 +28,18 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         if self.path == "/api/v2/app/version":
             self._write(200, b"5.0.4")
             return
+        if self.path == "/repos/rate/limited/releases/latest":
+            self._write(
+                403,
+                b'{"message":"API rate limit exceeded"}',
+                "application/json",
+                {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "4102444800"},
+            )
+            return
         if self.path == "/repos/demo/feeddock/releases/latest":
             payload = json.dumps(
                 {
-                    "tag_name": "v1.4.0",
+                    "tag_name": "v1.5.0",
                     "html_url": "https://example.test/releases/v1.3.0",
                     "published_at": "2026-07-25T00:00:00Z",
                 }
@@ -114,11 +124,22 @@ class IntegrationTests(unittest.TestCase):
             timeout=3,
         )
         status = service.check()
-        self.assertEqual(status.latest_version, "1.4.0")
+        self.assertEqual(status.latest_version, "1.5.0")
         self.assertTrue(status.update_available)
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)
         self.assertIn("已触发", message)
+
+    def test_update_rate_limit_has_friendly_message(self):
+        service = UpdateService(
+            repository="rate/limited",
+            api_url=self.base_url,
+            timeout=3,
+        )
+        status = service.check()
+        self.assertFalse(status.update_available)
+        self.assertIn("请求已达上限", status.message)
+        self.assertIn("手动检查", status.message)
 
     def test_version_comparison(self):
         self.assertTrue(is_newer_version("v1.2.0", "1.1.9"))

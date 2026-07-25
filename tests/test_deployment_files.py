@@ -30,7 +30,7 @@ class DeploymentFileTests(unittest.TestCase):
         fnos_env = (ROOT / ".env.fnos.example").read_text(encoding="utf-8")
         self.assertNotIn("\nAPP_VERSION=", f"\n{env_example}")
         self.assertNotIn("\nAPP_VERSION=", f"\n{fnos_env}")
-        self.assertIn("FEEDDOCK_BUILD_VERSION=1.3.2", env_example)
+        self.assertIn(f"FEEDDOCK_BUILD_VERSION={(ROOT / 'VERSION').read_text(encoding='utf-8').strip()}", env_example)
 
     def test_workflow_creates_release_after_image_publish(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
@@ -64,6 +64,12 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn(f"/static/change-password.js?v={version}", change_password)
         for page in (index, login, change_password):
             self.assertIn(f"/static/styles.css?v={version}", page)
+
+    def test_update_check_is_manual_only(self) -> None:
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("document.getElementById('checkUpdate').addEventListener", script)
+        self.assertNotIn("reloadAll().then(() => loadUpdateStatus", script)
+        self.assertTrue(script.rstrip().endswith("reloadAll();"))
 
     def test_fnos_update_check_enabled_and_one_click_update_disabled(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")

@@ -29,6 +29,8 @@ services:
 
       UPDATE_REPOSITORY: "planeteditorx/feeddock"
       UPDATE_API_URL: "https://api.github.com"
+      # 可选：仅用于提高手动检查更新的 GitHub API 限额
+      UPDATE_GITHUB_TOKEN: ""
 
       # 暂时关闭网页一键更新
       WATCHTOWER_URL: ""

@@ -164,3 +164,27 @@ def reset_qbittorrent_config(db: Session) -> QBittorrentConfig:
     db.execute(delete(AppSetting).where(AppSetting.key.in_(QBIT_SETTING_KEYS)))
     db.commit()
     return load_qbittorrent_config(db)
+
+
+def get_app_setting(key: str, default: str = "", db: Session | None = None) -> str:
+    def _read(session: Session) -> str:
+        try:
+            row = session.get(AppSetting, key)
+        except (OperationalError, ProgrammingError):
+            return default
+        return row.value if row else default
+
+    if db is not None:
+        return _read(db)
+    with SessionLocal() as session:
+        return _read(session)
+
+
+def set_app_setting(db: Session, key: str, value: str) -> str:
+    row = db.get(AppSetting, key)
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+    db.commit()
+    return value
