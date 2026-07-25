@@ -21,7 +21,7 @@ FeedDock 定时读取用户自行添加的 RSS / Atom，按关键词或正则过
 - 可选 Watchtower 网页一键更新
 - GitHub Actions 多架构镜像构建与 GHCR 推送
 
-当前版本号：`1.3.0`
+当前版本号：`1.3.1`
 
 
 ## 飞牛 OS（fnOS）部署
@@ -209,24 +209,28 @@ docker compose --profile updater --profile with-qbit up -d --no-build
 - Watchtower 需要挂载 `/var/run/docker.sock`，等同于拥有较高的 Docker 主机权限。
 - `WATCHTOWER_TOKEN` 不应公开，也不要把 Watchtower 端口暴露到公网。
 - 若不接受 Docker Socket 风险，不要启用 `updater` profile，使用手动升级即可。
-- 固定版本标签如 `:1.3.0` 不会自动跳到后续版本；一键更新应使用 `:latest` 或其他持续更新的标签。
+- 固定版本标签如 `:1.3.1` 不会自动跳到后续版本；一键更新应使用 `:latest` 或其他持续更新的标签。
 
 ## 5. GitHub Actions 构建与发布镜像
 
 项目包含 `.github/workflows/docker-publish.yml`：
 
-- Pull Request：运行测试并构建 `linux/amd64`、`linux/arm64`，不推送。
-- 默认分支：推送分支标签、SHA 标签和 `latest`。
-- `v1.2.3` 标签：推送 `1.2.3`、`1.2`、`1` 和正式版 `latest`。
-- 手动运行：可选择是否推送并指定额外标签。
-- 镜像构建时把发布版本写入 `APP_VERSION`。
+- Pull Request：运行测试并构建 `linux/amd64`、`linux/arm64`，不推送镜像，也不创建 Release。
+- 默认分支：推送版本标签、分支标签、SHA 标签和 `latest`。
+- Docker 镜像推送成功后，自动创建 `v<VERSION>` Git 标签和 GitHub Release。
+- 相同版本重复构建时不会重复创建 Release。
+- 手动运行并选择推送镜像时，也会自动创建对应 Release。
+- 镜像构建时把 `VERSION` 写入 `APP_VERSION`。
 
-发布版本：
+发布新版本时，只需先修改 `VERSION`，例如从 `1.3.1` 改为 `1.3.2`，然后推送到默认分支：
 
 ```bash
-git tag v1.3.0
-git push origin v1.3.0
+git add VERSION .
+git commit -m "Release v1.3.2"
+git push
 ```
+
+同一次工作流会依次推送 `1.3.2`、`1.3`、`1`、`latest` 镜像标签，并创建 `v1.3.2` Release。无需手动执行 `git tag`。
 
 镜像地址：
 
@@ -260,7 +264,7 @@ curl http://127.0.0.1:7789/health
 返回示例：
 
 ```json
-{"status":"ok","version":"1.3.0"}
+{"status":"ok","version":"1.3.1"}
 ```
 
 备份：

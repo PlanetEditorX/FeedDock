@@ -30,7 +30,17 @@ class DeploymentFileTests(unittest.TestCase):
         fnos_env = (ROOT / ".env.fnos.example").read_text(encoding="utf-8")
         self.assertNotIn("\nAPP_VERSION=", f"\n{env_example}")
         self.assertNotIn("\nAPP_VERSION=", f"\n{fnos_env}")
-        self.assertIn("FEEDDOCK_BUILD_VERSION=1.3.0", env_example)
+        self.assertIn("FEEDDOCK_BUILD_VERSION=1.3.1", env_example)
+
+    def test_workflow_creates_release_after_image_publish(self) -> None:
+        workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
+        self.assertIn("Create GitHub Release after image publish", workflow)
+        self.assertIn("RELEASE_TAG: v${{ steps.app_version.outputs.value }}", workflow)
+        self.assertIn('gh release create "$RELEASE_TAG"', workflow)
+        self.assertIn('--target "$GITHUB_SHA"', workflow)
+        self.assertIn("github.event_name != 'pull_request'", workflow)
+        self.assertIn("type=raw,value=${{ steps.app_version.outputs.value }}", workflow)
+        self.assertIn("--latest", workflow)
 
     def test_fnos_update_check_enabled_and_one_click_update_disabled(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")

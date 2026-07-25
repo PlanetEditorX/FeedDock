@@ -1,4 +1,4 @@
-# FeedDock v1.3.0 功能验证
+# FeedDock v1.3.1 功能验证
 
 ## 本次新增
 
@@ -9,10 +9,11 @@
 - 可清除保存的密码，或恢复 Compose 默认配置。
 - 飞牛 OS Compose 增加 `host.docker.internal:host-gateway`，支持访问同机 qBittorrent WebUI。
 - RSS 推送与保存路径读取网页中的最新 qBittorrent 配置。
+- Docker 镜像推送成功后，自动按 `VERSION` 创建 Git 标签和 GitHub Release。
 
 ## 自动化验证
 
-共 16 项测试通过：
+共 17 项测试通过：
 
 - 首次登录与强制修改密码。
 - 修改密码后重启持久化。
@@ -37,7 +38,7 @@ node --check app/static/app.js
 
 ## 飞牛 OS 使用结果
 
-更新到 v1.3.0 后，登录首页即可看到“qBittorrent 下载器”区域。推荐填写：
+更新到 v1.3.1 后，登录首页即可看到“qBittorrent 下载器”区域。推荐填写：
 
 ```text
 同机 qBittorrent：http://host.docker.internal:8080

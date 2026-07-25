@@ -104,6 +104,8 @@ http://飞牛IP:7789/health
 
 ## 五、更新
 
+GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.3.1` 时，会自动发布 `v1.3.1`。相同版本重复构建不会重复创建。
+
 当前默认配置支持在 FeedDock 页面检查 GitHub Release 是否有新版本：
 
 ```yaml

@@ -7,7 +7,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.3.0"
+os.environ["APP_VERSION"] = "1.3.1"
 
 from fastapi.testclient import TestClient
 
