@@ -23,6 +23,8 @@ services:
       # Mikan 番剧目录；若主域名不可用，会依次尝试备用地址
       MIKAN_BASE_URL: "https://mikanime.tv"
       MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
+      MIKAN_CACHE_HOURS: "6"
+      MIKAN_IMAGE_CACHE_DAYS: "7"
 
       # 先不配置 qBittorrent
       QBIT_URL: ""

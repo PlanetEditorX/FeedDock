@@ -232,6 +232,21 @@ def _allowed_mikan_bases() -> tuple[str, ...]:
     return tuple(values)
 
 
+def _response_base(response: httpx.Response, allowed_bases: tuple[str, ...]) -> str:
+    """Return the final Mikan origin after redirects.
+
+    Mikan aliases can redirect to another configured domain. Relative cover and
+    RSS paths must be resolved against the final response origin, otherwise a
+    catalog fetched through one alias can incorrectly point images at another
+    host that does not serve the same asset.
+    """
+
+    final_base = _normalize_base(str(response.url))
+    if final_base not in allowed_bases:
+        raise ValueError(f"Mikan 重定向到了未允许的站点：{final_base}")
+    return final_base
+
+
 def _subscription_preset(
     *,
     name: str,
@@ -618,9 +633,10 @@ class DiscoveryService:
             url = f"{base}/Home/BangumiCoverFlowByDayOfWeek?{urlencode({'year': year, 'seasonStr': season})}"
             try:
                 response = self._get(url)
+                effective_base = _response_base(response, self.mikan_bases)
                 rows = parse_mikan_catalog_html(
                     response.text,
-                    base,
+                    effective_base,
                     year=year,
                     season=season,
                     query=query,
@@ -629,18 +645,18 @@ class DiscoveryService:
                     for row in rows:
                         for item in row["items"]:
                             if item.get("cover_url"):
-                                cover_parts = urlparse(item["cover_url"])
-                                base_parts = urlparse(base)
-                                if cover_parts.netloc.casefold() == base_parts.netloc.casefold():
+                                cover_base = _normalize_base(item.get("base_url") or effective_base)
+                                cover_origin = _normalize_base(item["cover_url"])
+                                if cover_base in self.mikan_bases and cover_origin in self.mikan_bases:
                                     item["cover_proxy_url"] = "/api/discovery/mikan/image?" + urlencode(
-                                        {"base_url": base, "url": item["cover_url"]}
+                                        {"base_url": cover_base, "url": item["cover_url"]}
                                     )
                     return {
                         "provider": "mikan",
                         "year": year,
                         "season": season,
                         "query": _clean_text(query),
-                        "base_url": base,
+                        "base_url": effective_base,
                         "rows": rows,
                         "errors": errors,
                     }
@@ -655,22 +671,22 @@ class DiscoveryService:
             raise ValueError("Mikan 地址不在允许列表中")
         target = urljoin(base + "/", image_url.strip())
         target_parts = urlparse(target)
-        base_parts = urlparse(base)
-        if target_parts.scheme not in {"http", "https"} or target_parts.netloc.casefold() != base_parts.netloc.casefold():
+        target_base = _normalize_base(target)
+        if target_parts.scheme not in {"http", "https"} or target_base not in self.mikan_bases:
             raise ValueError("封面地址不属于允许的 Mikan 站点")
 
         headers = {
             **self.headers,
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-            "Referer": base + "/",
+            "Referer": target_base + "/",
         }
         if self.client is not None:
             response = self.client.get(target, headers=headers, follow_redirects=True)
         else:
             response = httpx.get(target, headers=headers, timeout=self.timeout, follow_redirects=True)
         response.raise_for_status()
-        final_parts = urlparse(str(response.url))
-        if final_parts.netloc.casefold() != base_parts.netloc.casefold():
+        final_base = _normalize_base(str(response.url))
+        if final_base not in self.mikan_bases:
             raise ValueError("封面重定向到了不受信任的站点")
         if len(response.content) > 6 * 1024 * 1024:
             raise ValueError("封面超过 6 MiB 限制")
@@ -698,7 +714,8 @@ class DiscoveryService:
             url = f"{base}/Home/Search?{urlencode({'searchstr': query})}"
             try:
                 response = self._get(url)
-                results = parse_mikan_search_html(response.text, base, limit)
+                effective_base = _response_base(response, self.mikan_bases)
+                results = parse_mikan_search_html(response.text, effective_base, limit)
                 if results:
                     return results
             except Exception as exc:
@@ -759,7 +776,8 @@ class DiscoveryService:
             url = f"{base}/Home/Bangumi/{bangumi_id}"
             try:
                 response = self._get(url)
-                detail = parse_mikan_detail_html(response.text, base, bangumi_id, title)
+                effective_base = _response_base(response, self.mikan_bases)
+                detail = parse_mikan_detail_html(response.text, effective_base, bangumi_id, title)
                 if detail["groups"]:
                     return detail
                 errors.append(f"{base}: 未解析到字幕组")

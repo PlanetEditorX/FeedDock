@@ -129,3 +129,20 @@ class SystemLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     details: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class MikanCacheEntry(Base):
+    __tablename__ = "mikan_cache_entries"
+    __table_args__ = (
+        Index("ix_mikan_cache_entries_kind_fetched_at", "kind", "fetched_at"),
+    )
+
+    cache_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )

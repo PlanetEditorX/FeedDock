@@ -186,3 +186,4 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
   .mikan-anime-grid { grid-template-columns: 1fr; }
 }
 .modal.hidden { display: none; }
+.cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }

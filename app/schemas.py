@@ -278,6 +278,12 @@ class MikanCatalogOut(BaseModel):
     base_url: str
     rows: list[MikanCatalogRowOut] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    cache_status: str = "cache"
+    cached_at: datetime | None = None
+    next_refresh_at: datetime | None = None
+    refresh_interval_hours: int = 6
+    is_stale: bool = False
+    refresh_error: str = ""
 
 
 class MikanGroupOut(BaseModel):
@@ -295,3 +301,9 @@ class MikanBangumiDetailOut(BaseModel):
     base_url: str
     detail_url: str
     groups: list[MikanGroupOut] = Field(default_factory=list)
+    cache_status: str = "cache"
+    cached_at: datetime | None = None
+    next_refresh_at: datetime | None = None
+    refresh_interval_hours: int = 6
+    is_stale: bool = False
+    refresh_error: str = ""

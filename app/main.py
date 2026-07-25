@@ -14,6 +14,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
+from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .rss_service import (
     calculate_missing_episodes,
@@ -216,6 +217,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
         "update_repository": settings.update_repository,
         "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
         "deployed_image": settings.deployed_image,
+        "mikan_cache_hours": settings.mikan_cache_hours,
     }
 
 
@@ -269,13 +271,35 @@ def mikan_catalog(
     year: int = Query(ge=2000, le=2100),
     season: str = Query(pattern="^(冬|春|夏|秋)$"),
     q: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        return DiscoveryService().catalog(year, season, q)
+        return MikanCacheService(DiscoveryService()).catalog(db, year, season, q)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Mikan 番剧目录解析失败：{exc}") from exc
+
+
+@app.post(
+    "/api/discovery/mikan/catalog/refresh",
+    response_model=MikanCatalogOut,
+    dependencies=[Depends(require_admin)],
+)
+def refresh_mikan_catalog(
+    year: int = Query(ge=2000, le=2100),
+    season: str = Query(pattern="^(冬|春|夏|秋)$"),
+    q: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return MikanCacheService(DiscoveryService()).catalog(
+            db, year, season, q, force_refresh=True
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mikan 强制更新失败：{exc}") from exc
 
 
 @app.get(
@@ -300,11 +324,16 @@ def mikan_cover_image(
     url: str = Query(min_length=1, max_length=2000),
 ) -> Response:
     try:
-        content, content_type = DiscoveryService().fetch_image(base_url, url)
+        content, content_type, cache_hit = fetch_cached_mikan_image(
+            base_url, url, discovery=DiscoveryService()
+        )
         return Response(
             content=content,
             media_type=content_type,
-            headers={"Cache-Control": "private, max-age=86400"},
+            headers={
+                "Cache-Control": "private, max-age=86400",
+                "X-FeedDock-Cache": "HIT" if cache_hit else "MISS",
+            },
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -321,13 +350,37 @@ def mikan_bangumi_detail(
     bangumi_id: int,
     base_url: str = Query(default="", max_length=500),
     title: str = Query(default="", max_length=300),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        return DiscoveryService().mikan_detail(bangumi_id, base_url, title)
+        return MikanCacheService(DiscoveryService()).detail(
+            db, bangumi_id, base_url, title
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Mikan 解析失败：{exc}") from exc
+
+
+@app.post(
+    "/api/discovery/mikan/{bangumi_id}/refresh",
+    response_model=MikanBangumiDetailOut,
+    dependencies=[Depends(require_admin)],
+)
+def refresh_mikan_bangumi_detail(
+    bangumi_id: int,
+    base_url: str = Query(default="", max_length=500),
+    title: str = Query(default="", max_length=300),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return MikanCacheService(DiscoveryService()).detail(
+            db, bangumi_id, base_url, title, force_refresh=True
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mikan 字幕组强制更新失败：{exc}") from exc
 
 
 @app.get("/api/dashboard", dependencies=[Depends(require_admin)])

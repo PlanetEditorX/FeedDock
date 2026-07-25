@@ -69,6 +69,23 @@ MIKAN_MODERN_CATALOG_HTML = """
 </div>
 """
 
+
+MIKAN_CURRENT_CARD_HTML = """
+<div class="sk-bangumi" data-dayofweek="6">
+  <div class="week-title">星期六</div>
+  <div class="detail">
+    <div class="m-week-square">
+      <div>
+        <a href="/Home/Bangumi/3920" target="_blank" title="&#x6469;&#x7EEA;">
+          <img data-src="/images/Bangumi/202604/edeef072.jpg?width=400&amp;height=400&amp;format=webp" alt="&#x6469;&#x7EEA;" class="b-lazy">
+        </a>
+        <div class="small-title ellipsis">&#x6469;&#x7EEA;</div>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+
 MIKAN_MODERN_DETAIL_HTML = """
 <!doctype html><html><head>
 <meta charset="utf-8">
@@ -123,6 +140,22 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(
             rows[0]["items"][0]["cover_url"],
             "https://mikan.test/images/Bangumi/202607/681.jpg?width=240",
+        )
+
+
+    def test_mikan_catalog_supports_current_m_week_square_data_src(self) -> None:
+        rows = parse_mikan_catalog_html(
+            MIKAN_CURRENT_CARD_HTML,
+            "https://mikanani.me",
+            year=2026,
+            season="夏",
+        )
+        item = rows[0]["items"][0]
+        self.assertEqual(item["bangumi_id"], 3920)
+        self.assertEqual(item["title"], "摩绪")
+        self.assertEqual(
+            item["cover_url"],
+            "https://mikanani.me/images/Bangumi/202604/edeef072.jpg?width=400&height=400&format=webp",
         )
 
     def test_mikan_search_extracts_unique_bangumi(self) -> None:
@@ -220,6 +253,61 @@ class DiscoveryServiceTests(unittest.TestCase):
     def test_cover_proxy_rejects_other_hosts(self) -> None:
         with self.assertRaisesRegex(ValueError, "不属于允许"):
             self.service.fetch_image("https://mikan.test", "https://example.com/cover.jpg")
+
+
+    def test_catalog_uses_final_redirect_origin_for_relative_covers(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "mikanime.tv":
+                target = "https://mikanani.me" + request.url.raw_path.decode("ascii")
+                return httpx.Response(302, headers={"Location": target}, request=request)
+            if request.url.host == "mikanani.me" and request.url.path == "/Home/BangumiCoverFlowByDayOfWeek":
+                return httpx.Response(200, text=MIKAN_CURRENT_CARD_HTML, request=request)
+            return httpx.Response(404, request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            service = DiscoveryService(
+                client=client,
+                mikan_bases=("https://mikanime.tv", "https://mikanani.me"),
+            )
+            response = service.catalog(2026, "夏")
+
+        item = response["rows"][0]["items"][0]
+        self.assertEqual(response["base_url"], "https://mikanani.me")
+        self.assertEqual(item["base_url"], "https://mikanani.me")
+        self.assertTrue(item["cover_url"].startswith("https://mikanani.me/images/"))
+        self.assertIn("base_url=https%3A%2F%2Fmikanani.me", item["cover_proxy_url"])
+
+    def test_cover_proxy_allows_redirect_between_configured_mikan_hosts(self) -> None:
+        image_path = "/images/Bangumi/202604/edeef072.jpg"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "mikanime.tv" and request.url.path == image_path:
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://mikanani.me" + image_path + "?format=webp"},
+                    request=request,
+                )
+            if request.url.host == "mikanani.me" and request.url.path == image_path:
+                return httpx.Response(
+                    200,
+                    content=b"RIFFmockWEBP",
+                    headers={"Content-Type": "image/webp"},
+                    request=request,
+                )
+            return httpx.Response(404, request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            service = DiscoveryService(
+                client=client,
+                mikan_bases=("https://mikanime.tv", "https://mikanani.me"),
+            )
+            content, content_type = service.fetch_image(
+                "https://mikanime.tv",
+                "https://mikanime.tv" + image_path,
+            )
+
+        self.assertEqual(content, b"RIFFmockWEBP")
+        self.assertEqual(content_type, "image/webp")
 
     def test_keyword_search_remains_available_as_fallback(self) -> None:
         response = self.service.search("金牌得主", limit=20)

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.7.1">
 </head>
 <body>
   <header class="topbar">
@@ -72,7 +72,7 @@
 
     <section class="panel" id="sourceDiscovery">
       <div class="panel-head">
-        <div><h2>Mikan 番剧目录</h2><p>按年份、季度和星期浏览番剧；点开番剧后选择字幕组 RSS。</p></div>
+        <div><h2>Mikan 番剧目录</h2><p>默认从 FeedDock 持久缓存读取；后台定时更新，避免页面操作频繁访问 Mikan。</p></div>
       </div>
       <form id="mikanCatalogForm" class="catalog-controls">
         <label>年份
@@ -90,13 +90,14 @@
           <input name="query" maxlength="200" placeholder="可选，例如：魔法少女">
         </label>
         <div class="form-actions">
-          <button id="loadMikanCatalog" type="submit">加载番剧</button>
+          <button id="loadMikanCatalog" type="submit">读取缓存</button>
+          <button id="forceRefreshMikanCatalog" type="button" class="secondary">强制更新</button>
           <button id="clearMikanCatalog" type="button" class="secondary">清空</button>
         </div>
       </form>
-      <p id="mikanCatalogState" class="hint">不会自动访问 Mikan，只有点击“加载番剧”才会请求所选季度。</p>
+      <p id="mikanCatalogState" class="hint">首次没有缓存时会请求一次 Mikan；之后页面只读缓存，已浏览季度默认每 6 小时后台更新一次。</p>
       <div id="mikanCatalog" class="mikan-catalog"></div>
-      <p class="hint">点击番剧卡片后，会读取该番剧的字幕组并显示每个字幕组对应的 RSS；选择“订阅”即可带入下方订阅表单。</p>
+      <p class="hint">标题搜索只过滤本地季度缓存，不会再次访问 Mikan。番剧字幕组详情同样会缓存；需要立即更新时使用“强制更新”按钮。</p>
     </section>
 
     <section class="panel">
@@ -233,6 +234,6 @@
     </section>
   </div>
 
-  <script src="/static/app.js?v=1.6.1" defer></script>
+  <script src="/static/app.js?v=1.7.1" defer></script>
 </body>
 </html>

@@ -1,52 +1,83 @@
-# FeedDock v1.6.1 验证报告
+# FeedDock v1.7.1 验证报告
 
 ## 结论
 
-FeedDock v1.6.1 已通过 40 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Compose / GitHub Actions YAML 解析检查。
+FeedDock v1.7.1 已通过 51 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
 
-## Mikan 季度目录
 
-已验证：
-
-- 调用 `/Home/BangumiCoverFlowByDayOfWeek?year=...&seasonStr=...` 获取季度目录。
-- 解析 `data-dayofweek` 并按星期分组。
-- 解析番剧 ID、标题、封面、更新时间和详情地址。
-- 支持 `data-src`、`data-original`、`srcset` 与 CSS `background-image` 封面。
-- 同源封面代理校验来源主机、图片类型和 6 MiB 大小上限。
-- 同一番剧 ID 自动去重。
-- 支持在选定季度内按标题筛选。
-- 主地址失败时尝试备用 Mikan 地址。
-- 年份与季度参数校验。
-
-## 字幕组与 RSS
+## Mikan 封面域名修复
 
 已验证：
 
-- 点击番剧后请求 `/Home/Bangumi/{id}`。
-- 从字幕组链接与页面节点提取 Subgroup ID。
-- 支持 `div.subgroup-text` 的纯数字 ID、`subgroup-*` ID 和 `data-subgroupid`。
-- 含无 `property/name` 的 `meta` 标签时不会再触发空值 `.lower()`。
-- 生成专用 RSS：
+- 当前 `m-week-square` 结构中的 `img[data-src]` 能解析为封面地址。
+- `/images/Bangumi/...` 相对路径按最终 HTTP 响应域名拼接。
+- `mikanime.tv` 重定向到 `mikanani.me` 后，目录、详情、RSS 和封面均使用最终域名。
+- 封面代理允许在配置白名单中的 Mikan 域名之间重定向，同时继续拒绝其他站点。
+- v1.7.0 及更早的季度缓存会自动迁移并只刷新一次。
 
-```text
-/RSS/Bangumi?bangumiId={番剧ID}&subgroupid={字幕组ID}
-```
+## Mikan 持久缓存
 
-- 页面显示 RSS 地址、复制按钮和订阅按钮。
-- 选择订阅后预填名称、来源和 RSS，不会跳过规则预览直接保存。
+已验证：
+
+- 第一次读取某个年份和季度时访问 Mikan，并写入 SQLite 缓存。
+- 相同季度再次读取时不访问 Mikan。
+- 修改标题搜索词只过滤本地完整季度缓存，不产生来源请求。
+- 点击“强制更新”会绕过缓存并替换季度数据。
+- 缓存响应包含缓存时间、下次刷新时间、状态和上次错误。
+- 已过期缓存仍可正常展示，不会因为页面访问而立即请求来源站。
+- 后台刷新只处理已经缓存且达到刷新间隔的季度。
+- 每轮后台最多处理 4 个到期季度，防止集中请求。
+- 后台刷新失败后至少等待 1 小时再尝试。
+- 后台缓存异常不会终止 RSS 调度线程。
+
+## 字幕组详情缓存
+
+已验证：
+
+- 第一次打开番剧详情时读取 Mikan 并缓存字幕组 RSS。
+- 重复打开同一番剧直接读取缓存。
+- “强制更新字幕组”会重新读取并替换详情缓存。
+- 后台不会批量刷新所有番剧详情，避免订阅库增大后产生大量请求。
+- 原有 `subgroup-text`、PublishGroup 链接和空 HTML 属性兼容逻辑继续通过测试。
+
+## 封面缓存
+
+已验证：
+
+- Mikan 封面通过 FeedDock 同源接口加载。
+- 首次加载写入 `/data/mikan-image-cache`。
+- 后续加载直接读取磁盘，不再次请求来源图片。
+- 默认缓存时间为 7 天，可通过 `MIKAN_IMAGE_CACHE_DAYS` 修改。
+- 保留来源主机、图片类型和大小安全校验。
 
 ## 页面行为
 
 已验证：
 
-- 首页包含年份、季度、标题筛选和“加载番剧”。
-- 番剧按星期分区，以封面卡片显示。
-- 前端优先使用 FeedDock 同源封面代理，失败后回退原地址与文字占位。
-- 番剧详情使用弹窗显示字幕组 RSS。
-- 页面加载不会自动访问 Mikan。
-- 外部标题使用 DOM 文本节点渲染，不直接写入 `innerHTML`。
-- 移动端目录和详情弹窗具有响应式布局。
-- 使用 Chromium 无头浏览器模拟加载目录、点击番剧和显示 RSS 弹窗，未出现前端运行错误。
+- 页面提供“读取缓存”“强制更新”和“清空”按钮。
+- 默认按钮调用缓存读取接口。
+- 强制更新使用独立 POST 接口。
+- 页面显示缓存时间和下次后台刷新时间。
+- 标题搜索使用同一季度缓存。
+- 番剧弹窗提供单独的“强制更新字幕组”按钮。
+- 静态资源版本已更新为 1.7.1，避免飞牛浏览器使用旧 JavaScript。
+
+## 飞牛部署
+
+已验证飞牛 Compose 包含：
+
+```yaml
+MIKAN_CACHE_HOURS: "6"
+MIKAN_IMAGE_CACHE_DAYS: "7"
+```
+
+缓存数据库和封面均位于已经挂载的 `/data` 中，对应宿主机：
+
+```text
+/vol1/1000/应用/feeddock/data
+```
+
+容器重建和镜像升级不会清除缓存、账号、订阅或 qBittorrent 配置。
 
 ## 既有功能回归
 
@@ -54,14 +85,12 @@ FeedDock v1.6.1 已通过 40 项自动化测试，并完成 Python 编译、Java
 
 - 首次登录强制改密和密码持久化。
 - 网页配置外部 qBittorrent。
-- qBittorrent 登录、读取版本和推送任务。
 - GitHub Release 手动检查、限流提示和更新触发。
-- 主/备用 RSS、规则过滤、集数偏移、小数集数和路径预览。
-- 遗漏检测、只下载最新集、编辑与删除订阅。
+- 主/备用 RSS、规则过滤、集数偏移和路径预览。
+- 遗漏检测、只下载最新集、订阅编辑与删除。
 - RSS、Atom、Torrent enclosure、Magnet 和路径越界防护。
-- 飞牛绝对数据路径、宿主机网关和 GHCR 镜像配置。
-- Docker 镜像成功后自动创建 Release。
+- GHCR 多架构镜像构建及自动创建 Release 的工作流结构。
 
 ## 测试边界
 
-当前构建环境不能直接访问线上 Mikan，因此目录与详情集成测试使用真实页面结构格式的固定 HTML 样本和 `httpx.MockTransport`。第三方站点若调整 HTML 结构、域名或访问策略，解析器可能需要随之更新。
+当前构建环境不能直接访问线上 Mikan。来源解析测试使用符合当前页面结构的 HTML 样本和 `httpx.MockTransport`；缓存层使用临时 SQLite、模拟来源客户端和临时磁盘目录完成真实读写验证。

@@ -8,7 +8,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.6.1"
+os.environ["APP_VERSION"] = "1.7.0"
 
 from fastapi.testclient import TestClient
 
@@ -96,6 +96,18 @@ class AuthFlowTests(unittest.TestCase):
                 )
                 self.assertEqual(catalog.status_code, 200, catalog.text)
                 self.assertEqual(catalog.json()["rows"][0]["weekday"], "星期一")
+                cached_catalog = client.get(
+                    "/api/discovery/mikan/catalog",
+                    params={"year": 2026, "season": "夏", "q": "金牌"},
+                )
+                self.assertEqual(cached_catalog.status_code, 200, cached_catalog.text)
+                self.assertEqual(discovery_factory.return_value.catalog.call_count, 1)
+                forced_catalog = client.post(
+                    "/api/discovery/mikan/catalog/refresh",
+                    params={"year": 2026, "season": "夏"},
+                )
+                self.assertEqual(forced_catalog.status_code, 200, forced_catalog.text)
+                self.assertEqual(discovery_factory.return_value.catalog.call_count, 2)
 
                 discovery_factory.return_value.search.return_value = {
                     "query": "金牌得主",
@@ -143,6 +155,18 @@ class AuthFlowTests(unittest.TestCase):
                 )
                 self.assertEqual(detail.status_code, 200, detail.text)
                 self.assertEqual(detail.json()["groups"][0]["name"], "LoliHouse")
+                cached_detail = client.get(
+                    "/api/discovery/mikan/3822",
+                    params={"base_url": "https://mikan.test", "title": "金牌得主 第二季"},
+                )
+                self.assertEqual(cached_detail.status_code, 200, cached_detail.text)
+                self.assertEqual(discovery_factory.return_value.mikan_detail.call_count, 1)
+                forced_detail = client.post(
+                    "/api/discovery/mikan/3822/refresh",
+                    params={"base_url": "https://mikan.test", "title": "金牌得主 第二季"},
+                )
+                self.assertEqual(forced_detail.status_code, 200, forced_detail.text)
+                self.assertEqual(discovery_factory.return_value.mikan_detail.call_count, 2)
 
             created_subscription = client.post(
                 "/api/subscriptions",

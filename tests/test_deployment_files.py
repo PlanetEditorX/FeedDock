@@ -21,6 +21,8 @@ class DeploymentFileTests(unittest.TestCase):
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)
         self.assertIn('MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"', compose)
+        self.assertIn('MIKAN_CACHE_HOURS: "6"', compose)
+        self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "7"', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
     def test_frontend_has_manual_mikan_catalog(self) -> None:
@@ -31,7 +33,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('id="catalogSeason"', index)
         self.assertIn('id="mikanDetailModal"', index)
         self.assertIn("/api/discovery/mikan/catalog", script)
+        self.assertIn("/api/discovery/mikan/catalog/refresh", script)
         self.assertIn("/api/discovery/mikan/", script)
+        self.assertIn('id="forceRefreshMikanCatalog"', index)
+        self.assertIn("cacheStatusText", script)
         self.assertIn("applyDiscoveryPreset", script)
         self.assertNotIn("动漫花园", index)
         self.assertNotIn("dmhy", script.lower())
@@ -39,6 +44,16 @@ class DeploymentFileTests(unittest.TestCase):
     def test_mikan_modal_is_hidden_until_anime_is_selected(self) -> None:
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".modal.hidden { display: none; }", styles)
+
+
+    def test_mikan_cache_is_persistent_and_background_refreshed(self) -> None:
+        cache_module = (ROOT / "app/mikan_cache.py").read_text(encoding="utf-8")
+        scheduler = (ROOT / "app/scheduler.py").read_text(encoding="utf-8")
+        models = (ROOT / "app/models.py").read_text(encoding="utf-8")
+        self.assertIn("class MikanCacheEntry", models)
+        self.assertIn("refresh_due_mikan_catalogs", scheduler)
+        self.assertIn("force_refresh", cache_module)
+        self.assertIn("mikan-image-cache", cache_module)
 
     def test_fnos_compose_has_first_login_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")

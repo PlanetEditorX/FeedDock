@@ -2,6 +2,7 @@ const notice = document.getElementById('notice');
 const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 let subscriptionsById = new Map();
+let currentMikanDetailItem = null;
 
 function showNotice(message, ok = true) {
   notice.textContent = message;
@@ -134,6 +135,10 @@ async function loadConfig() {
   document.getElementById('currentVersion').textContent = data.app_version || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
   document.getElementById('updaterState').textContent = data.updater_configured ? '已启用' : '未启用';
+  const catalogState = document.getElementById('mikanCatalogState');
+  if (catalogState && !document.getElementById('mikanCatalog').children.length) {
+    catalogState.textContent = `首次没有缓存时会请求一次 Mikan；之后页面只读缓存，已浏览季度默认每 ${data.mikan_cache_hours || 6} 小时后台更新一次。`;
+  }
 }
 
 async function loadDownloaderSettings() {
@@ -262,14 +267,54 @@ function openMikanModal(title) {
   document.body.classList.add('modal-open');
 }
 
+function cacheStatusText(data) {
+  const statusLabels = {
+    cache: '本地缓存',
+    cache_miss_fetched: '首次拉取并缓存',
+    force_refreshed: '刚刚强制更新',
+    cache_migrated: '旧缓存已自动修复',
+    legacy_cache_refresh_failed: '旧缓存修复失败，暂时使用旧数据',
+  };
+  const parts = [statusLabels[data.cache_status] || '本地缓存'];
+  if (data.cached_at) parts.push(`缓存时间 ${fmtDate(data.cached_at)}`);
+  if (data.next_refresh_at) parts.push(`下次后台刷新 ${fmtDate(data.next_refresh_at)}`);
+  if (data.is_stale) parts.push('等待后台刷新');
+  if (data.refresh_error) parts.push(`上次刷新失败：${data.refresh_error}`);
+  return parts.join(' · ');
+}
+
 function renderMikanDetail(detail) {
   const container = document.getElementById('mikanDetailBody');
   container.replaceChildren();
 
   const summary = document.createElement('div');
   summary.className = 'mikan-detail-summary';
-  summary.append(text('strong', `${detail.groups.length} 个字幕组 RSS`));
-  if (detail.detail_url) summary.append(externalLink('打开 Mikan 番剧页', detail.detail_url));
+  const summaryText = document.createElement('div');
+  summaryText.append(text('strong', `${detail.groups.length} 个字幕组 RSS`));
+  summaryText.append(text('span', cacheStatusText(detail), 'muted cache-meta'));
+  summary.append(summaryText);
+
+  const summaryActions = document.createElement('div');
+  summaryActions.className = 'card-actions';
+  const refreshButton = text('button', '强制更新字幕组', 'small secondary');
+  refreshButton.type = 'button';
+  refreshButton.addEventListener('click', async () => {
+    if (!currentMikanDetailItem) return;
+    refreshButton.disabled = true;
+    refreshButton.textContent = '正在更新…';
+    try {
+      await openMikanDetail(currentMikanDetailItem, true);
+      showNotice('字幕组缓存已更新');
+    } catch (_) {
+      // openMikanDetail already renders the error.
+    } finally {
+      refreshButton.disabled = false;
+      refreshButton.textContent = '强制更新字幕组';
+    }
+  });
+  summaryActions.append(refreshButton);
+  if (detail.detail_url) summaryActions.append(externalLink('打开 Mikan 番剧页', detail.detail_url));
+  summary.append(summaryActions);
   container.append(summary);
 
   if (!detail.groups.length) {
@@ -304,19 +349,25 @@ function renderMikanDetail(detail) {
   container.append(list);
 }
 
-async function openMikanDetail(item) {
+async function openMikanDetail(item, forceRefresh = false) {
+  currentMikanDetailItem = item;
   openMikanModal(item.title);
   try {
     const params = new URLSearchParams({
       base_url: item.base_url || '',
       title: item.title || '',
     });
-    const detail = await api(`/api/discovery/mikan/${item.bangumi_id}?${params.toString()}`);
+    const path = forceRefresh
+      ? `/api/discovery/mikan/${item.bangumi_id}/refresh?${params.toString()}`
+      : `/api/discovery/mikan/${item.bangumi_id}?${params.toString()}`;
+    const detail = await api(path, forceRefresh ? { method: 'POST' } : {});
     document.getElementById('mikanDetailTitle').textContent = detail.title;
     renderMikanDetail(detail);
+    return detail;
   } catch (error) {
     const body = document.getElementById('mikanDetailBody');
     body.replaceChildren(text('p', error.message, 'error-text'));
+    throw error;
   }
 }
 
@@ -361,14 +412,15 @@ function renderMikanCatalog(data) {
   container.replaceChildren();
   const count = data.rows.reduce((sum, row) => sum + row.items.length, 0);
   if (!count) {
-    state.textContent = data.query
+    const emptyMessage = data.query
       ? `${data.year} ${data.season}没有匹配“${data.query}”的番剧。`
       : `${data.year} ${data.season}没有解析到番剧。`;
+    state.textContent = `${emptyMessage} · ${cacheStatusText(data)}`;
     state.className = 'hint';
     return;
   }
 
-  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · ${count} 部番剧`;
+  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · ${count} 部番剧 · ${cacheStatusText(data)}`;
   state.className = 'hint';
   for (const row of data.rows) {
     const section = document.createElement('section');
@@ -401,28 +453,41 @@ function initializeCatalogSelectors() {
   document.getElementById('catalogSeason').value = season;
 }
 
-async function loadMikanCatalog(form) {
-  const button = document.getElementById('loadMikanCatalog');
+async function loadMikanCatalog(form, forceRefresh = false) {
+  const loadButton = document.getElementById('loadMikanCatalog');
+  const refreshButton = document.getElementById('forceRefreshMikanCatalog');
+  const activeButton = forceRefresh ? refreshButton : loadButton;
   const state = document.getElementById('mikanCatalogState');
   const year = form.elements.year.value;
   const season = form.elements.season.value;
   const query = form.elements.query.value.trim();
-  button.disabled = true;
-  button.textContent = '正在加载…';
-  state.textContent = `正在读取 Mikan ${year} ${season}番剧目录…`;
+  loadButton.disabled = true;
+  refreshButton.disabled = true;
+  activeButton.textContent = forceRefresh ? '正在强制更新…' : '正在读取缓存…';
+  state.textContent = forceRefresh
+    ? `正在从 Mikan 更新 ${year} ${season}番剧目录…`
+    : `正在读取 FeedDock 中的 ${year} ${season}缓存…`;
   state.className = 'hint';
   try {
     const params = new URLSearchParams({ year, season });
     if (query) params.set('q', query);
-    const data = await api(`/api/discovery/mikan/catalog?${params.toString()}`);
+    const path = forceRefresh
+      ? `/api/discovery/mikan/catalog/refresh?${params.toString()}`
+      : `/api/discovery/mikan/catalog?${params.toString()}`;
+    const data = await api(path, forceRefresh ? { method: 'POST' } : {});
     renderMikanCatalog(data);
+    if (forceRefresh) showNotice('Mikan 番剧目录缓存已更新');
   } catch (error) {
-    document.getElementById('mikanCatalog').replaceChildren();
+    if (!document.getElementById('mikanCatalog').children.length) {
+      document.getElementById('mikanCatalog').replaceChildren();
+    }
     state.textContent = error.message;
     state.className = 'hint error-text';
   } finally {
-    button.disabled = false;
-    button.textContent = '加载番剧';
+    loadButton.disabled = false;
+    refreshButton.disabled = false;
+    loadButton.textContent = '读取缓存';
+    refreshButton.textContent = '强制更新';
   }
 }
 
@@ -613,7 +678,11 @@ document.getElementById('restoreDownloaderConfig').addEventListener('click', asy
 
 document.getElementById('mikanCatalogForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  await loadMikanCatalog(event.currentTarget);
+  await loadMikanCatalog(event.currentTarget, false);
+});
+
+document.getElementById('forceRefreshMikanCatalog').addEventListener('click', async () => {
+  await loadMikanCatalog(document.getElementById('mikanCatalogForm'), true);
 });
 
 document.getElementById('clearMikanCatalog').addEventListener('click', () => {
@@ -621,7 +690,7 @@ document.getElementById('clearMikanCatalog').addEventListener('click', () => {
   form.elements.query.value = '';
   document.getElementById('mikanCatalog').replaceChildren();
   const state = document.getElementById('mikanCatalogState');
-  state.textContent = '已清空。点击“加载番剧”重新读取所选季度。';
+  state.textContent = '已清空。点击“读取缓存”加载所选季度；只有“强制更新”会访问 Mikan。';
   state.className = 'hint';
 });
 
