@@ -1,59 +1,51 @@
-# FeedDock 1.2.1 功能验证报告
+# FeedDock v1.3.0 功能验证
 
-## 飞牛 OS 默认部署配置
+## 本次新增
 
-`docker-compose.fnos.yml` 已调整为适合当前飞牛目录的最小可运行配置：
+- qBittorrent 可在 Web 页面配置，不再必须修改 Compose。
+- 网页配置保存到 SQLite，容器重启后继续生效。
+- 网页配置优先于 Compose 环境变量。
+- 密码不会通过读取接口回显；密码输入框留空可保留原密码。
+- 可清除保存的密码，或恢复 Compose 默认配置。
+- 飞牛 OS Compose 增加 `host.docker.internal:host-gateway`，支持访问同机 qBittorrent WebUI。
+- RSS 推送与保存路径读取网页中的最新 qBittorrent 配置。
 
-```text
-/vol1/1000/应用/feeddock/data:/data
-```
+## 自动化验证
 
-默认值：
+共 16 项测试通过：
 
-- 镜像：`ghcr.io/planeteditorx/feeddock:latest`；
-- 端口：`7789:8000`；
-- 首次用户名：`admin`；
-- 首次密码：`password`；
-- qBittorrent：留空，不影响 FeedDock 启动；
-- GitHub Release 更新检查：启用；
-- Watchtower 网页一键更新：暂时关闭。
-
-首次登录后，应用会强制要求设置至少 10 个字符的新密码。新密码哈希保存在持久化数据库中，数据库初始化完成后，Compose 中的 `ADMIN_PASSWORD` 不再覆盖它。
-
-## 功能回归
-
-自动化测试覆盖：
-
-- 登录成功和登录失败；
-- 首次登录强制修改密码；
-- 改密前业务 API 锁定，改密后恢复；
-- 会话注销；
-- 外部 qBittorrent 登录、读取版本和推送 Magnet；
-- GitHub Release 版本比较和检查；
-- Watchtower Bearer Token 更新触发；
-- RSS、Atom、关键词、集数解析和路径越界保护；
-- 飞牛 Compose 使用 GHCR 镜像，无本地构建；
-- 飞牛默认初始账号、空 qBittorrent 和绝对数据目录；
-- 运行时版本不被 `.env` 固定。
+- 首次登录与强制修改密码。
+- 修改密码后重启持久化。
+- qBittorrent 网页配置保存、读取和密码不回显。
+- 留空密码时保留已保存密码。
+- 网页配置在应用重启后仍存在。
+- 默认下载器客户端实际使用网页配置。
+- 外部 qBittorrent 登录、版本读取和 Magnet 推送。
+- GitHub Release 更新检查和 Watchtower 更新触发。
+- RSS、Atom、关键词、集数、去重和路径安全。
+- 飞牛 OS Compose 镜像、端口、数据目录及宿主机网关检查。
 
 执行命令：
 
 ```bash
 python -m unittest discover -s tests -v
-python -m compileall -q app docker-entrypoint.py
+python -m compileall -q app tests
 node --check app/static/app.js
 ```
 
-当前环境没有连接用户的飞牛 OS Docker 服务，因此无法代替用户执行 NAS 上的实际镜像拉取和容器重建。应用 HTTP 流程和相关协议通过本地自动化验证。
+结果：全部通过。
 
-## HTTP 冒烟测试
+## 飞牛 OS 使用结果
 
-使用飞牛默认部署等价环境变量启动应用后：
+更新到 v1.3.0 后，登录首页即可看到“qBittorrent 下载器”区域。推荐填写：
 
 ```text
-GET  /health             -> 200，version=1.2.1
-POST /api/auth/login     -> 200，must_change_password=true
-GET  /api/dashboard      -> 428 PASSWORD_CHANGE_REQUIRED
+同机 qBittorrent：http://host.docker.internal:8080
+其他设备：http://设备局域网IP:WebUI端口
 ```
 
-这确认默认 `admin / password` 只用于首次登录，并且首次改密门禁正常生效。
+`download_path` 必须是 qBittorrent 所在主机或容器能够识别的路径。FeedDock 本身不需要挂载该下载目录。
+
+## 未在当前环境执行
+
+当前执行环境没有 Docker Engine，也无法连接用户的飞牛 OS，因此没有实际执行 GHCR 镜像构建和 NAS 容器重建。应用 API、数据库持久化、外部 qBittorrent 协议和部署文件已完成本地验证。

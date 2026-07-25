@@ -7,7 +7,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.2.1"
+os.environ["APP_VERSION"] = "1.3.0"
 
 from fastapi.testclient import TestClient
 
@@ -61,6 +61,36 @@ class AuthFlowTests(unittest.TestCase):
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
             self.assertIn("系统与更新", home.text)
+            self.assertIn("qBittorrent 下载器", home.text)
+
+            saved_qbit = client.put(
+                "/api/downloader/settings",
+                json={
+                    "qbit_url": "http://host.docker.internal:8080",
+                    "qbit_username": "admin",
+                    "qbit_password": "qbit-secret",
+                    "qbit_category": "rss",
+                    "download_path": "/media/downloads/rss",
+                },
+            )
+            self.assertEqual(saved_qbit.status_code, 200)
+            self.assertTrue(saved_qbit.json()["qbit_password_configured"])
+            self.assertEqual(saved_qbit.json()["source"], "web")
+            self.assertNotIn("qbit_password", saved_qbit.json())
+
+            preserve_password = client.put(
+                "/api/downloader/settings",
+                json={
+                    "qbit_url": "http://host.docker.internal:8080",
+                    "qbit_username": "admin",
+                    "qbit_password": None,
+                    "qbit_category": "anime",
+                    "download_path": "/media/downloads/rss",
+                },
+            )
+            self.assertEqual(preserve_password.status_code, 200)
+            self.assertTrue(preserve_password.json()["qbit_password_configured"])
+            self.assertEqual(preserve_password.json()["qbit_category"], "anime")
 
             logout = client.post("/api/auth/logout")
             self.assertEqual(logout.status_code, 200)
@@ -83,6 +113,11 @@ class AuthFlowTests(unittest.TestCase):
             )
             self.assertEqual(new_password.status_code, 200)
             self.assertFalse(new_password.json()["must_change_password"])
+
+            persisted_qbit = restarted_client.get("/api/downloader/settings")
+            self.assertEqual(persisted_qbit.status_code, 200)
+            self.assertEqual(persisted_qbit.json()["qbit_category"], "anime")
+            self.assertTrue(persisted_qbit.json()["qbit_password_configured"])
 
 
 if __name__ == "__main__":

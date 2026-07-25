@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .config import settings
+from .runtime_config import load_qbittorrent_config
 
 
 @dataclass(slots=True)
@@ -24,11 +25,12 @@ class QBittorrentClient:
         timeout: int | None = None,
         category: str | None = None,
     ) -> None:
-        self.base_url = (settings.qbit_url if base_url is None else base_url).strip().rstrip("/")
-        self.username = settings.qbit_username if username is None else username
-        self.password = settings.qbit_password if password is None else password
+        runtime = load_qbittorrent_config() if base_url is None else None
+        self.base_url = ((runtime.url if runtime else settings.qbit_url) if base_url is None else base_url).strip().rstrip("/")
+        self.username = (runtime.username if runtime else settings.qbit_username) if username is None else username
+        self.password = (runtime.password if runtime else settings.qbit_password) if password is None else password
         self.timeout = settings.request_timeout_seconds if timeout is None else timeout
-        self.category = settings.qbit_category if category is None else category
+        self.category = (runtime.category if runtime else settings.qbit_category) if category is None else category
 
     def _configuration_error(self) -> str:
         if not self.base_url:

@@ -12,6 +12,7 @@ class DeploymentFileTests(unittest.TestCase):
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn("ghcr.io/planeteditorx/feeddock:latest", compose)
         self.assertIn('"7789:8000"', compose)
+        self.assertIn('"host.docker.internal:host-gateway"', compose)
         self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', compose)
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
@@ -29,7 +30,7 @@ class DeploymentFileTests(unittest.TestCase):
         fnos_env = (ROOT / ".env.fnos.example").read_text(encoding="utf-8")
         self.assertNotIn("\nAPP_VERSION=", f"\n{env_example}")
         self.assertNotIn("\nAPP_VERSION=", f"\n{fnos_env}")
-        self.assertIn("FEEDDOCK_BUILD_VERSION=1.2.1", env_example)
+        self.assertIn("FEEDDOCK_BUILD_VERSION=1.3.0", env_example)
 
     def test_fnos_update_check_enabled_and_one_click_update_disabled(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")

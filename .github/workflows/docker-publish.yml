@@ -93,7 +93,7 @@ jobs:
           payload = yaml.safe_load(Path("docker-compose.fnos.yml").read_text())
           assert payload["services"]["feeddock"]["image"].startswith("ghcr.io/planeteditorx/feeddock:")
           assert "host.docker.internal:host-gateway" in payload["services"]["feeddock"]["extra_hosts"]
-          assert payload["services"]["feeddock"]["volumes"] == ["./data:/data"]
+          assert payload["services"]["feeddock"]["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]
           PY
 
   build-and-push:

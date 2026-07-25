@@ -3,7 +3,9 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from app.database import Base, SessionLocal, engine
 from app.downloader import QBittorrentClient
+from app.runtime_config import reset_qbittorrent_config, save_qbittorrent_config
 from app.update_service import UpdateService, is_newer_version
 
 
@@ -27,7 +29,7 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         if self.path == "/repos/demo/feeddock/releases/latest":
             payload = json.dumps(
                 {
-                    "tag_name": "v1.3.0",
+                    "tag_name": "v1.4.0",
                     "html_url": "https://example.test/releases/v1.3.0",
                     "published_at": "2026-07-25T00:00:00Z",
                 }
@@ -82,6 +84,27 @@ class IntegrationTests(unittest.TestCase):
         added = client.add_url("magnet:?xt=urn:btih:DEMO", "/downloads/rss/Demo")
         self.assertTrue(added.ok, added.message)
 
+    def test_saved_web_settings_are_used_by_default_client(self):
+        Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            save_qbittorrent_config(
+                db,
+                qbit_url=self.base_url,
+                qbit_username="saved-admin",
+                qbit_password="saved-password",
+                clear_password=False,
+                qbit_category="saved-category",
+                download_path="/saved/downloads",
+            )
+
+        client = QBittorrentClient(timeout=3)
+        result = client.test()
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(client.category, "saved-category")
+
+        with SessionLocal() as db:
+            reset_qbittorrent_config(db)
+
     def test_update_check_and_trigger(self):
         service = UpdateService(
             repository="demo/feeddock",
@@ -91,7 +114,7 @@ class IntegrationTests(unittest.TestCase):
             timeout=3,
         )
         status = service.check()
-        self.assertEqual(status.latest_version, "1.3.0")
+        self.assertEqual(status.latest_version, "1.4.0")
         self.assertTrue(status.update_available)
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)

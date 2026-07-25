@@ -79,27 +79,28 @@ http://飞牛IP:7789/health
 {"status":"ok","version":"当前版本号"}
 ```
 
-## 四、后续配置 qBittorrent
+## 四、在网页配置外部 qBittorrent
 
-现在 Compose 中保留为空：
+现在 Compose 中的 qBittorrent 配置保持为空，FeedDock 可以先独立启动。登录并修改初始密码后，在首页找到 **qBittorrent 下载器**。
 
-```yaml
-QBIT_URL: ""
-QBIT_USERNAME: ""
-QBIT_PASSWORD: ""
+按下面填写：
+
+1. qBittorrent 在同一台飞牛 OS：WebUI 地址先填 `http://host.docker.internal:8080`。
+2. qBittorrent 在局域网其他设备：填写类似 `http://192.168.1.20:8080`。
+3. 用户名和密码填写 qBittorrent WebUI 的登录信息。
+4. 分类可保留 `rss`。
+5. 下载保存路径填写 qBittorrent 能识别的路径，例如 `/downloads/rss`。
+6. 点击“保存并测试连接”。
+
+网页设置保存在：
+
+```text
+/vol1/1000/应用/feeddock/data/feeddock.db
 ```
 
-因此 FeedDock 可以在没有 qBittorrent 的情况下正常启动和登录。
+配置在容器重启后仍然有效，并优先于 Compose 环境变量。页面不会回显密码；以后只修改地址、分类或下载路径时，密码输入框留空即可保留原密码。
 
-准备好 qBittorrent 后，再修改这三项。例如 qBittorrent 在局域网地址 `192.168.1.20`：
-
-```yaml
-QBIT_URL: "http://192.168.1.20:8080"
-QBIT_USERNAME: "admin"
-QBIT_PASSWORD: "你的qBittorrent密码"
-```
-
-保存 Compose 并重新部署，然后在 FeedDock 页面点击“测试下载器”。
+需要改回 Compose 配置时，点击“恢复 Compose 默认”。如果 `host.docker.internal` 无法连接，可以改填飞牛 OS 的局域网 IP，例如 `http://192.168.1.10:8080`。
 
 ## 五、更新
 

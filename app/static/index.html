@@ -51,6 +51,32 @@
 
     <section class="panel">
       <div class="panel-head">
+        <div>
+          <h2>qBittorrent 下载器</h2>
+          <p id="qbitConfigState">正在读取下载器配置…</p>
+        </div>
+      </div>
+      <form id="downloaderForm" class="form-grid">
+        <label class="wide">qBittorrent WebUI 地址
+          <input name="qbit_url" type="url" placeholder="同一台飞牛可填 http://host.docker.internal:8080">
+        </label>
+        <label>用户名<input name="qbit_username" autocomplete="username" placeholder="admin"></label>
+        <label>密码<input name="qbit_password" type="password" autocomplete="new-password" placeholder="留空则保留已保存密码"></label>
+        <label>分类<input name="qbit_category" placeholder="rss"></label>
+        <label>下载保存路径<input name="download_path" placeholder="/downloads/rss" required></label>
+        <label class="checkbox-label"><input name="clear_password" type="checkbox">清除已经保存的密码</label>
+        <div class="form-actions wide">
+          <button type="submit">保存配置</button>
+          <button id="saveAndTestDownloader" type="button" class="secondary">保存并测试连接</button>
+          <button id="restoreDownloaderConfig" type="button" class="secondary">恢复 Compose 默认</button>
+        </div>
+      </form>
+      <p class="hint">如果 qBittorrent 也在这台飞牛上，地址通常填写 <code>http://host.docker.internal:8080</code>。下载保存路径必须填写 qBittorrent 能识别的路径，而不是 FeedDock 的目录。</p>
+      <p class="hint">密码不会显示回页面。网页保存的配置位于 FeedDock 数据库中，请保护好 <code>/vol1/1000/应用/feeddock/data</code>。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <div><h2>添加订阅</h2><p>包含词命中任意一个即可；排除词优先。</p></div>
       </div>
       <form id="subscriptionForm" class="form-grid">

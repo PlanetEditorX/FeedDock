@@ -100,3 +100,17 @@ class UpdateStatusOut(BaseModel):
     updater_configured: bool = False
     deployed_image: str = ""
     message: str = ""
+
+
+class QBittorrentSettingsUpdate(BaseModel):
+    qbit_url: str = Field(default="", max_length=2000)
+    qbit_username: str = Field(default="", max_length=200)
+    qbit_password: str | None = Field(default=None, max_length=500)
+    clear_password: bool = False
+    qbit_category: str = Field(default="rss", max_length=200)
+    download_path: str = Field(default="/downloads/rss", max_length=2000)
+
+    @field_validator("qbit_url", "qbit_username", "qbit_category", "download_path")
+    @classmethod
+    def strip_qbit_text(cls, value: str) -> str:
+        return value.strip()

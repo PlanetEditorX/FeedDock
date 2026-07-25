@@ -17,6 +17,7 @@ from .database import SessionLocal
 from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .rss_parser import parse_feed
+from .runtime_config import load_qbittorrent_config
 
 
 _refresh_lock = threading.Lock()
@@ -109,8 +110,9 @@ def _safe_segment(value: str) -> str:
 
 
 def render_save_path(subscription: Subscription, episode: str) -> str:
+    download_path = load_qbittorrent_config().download_path
     context = {
-        "base": settings.download_path.rstrip("/"),
+        "base": download_path.rstrip("/"),
         "subscription": _safe_segment(subscription.name),
         "episode": episode or "unknown",
     }
@@ -121,7 +123,7 @@ def render_save_path(subscription: Subscription, episode: str) -> str:
 
     # Normalize and collapse dot segments because the path is sent into a Linux container.
     normalized = posixpath.normpath("/" + rendered.lstrip("/"))
-    base = posixpath.normpath("/" + settings.download_path.lstrip("/"))
+    base = posixpath.normpath("/" + download_path.lstrip("/"))
     if not (normalized == base or normalized.startswith(base.rstrip("/") + "/")):
         return f"{base}/{context['subscription']}"
     return normalized

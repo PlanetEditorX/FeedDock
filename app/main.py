@@ -20,6 +20,7 @@ from .schemas import (
     ChangePasswordRequest,
     FeedItemOut,
     LoginRequest,
+    QBittorrentSettingsUpdate,
     LogOut,
     SubscriptionCreate,
     SubscriptionOut,
@@ -38,6 +39,11 @@ from .security import (
     hash_password,
 )
 from .update_service import UpdateService
+from .runtime_config import (
+    load_qbittorrent_config,
+    reset_qbittorrent_config,
+    save_qbittorrent_config,
+)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -161,20 +167,47 @@ def logout(response: Response) -> dict[str, bool]:
 
 
 @app.get("/api/config", dependencies=[Depends(require_admin)])
-def get_config() -> dict[str, str | int | bool]:
+def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
+    qbit = load_qbittorrent_config(db)
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
         "poll_interval_minutes": settings.poll_interval_minutes,
-        "qbit_url": settings.qbit_url,
-        "qbit_username": settings.qbit_username,
-        "qbit_password_configured": bool(settings.qbit_password),
-        "qbit_category": settings.qbit_category,
-        "download_path": settings.download_path,
+        **qbit.public_dict(),
         "timezone": settings.timezone,
         "update_repository": settings.update_repository,
         "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
     }
+
+
+@app.get("/api/downloader/settings", dependencies=[Depends(require_admin)])
+def get_downloader_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return load_qbittorrent_config(db).public_dict()
+
+
+@app.put("/api/downloader/settings", dependencies=[Depends(require_admin)])
+def update_downloader_settings(
+    payload: QBittorrentSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, str | bool]:
+    try:
+        config = save_qbittorrent_config(
+            db,
+            qbit_url=payload.qbit_url,
+            qbit_username=payload.qbit_username,
+            qbit_password=payload.qbit_password,
+            clear_password=payload.clear_password,
+            qbit_category=payload.qbit_category,
+            download_path=payload.download_path,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config.public_dict()
+
+
+@app.delete("/api/downloader/settings", dependencies=[Depends(require_admin)])
+def restore_downloader_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return reset_qbittorrent_config(db).public_dict()
 
 
 @app.get("/api/dashboard", dependencies=[Depends(require_admin)])

@@ -14,13 +14,14 @@ FeedDock 定时读取用户自行添加的 RSS / Atom，按关键词或正则过
 - RSS / Atom 定时轮询与手动刷新
 - 包含词、排除词、集数正则、指纹去重和任务重试
 - qBittorrent Web API 登录、连通性测试与任务推送
+- 可在 Web 页面保存、测试和恢复 qBittorrent 配置
 - 支持外部 qBittorrent，不要求与 FeedDock 部署在同一主机
 - 可选 Compose 内置 qBittorrent
 - GitHub Release 版本检查
 - 可选 Watchtower 网页一键更新
 - GitHub Actions 多架构镜像构建与 GHCR 推送
 
-当前版本号：`1.2.1`
+当前版本号：`1.3.0`
 
 
 ## 飞牛 OS（fnOS）部署
@@ -28,25 +29,18 @@ FeedDock 定时读取用户自行添加的 RSS / Atom，按关键词或正则过
 项目提供飞牛 OS 专用文件：
 
 - `docker-compose.fnos.yml`：直接使用 `ghcr.io/planeteditorx/feeddock:latest`，无需在 NAS 上构建镜像。
-- `FNOS_DEPLOY.md`：按照 `/vol1/1000/应用/feeddock` 目录编写的逐步部署说明。
+- `.env.fnos.example`：飞牛环境变量模板。
+- `FNOS_DEPLOY.md`：从创建 Compose 项目到登录、外部 qBittorrent 和更新验证的完整步骤。
 
-默认飞牛配置为：
+飞牛专用 Compose 只为 FeedDock 挂载 `/vol1/1000/应用/feeddock/data:/data`。外部 qBittorrent 的下载目录不会映射给 FeedDock，`DOWNLOAD_PATH` 只作为保存路径发送给 qBittorrent。
 
-```text
-访问地址：http://飞牛IP:7789
-首次用户名：admin
-首次密码：password
+同一台飞牛 OS 上的 qBittorrent 可以使用：
+
+```dotenv
+QBIT_URL=http://host.docker.internal:8080
 ```
 
-首次登录后系统会强制要求修改密码。新密码保存在：
-
-```text
-/vol1/1000/应用/feeddock/data
-```
-
-因此，修改密码后重启或重新创建容器，不会重新变回 `password`。
-
-默认暂不配置 qBittorrent，也暂时关闭网页一键更新，便于先完成登录和基础验证。GitHub Release 更新检查仍然可用。详细步骤见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)。
+专用 Compose 已配置 `host.docker.internal:host-gateway`。详细步骤见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)。
 
 ## 1. 快速部署
 
@@ -136,6 +130,9 @@ ADMIN_PASSWORD=change-this-to-a-strong-password
 
 ## 3. 外部 qBittorrent
 
+登录后可直接在首页的“qBittorrent 下载器”区域配置，无需修改 Compose。网页配置存入 SQLite，并优先于环境变量；密码留空表示保留现有密码。飞牛 OS 同机服务可使用 `http://host.docker.internal:8080`。
+
+
 配置示例：
 
 ```dotenv
@@ -212,7 +209,7 @@ docker compose --profile updater --profile with-qbit up -d --no-build
 - Watchtower 需要挂载 `/var/run/docker.sock`，等同于拥有较高的 Docker 主机权限。
 - `WATCHTOWER_TOKEN` 不应公开，也不要把 Watchtower 端口暴露到公网。
 - 若不接受 Docker Socket 风险，不要启用 `updater` profile，使用手动升级即可。
-- 固定版本标签如 `:1.2.1` 不会自动跳到后续版本；一键更新应使用 `:latest` 或其他持续更新的标签。
+- 固定版本标签如 `:1.3.0` 不会自动跳到后续版本；一键更新应使用 `:latest` 或其他持续更新的标签。
 
 ## 5. GitHub Actions 构建与发布镜像
 
@@ -227,8 +224,8 @@ docker compose --profile updater --profile with-qbit up -d --no-build
 发布版本：
 
 ```bash
-git tag v1.2.1
-git push origin v1.2.1
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 镜像地址：
@@ -263,7 +260,7 @@ curl http://127.0.0.1:7789/health
 返回示例：
 
 ```json
-{"status":"ok","version":"1.2.1"}
+{"status":"ok","version":"1.3.0"}
 ```
 
 备份：
