@@ -19,7 +19,7 @@ from .models import MikanCacheEntry, SystemLog, utcnow
 
 _CATALOG_KIND = "catalog"
 _DETAIL_KIND = "detail"
-_CATALOG_SCHEMA_VERSION = 2
+_CATALOG_SCHEMA_VERSION = 3
 _DETAIL_SCHEMA_VERSION = 2
 _refresh_lock = threading.Lock()
 _image_lock = threading.Lock()

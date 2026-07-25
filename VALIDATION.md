@@ -1,8 +1,8 @@
-# FeedDock v1.8.0 验证报告
+# FeedDock v1.8.1 验证报告
 
 ## 结论
 
-FeedDock v1.8.0 已通过 54 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
+FeedDock v1.8.1 已通过 55 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
 
 
 ## Mikan 封面域名修复
@@ -60,7 +60,7 @@ FeedDock v1.8.0 已通过 54 项自动化测试，并完成 Python 编译、Java
 - 页面显示缓存时间和下次后台刷新时间。
 - 标题搜索使用同一季度缓存。
 - 番剧弹窗提供单独的“强制更新字幕组”按钮。
-- 静态资源版本已更新为 1.8.0，避免飞牛浏览器使用旧 JavaScript。
+- 静态资源版本已更新为 1.8.1，避免飞牛浏览器使用旧 JavaScript。
 
 ## 飞牛部署
 
@@ -96,9 +96,22 @@ MIKAN_IMAGE_CACHE_DAYS: "7"
 当前构建环境不能直接访问线上 Mikan。来源解析测试使用符合当前页面结构的 HTML 样本和 `httpx.MockTransport`；缓存层使用临时 SQLite、模拟来源客户端和临时磁盘目录完成真实读写验证。
 
 
-## v1.8.0 新增验证
+## v1.8.1 新增验证
 
 - 按星期保存隐藏番剧并保持其他星期不变。
 - 清空某星期过滤后可恢复显示。
 - API 目录保留隐藏项目并附加 `hidden` 状态，编辑模式无需再次请求 Mikan。
 - 前端包含编辑、保存、取消和本周全部显示操作。
+
+## v1.8.1 官网桌面目录封面修复
+
+已使用用户提供的 Mikan 官网完整 HTML 响应直接验证：
+
+- 官网番剧封面位于 `span.js-expand_bangumi[data-src]`。
+- 官网番剧 ID 位于同一节点的 `data-bangumiid`，标题和更新时间位于相邻的 `div.an-info-group`。
+- 修复前，解析器过早停在 `an-info-group`，无法访问同级封面节点。
+- 修复后，解析器优先选择完整 `<li>` 卡片，再提取封面、标题和更新时间。
+- 完整官网样本识别 87 个番剧，87 个均获得非空封面地址。
+- `bangumi_id=681` 正确解析为 `/images/Bangumi/200504/1df90634.jpg?...`。
+- `bangumi_id=3920` 正确解析为 `/images/Bangumi/202604/edeef072.jpg?...`。
+- 目录缓存 schema 从 2 升级为 3，已有空封面缓存会自动迁移刷新。

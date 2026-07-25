@@ -86,6 +86,27 @@ MIKAN_CURRENT_CARD_HTML = """
 </div>
 """
 
+
+MIKAN_OFFICIAL_DESKTOP_CARD_HTML = """
+<div class="sk-bangumi" data-dayofweek="5">
+  <div id="data-row-5" class="row">星期五</div>
+  <div class="an-box animated fadeIn"><ul class="list-inline an-ul">
+    <li>
+      <span data-src="/images/Bangumi/200504/1df90634.jpg?width=400&amp;height=400&amp;format=webp"
+            class="js-expand_bangumi b-lazy" data-bangumiid="681"
+            data-bangumiindex="1" data-showsubscribed="false"></span>
+      <div class="an-info">
+        <div class="an-info-group">
+          <div class="date-text">2026/07/23 更新</div>
+          <a href="/Home/Bangumi/681" target="_blank" class="an-text"
+             title="哆啦A梦">哆啦A梦</a>
+        </div>
+      </div>
+    </li>
+  </ul></div>
+</div>
+"""
+
 MIKAN_MODERN_DETAIL_HTML = """
 <!doctype html><html><head>
 <meta charset="utf-8">
@@ -156,6 +177,24 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(
             item["cover_url"],
             "https://mikanani.me/images/Bangumi/202604/edeef072.jpg?width=400&height=400&format=webp",
+        )
+
+
+    def test_mikan_catalog_supports_official_desktop_span_cover(self) -> None:
+        rows = parse_mikan_catalog_html(
+            MIKAN_OFFICIAL_DESKTOP_CARD_HTML,
+            "https://mikanani.me",
+            year=2026,
+            season="夏",
+        )
+        item = rows[0]["items"][0]
+        self.assertEqual(rows[0]["weekday"], "星期五")
+        self.assertEqual(item["bangumi_id"], 681)
+        self.assertEqual(item["title"], "哆啦A梦")
+        self.assertEqual(item["update_at"], "2026/07/23 更新")
+        self.assertEqual(
+            item["cover_url"],
+            "https://mikanani.me/images/Bangumi/200504/1df90634.jpg?width=400&height=400&format=webp",
         )
 
     def test_mikan_search_extracts_unique_bangumi(self) -> None:

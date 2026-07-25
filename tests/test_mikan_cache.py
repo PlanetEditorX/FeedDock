@@ -119,7 +119,7 @@ class MikanCacheTests(unittest.TestCase):
         self.assertEqual(migrated["cache_status"], "cache_migrated")
         self.assertEqual(cached["cache_status"], "cache")
         assert row is not None
-        self.assertEqual(json.loads(row.params_json)["schema_version"], 2)
+        self.assertEqual(json.loads(row.params_json)["schema_version"], 3)
 
     def test_force_refresh_replaces_catalog_cache(self) -> None:
         with self.Session() as db:

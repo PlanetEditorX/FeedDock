@@ -336,14 +336,27 @@ def _extract_image_candidate(node: _HtmlNode) -> str:
 
 
 def _catalog_container(node: _HtmlNode, boundary: _HtmlNode) -> _HtmlNode:
+    """Return the complete card node that contains both metadata and cover.
+
+    Mikan's official desktop catalog places the title link inside
+    ``div.an-info-group`` while the cover is a sibling ``span[data-src]``
+    directly under the surrounding ``li``.  Stopping at ``an-info-group``
+    therefore loses the cover.  Prefer an ancestor ``li`` when present, but
+    retain the nearest known card container as a fallback for fragments that
+    do not use list items.
+    """
+
     current: _HtmlNode | None = node
     closest = node
+    fallback: _HtmlNode | None = None
     while current is not None and current is not boundary:
         closest = current
-        if current.tag == "li" or current.classes() & _CATALOG_CONTAINER_CLASSES:
+        if current.tag == "li":
             return current
+        if fallback is None and current.classes() & _CATALOG_CONTAINER_CLASSES:
+            fallback = current
         current = current.parent
-    return closest
+    return fallback or closest
 
 
 def _subgroup_id(node: _HtmlNode) -> int | None:
