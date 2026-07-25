@@ -24,8 +24,10 @@ from .rss_service import (
 )
 from .runtime_config import (
     get_app_setting,
+    load_mikan_hidden_filters,
     load_qbittorrent_config,
     reset_qbittorrent_config,
+    save_mikan_weekday_hidden_filter,
     save_qbittorrent_config,
     set_app_setting,
 )
@@ -40,6 +42,8 @@ from .schemas import (
     LogOut,
     MikanBangumiDetailOut,
     MikanCatalogOut,
+    MikanWeekdayFilterOut,
+    MikanWeekdayFilterUpdate,
     QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
@@ -91,6 +95,41 @@ def _subscription_values(payload: SubscriptionCreate | SubscriptionUpdate | Subs
         values["include_keywords"] = ""
     return values
 
+
+
+def _apply_mikan_hidden_filters(
+    payload: dict[str, Any],
+    db: Session,
+    *,
+    year: int,
+    season: str,
+) -> dict[str, Any]:
+    """Annotate cached catalog items with local hidden state.
+
+    Items remain in the API response so the browser can enter edit mode and
+    restore them without another Mikan request. Normal display filtering is
+    performed locally by the UI.
+    """
+
+    filters = load_mikan_hidden_filters(db, year=year, season=season)
+    total_hidden = 0
+    for row in payload.get("rows", []):
+        weekday = str(row.get("weekday", "")).strip()
+        hidden_ids = filters.get(weekday, set())
+        row_hidden = 0
+        for item in row.get("items", []):
+            try:
+                bangumi_id = int(item.get("bangumi_id", 0))
+            except (TypeError, ValueError):
+                bangumi_id = 0
+            hidden = bangumi_id in hidden_ids
+            item["hidden"] = hidden
+            if hidden:
+                row_hidden += 1
+        row["hidden_count"] = row_hidden
+        total_hidden += row_hidden
+    payload["hidden_count"] = total_hidden
+    return payload
 
 def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
     output = SubscriptionOut.model_validate(subscription)
@@ -274,7 +313,8 @@ def mikan_catalog(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        return MikanCacheService(DiscoveryService()).catalog(db, year, season, q)
+        payload = MikanCacheService(DiscoveryService()).catalog(db, year, season, q)
+        return _apply_mikan_hidden_filters(payload, db, year=year, season=season)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -293,13 +333,41 @@ def refresh_mikan_catalog(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        return MikanCacheService(DiscoveryService()).catalog(
+        payload = MikanCacheService(DiscoveryService()).catalog(
             db, year, season, q, force_refresh=True
         )
+        return _apply_mikan_hidden_filters(payload, db, year=year, season=season)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Mikan 强制更新失败：{exc}") from exc
+
+
+@app.put(
+    "/api/discovery/mikan/catalog/filters",
+    response_model=MikanWeekdayFilterOut,
+    dependencies=[Depends(require_admin)],
+)
+def update_mikan_weekday_filter(
+    payload: MikanWeekdayFilterUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        hidden_ids = save_mikan_weekday_hidden_filter(
+            db,
+            year=payload.year,
+            season=payload.season,
+            weekday=payload.weekday,
+            hidden_bangumi_ids=payload.hidden_bangumi_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "year": payload.year,
+        "season": payload.season,
+        "weekday": payload.weekday,
+        "hidden_bangumi_ids": sorted(hidden_ids),
+    }
 
 
 @app.get(

@@ -262,12 +262,14 @@ class MikanCatalogItemOut(BaseModel):
     update_at: str = ""
     detail_url: str
     base_url: str
+    hidden: bool = False
 
 
 class MikanCatalogRowOut(BaseModel):
     weekday: str
     day_of_week: int | None = None
     items: list[MikanCatalogItemOut] = Field(default_factory=list)
+    hidden_count: int = 0
 
 
 class MikanCatalogOut(BaseModel):
@@ -284,6 +286,31 @@ class MikanCatalogOut(BaseModel):
     refresh_interval_hours: int = 6
     is_stale: bool = False
     refresh_error: str = ""
+    hidden_count: int = 0
+
+
+class MikanWeekdayFilterUpdate(BaseModel):
+    year: int = Field(ge=2000, le=2100)
+    season: str = Field(pattern="^(冬|春|夏|秋)$")
+    weekday: str = Field(min_length=1, max_length=40)
+    hidden_bangumi_ids: list[int] = Field(default_factory=list, max_length=2000)
+
+    @field_validator("weekday")
+    @classmethod
+    def normalize_weekday(cls, value: str) -> str:
+        return " ".join(value.split()).strip()
+
+    @field_validator("hidden_bangumi_ids")
+    @classmethod
+    def normalize_hidden_ids(cls, values: list[int]) -> list[int]:
+        return sorted({value for value in values if value > 0})
+
+
+class MikanWeekdayFilterOut(BaseModel):
+    year: int
+    season: str
+    weekday: str
+    hidden_bangumi_ids: list[int] = Field(default_factory=list)
 
 
 class MikanGroupOut(BaseModel):

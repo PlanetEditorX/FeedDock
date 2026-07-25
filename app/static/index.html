@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.7.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.8.0">
 </head>
 <body>
   <header class="topbar">
@@ -97,7 +97,7 @@
       </form>
       <p id="mikanCatalogState" class="hint">首次没有缓存时会请求一次 Mikan；之后页面只读缓存，已浏览季度默认每 6 小时后台更新一次。</p>
       <div id="mikanCatalog" class="mikan-catalog"></div>
-      <p class="hint">标题搜索只过滤本地季度缓存，不会再次访问 Mikan。番剧字幕组详情同样会缓存；需要立即更新时使用“强制更新”按钮。</p>
+      <p class="hint">标题搜索只过滤本地季度缓存，不会再次访问 Mikan。每个星期可进入“编辑过滤”模式，隐藏设置保存在 FeedDock 数据库中；需要立即更新目录时使用“强制更新”按钮。</p>
     </section>
 
     <section class="panel">
@@ -234,6 +234,6 @@
     </section>
   </div>
 
-  <script src="/static/app.js?v=1.7.1" defer></script>
+  <script src="/static/app.js?v=1.8.0" defer></script>
 </body>
 </html>

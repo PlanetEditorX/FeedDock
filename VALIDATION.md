@@ -1,8 +1,8 @@
-# FeedDock v1.7.1 验证报告
+# FeedDock v1.8.0 验证报告
 
 ## 结论
 
-FeedDock v1.7.1 已通过 51 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
+FeedDock v1.8.0 已通过 54 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Docker Compose / GitHub Actions YAML 解析检查。
 
 
 ## Mikan 封面域名修复
@@ -60,7 +60,7 @@ FeedDock v1.7.1 已通过 51 项自动化测试，并完成 Python 编译、Java
 - 页面显示缓存时间和下次后台刷新时间。
 - 标题搜索使用同一季度缓存。
 - 番剧弹窗提供单独的“强制更新字幕组”按钮。
-- 静态资源版本已更新为 1.7.1，避免飞牛浏览器使用旧 JavaScript。
+- 静态资源版本已更新为 1.8.0，避免飞牛浏览器使用旧 JavaScript。
 
 ## 飞牛部署
 
@@ -94,3 +94,11 @@ MIKAN_IMAGE_CACHE_DAYS: "7"
 ## 测试边界
 
 当前构建环境不能直接访问线上 Mikan。来源解析测试使用符合当前页面结构的 HTML 样本和 `httpx.MockTransport`；缓存层使用临时 SQLite、模拟来源客户端和临时磁盘目录完成真实读写验证。
+
+
+## v1.8.0 新增验证
+
+- 按星期保存隐藏番剧并保持其他星期不变。
+- 清空某星期过滤后可恢复显示。
+- API 目录保留隐藏项目并附加 `hidden` 状态，编辑模式无需再次请求 Mikan。
+- 前端包含编辑、保存、取消和本周全部显示操作。

@@ -147,8 +147,11 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .mikan-weekday-section { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
 .mikan-weekday-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .mikan-weekday-head h3 { margin: 0; font-size: 16px; }
+.mikan-weekday-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; min-width: 0; }
+.mikan-weekday-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mikan-weekday-section.is-filter-editing { border-color: var(--accent); }
 .mikan-anime-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1px; background: var(--line); }
-.mikan-anime-card { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px; min-height: 98px; padding: 12px; border: 0; border-radius: 0; background: var(--panel); color: var(--text); text-align: left; font-weight: 400; }
+.mikan-anime-card { position: relative; display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px; min-height: 98px; padding: 12px; border: 0; border-radius: 0; background: var(--panel); color: var(--text); text-align: left; font-weight: 400; }
 .mikan-anime-card:hover { filter: none; background: #1c2430; }
 .mikan-anime-card:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
 .mikan-cover { width: 66px; height: 88px; display: grid; place-items: center; overflow: hidden; border-radius: 7px; background: var(--panel-2); color: var(--muted); font-size: 24px; font-weight: 800; }
@@ -156,6 +159,12 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .mikan-anime-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
 .mikan-anime-info strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-height: 1.42; }
 .catalog-card-action { margin-top: auto; color: var(--accent); font-size: 12px; }
+.mikan-anime-card.is-filter-editing { cursor: pointer; padding-top: 42px; }
+.mikan-anime-card.is-filter-hidden { opacity: .48; background: #111820; }
+.mikan-anime-card.is-filter-hidden::after { content: "将隐藏"; position: absolute; right: 10px; bottom: 9px; padding: 2px 7px; border-radius: 999px; color: #ffb4b4; background: rgba(218, 54, 51, .18); font-size: 11px; font-weight: 700; }
+.mikan-filter-check { position: absolute; top: 10px; right: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: rgba(13, 17, 23, .9); color: var(--text); font-size: 12px; cursor: pointer; }
+.mikan-filter-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.mikan-weekday-empty { grid-column: 1 / -1; margin: 0; padding: 22px 16px; background: var(--panel); color: var(--muted); text-align: center; }
 
 .modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .74); backdrop-filter: blur(4px); }
@@ -184,6 +193,8 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
   .mikan-rss-row, .mikan-detail-summary { align-items: flex-start; flex-direction: column; }
   .mikan-rss-row .card-actions { width: 100%; }
   .mikan-anime-grid { grid-template-columns: 1fr; }
+  .mikan-weekday-head { align-items: flex-start; flex-direction: column; }
+  .mikan-weekday-actions { width: 100%; justify-content: flex-start; }
 }
 .modal.hidden { display: none; }
 .cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }

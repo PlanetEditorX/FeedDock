@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from urllib.parse import urlparse
 
 from sqlalchemy import delete, select
@@ -188,3 +189,85 @@ def set_app_setting(db: Session, key: str, value: str) -> str:
         db.add(AppSetting(key=key, value=value))
     db.commit()
     return value
+
+
+_MIKAN_HIDDEN_FILTER_PREFIX = "mikan_hidden_catalog"
+
+
+def _mikan_hidden_filter_key(year: int, season: str) -> str:
+    return f"{_MIKAN_HIDDEN_FILTER_PREFIX}:{year}:{season}"
+
+
+def load_mikan_hidden_filters(
+    db: Session,
+    *,
+    year: int,
+    season: str,
+) -> dict[str, set[int]]:
+    """Load locally hidden Mikan titles grouped by weekday.
+
+    The value is stored in the existing app_settings table, so existing fnOS
+    installations need no schema migration. Invalid or manually damaged JSON is
+    ignored instead of preventing the catalog from loading.
+    """
+
+    raw = get_app_setting(_mikan_hidden_filter_key(year, season), "{}", db)
+    try:
+        parsed = json.loads(raw or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    result: dict[str, set[int]] = {}
+    for weekday, values in parsed.items():
+        if not isinstance(weekday, str) or not isinstance(values, list):
+            continue
+        ids: set[int] = set()
+        for value in values:
+            try:
+                bangumi_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if bangumi_id > 0:
+                ids.add(bangumi_id)
+        if ids:
+            result[weekday] = ids
+    return result
+
+
+def save_mikan_weekday_hidden_filter(
+    db: Session,
+    *,
+    year: int,
+    season: str,
+    weekday: str,
+    hidden_bangumi_ids: list[int] | set[int],
+) -> set[int]:
+    """Replace one weekday's hidden list while preserving every other weekday."""
+
+    cleaned_weekday = " ".join((weekday or "").split()).strip()
+    if not cleaned_weekday or len(cleaned_weekday) > 40:
+        raise ValueError("星期名称无效")
+
+    cleaned_ids = {int(value) for value in hidden_bangumi_ids if int(value) > 0}
+    if len(cleaned_ids) > 2000:
+        raise ValueError("单个星期最多保存 2000 个隐藏番剧")
+
+    filters = load_mikan_hidden_filters(db, year=year, season=season)
+    if cleaned_ids:
+        filters[cleaned_weekday] = cleaned_ids
+    else:
+        filters.pop(cleaned_weekday, None)
+
+    serializable = {
+        name: sorted(values)
+        for name, values in sorted(filters.items())
+        if values
+    }
+    set_app_setting(
+        db,
+        _mikan_hidden_filter_key(year, season),
+        json.dumps(serializable, ensure_ascii=False, separators=(",", ":")),
+    )
+    return cleaned_ids

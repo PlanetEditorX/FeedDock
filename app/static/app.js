@@ -3,6 +3,8 @@ const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 let subscriptionsById = new Map();
 let currentMikanDetailItem = null;
+let currentMikanCatalogData = null;
+const mikanWeekdayDrafts = new Map();
 
 function showNotice(message, ok = true) {
   notice.textContent = message;
@@ -371,11 +373,17 @@ async function openMikanDetail(item, forceRefresh = false) {
   }
 }
 
-function createMikanCard(item) {
-  const card = document.createElement('button');
-  card.type = 'button';
+function mikanWeekdayKey(data, row) {
+  return `${data.year}|${data.season}|${row.weekday}`;
+}
+
+function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle = null } = {}) {
+  const card = document.createElement(editing ? 'article' : 'button');
+  if (!editing) card.type = 'button';
   card.className = 'mikan-anime-card';
-  card.addEventListener('click', () => openMikanDetail(item));
+  if (editing) card.classList.add('is-filter-editing');
+  if (hiddenDraft) card.classList.add('is-filter-hidden');
+  if (!editing) card.addEventListener('click', () => openMikanDetail(item));
 
   const cover = document.createElement('div');
   cover.className = 'mikan-cover';
@@ -401,17 +409,72 @@ function createMikanCard(item) {
   info.className = 'mikan-anime-info';
   info.append(text('strong', item.title));
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
-  info.append(text('span', '点击查看字幕组 RSS', 'catalog-card-action'));
+  info.append(text(
+    'span',
+    editing ? (hiddenDraft ? '保存后隐藏' : '当前显示') : '点击查看字幕组 RSS',
+    'catalog-card-action',
+  ));
   card.append(cover, info);
+
+  if (editing) {
+    const label = document.createElement('label');
+    label.className = 'mikan-filter-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = hiddenDraft;
+    checkbox.setAttribute('aria-label', `隐藏 ${item.title}`);
+    const caption = text('span', '隐藏');
+    const applyValue = () => {
+      card.classList.toggle('is-filter-hidden', checkbox.checked);
+      const action = card.querySelector('.catalog-card-action');
+      if (action) action.textContent = checkbox.checked ? '保存后隐藏' : '当前显示';
+      if (onToggle) onToggle(checkbox.checked);
+    };
+    checkbox.addEventListener('change', applyValue);
+    card.addEventListener('click', (event) => {
+      if (event.target === checkbox || event.target === label || label.contains(event.target)) return;
+      checkbox.checked = !checkbox.checked;
+      applyValue();
+    });
+    label.append(checkbox, caption);
+    card.append(label);
+  }
   return card;
 }
 
+async function saveMikanWeekdayFilter(data, row, hiddenIds) {
+  const result = await api('/api/discovery/mikan/catalog/filters', {
+    method: 'PUT',
+    body: JSON.stringify({
+      year: data.year,
+      season: data.season,
+      weekday: row.weekday,
+      hidden_bangumi_ids: [...hiddenIds].sort((a, b) => a - b),
+    }),
+  });
+  const saved = new Set(result.hidden_bangumi_ids || []);
+  row.items.forEach((item) => { item.hidden = saved.has(Number(item.bangumi_id)); });
+  row.hidden_count = row.items.filter((item) => item.hidden).length;
+  data.hidden_count = data.rows.reduce(
+    (sum, currentRow) => sum + currentRow.items.filter((item) => item.hidden).length,
+    0,
+  );
+  return saved;
+}
+
 function renderMikanCatalog(data) {
+  currentMikanCatalogData = data;
   const container = document.getElementById('mikanCatalog');
   const state = document.getElementById('mikanCatalogState');
   container.replaceChildren();
-  const count = data.rows.reduce((sum, row) => sum + row.items.length, 0);
-  if (!count) {
+
+  const totalCount = data.rows.reduce((sum, row) => sum + row.items.length, 0);
+  const hiddenCount = data.rows.reduce(
+    (sum, row) => sum + row.items.filter((item) => item.hidden).length,
+    0,
+  );
+  const visibleCount = totalCount - hiddenCount;
+  if (!totalCount) {
     const emptyMessage = data.query
       ? `${data.year} ${data.season}没有匹配“${data.query}”的番剧。`
       : `${data.year} ${data.season}没有解析到番剧。`;
@@ -420,18 +483,112 @@ function renderMikanCatalog(data) {
     return;
   }
 
-  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · ${count} 部番剧 · ${cacheStatusText(data)}`;
+  const hiddenSummary = hiddenCount ? ` · 已隐藏 ${hiddenCount} 部` : '';
+  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}`;
   state.className = 'hint';
+
   for (const row of data.rows) {
+    const key = mikanWeekdayKey(data, row);
+    const editing = mikanWeekdayDrafts.has(key);
+    const draft = mikanWeekdayDrafts.get(key) || new Set();
+    const hiddenInRow = row.items.filter((item) => item.hidden).length;
+    const visibleItems = editing ? row.items : row.items.filter((item) => !item.hidden);
+
     const section = document.createElement('section');
     section.className = 'mikan-weekday-section';
+    if (editing) section.classList.add('is-filter-editing');
+
     const heading = document.createElement('div');
     heading.className = 'mikan-weekday-head';
-    heading.append(text('h3', row.weekday));
-    heading.append(text('span', `${row.items.length} 部`, 'muted'));
+    const titleBox = document.createElement('div');
+    titleBox.className = 'mikan-weekday-title';
+    titleBox.append(text('h3', row.weekday));
+    const countText = editing
+      ? `${row.items.length} 部 · 已选择隐藏 ${draft.size} 部`
+      : `${row.items.length - hiddenInRow} 部显示${hiddenInRow ? ` · ${hiddenInRow} 部已隐藏` : ''}`;
+    titleBox.append(text('span', countText, 'muted'));
+
+    const actions = document.createElement('div');
+    actions.className = 'mikan-weekday-actions';
+    if (editing) {
+      const showAll = text('button', '本周全部显示', 'small secondary');
+      showAll.type = 'button';
+      showAll.addEventListener('click', async () => {
+        showAll.disabled = true;
+        try {
+          await saveMikanWeekdayFilter(data, row, new Set());
+          mikanWeekdayDrafts.delete(key);
+          renderMikanCatalog(data);
+          showNotice(`${row.weekday}的全部番剧已恢复显示`);
+        } catch (error) {
+          showNotice(error.message, false);
+          showAll.disabled = false;
+        }
+      });
+
+      const cancel = text('button', '取消', 'small secondary');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => {
+        mikanWeekdayDrafts.delete(key);
+        renderMikanCatalog(data);
+      });
+
+      const save = text('button', '保存过滤', 'small');
+      save.type = 'button';
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          await saveMikanWeekdayFilter(data, row, draft);
+          mikanWeekdayDrafts.delete(key);
+          renderMikanCatalog(data);
+          showNotice(`${row.weekday}过滤设置已保存`);
+        } catch (error) {
+          showNotice(error.message, false);
+          save.disabled = false;
+        }
+      });
+      actions.append(showAll, cancel, save);
+    } else {
+      const edit = text('button', '编辑过滤', 'small secondary');
+      edit.type = 'button';
+      edit.disabled = Boolean(data.query);
+      if (data.query) edit.title = '请先清空标题搜索，再编辑完整星期过滤';
+      edit.addEventListener('click', () => {
+        mikanWeekdayDrafts.set(
+          key,
+          new Set(row.items.filter((item) => item.hidden).map((item) => Number(item.bangumi_id))),
+        );
+        renderMikanCatalog(data);
+      });
+      actions.append(edit);
+    }
+    heading.append(titleBox, actions);
+
     const grid = document.createElement('div');
     grid.className = 'mikan-anime-grid';
-    row.items.forEach((item) => grid.append(createMikanCard(item)));
+    if (!visibleItems.length) {
+      const empty = text(
+        'p',
+        editing
+          ? '本周没有番剧。'
+          : `本周 ${hiddenInRow} 部番剧已全部隐藏，点击“编辑过滤”可以恢复。`,
+        'mikan-weekday-empty',
+      );
+      grid.append(empty);
+    } else {
+      visibleItems.forEach((item) => {
+        const bangumiId = Number(item.bangumi_id);
+        grid.append(createMikanCard(item, {
+          editing,
+          hiddenDraft: draft.has(bangumiId),
+          onToggle: (hidden) => {
+            if (hidden) draft.add(bangumiId);
+            else draft.delete(bangumiId);
+            renderMikanCatalog(data);
+          },
+        }));
+      });
+    }
     section.append(heading, grid);
     container.append(section);
   }
@@ -454,6 +611,7 @@ function initializeCatalogSelectors() {
 }
 
 async function loadMikanCatalog(form, forceRefresh = false) {
+  mikanWeekdayDrafts.clear();
   const loadButton = document.getElementById('loadMikanCatalog');
   const refreshButton = document.getElementById('forceRefreshMikanCatalog');
   const activeButton = forceRefresh ? refreshButton : loadButton;
@@ -689,6 +847,8 @@ document.getElementById('clearMikanCatalog').addEventListener('click', () => {
   const form = document.getElementById('mikanCatalogForm');
   form.elements.query.value = '';
   document.getElementById('mikanCatalog').replaceChildren();
+  currentMikanCatalogData = null;
+  mikanWeekdayDrafts.clear();
   const state = document.getElementById('mikanCatalogState');
   state.textContent = '已清空。点击“读取缓存”加载所选季度；只有“强制更新”会访问 Mikan。';
   state.className = 'hint';

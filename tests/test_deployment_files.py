@@ -124,5 +124,19 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("dmhy", discovery)
         self.assertNotIn("dmhy", config)
 
+
+    def test_mikan_catalog_has_persistent_per_week_filtering(self) -> None:
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        runtime = (ROOT / "app/runtime_config.py").read_text(encoding="utf-8")
+        self.assertIn("编辑过滤", script)
+        self.assertIn("保存过滤", script)
+        self.assertIn("本周全部显示", script)
+        self.assertIn("/api/discovery/mikan/catalog/filters", script)
+        self.assertIn("mikan-filter-check", styles)
+        self.assertIn("def update_mikan_weekday_filter", main)
+        self.assertIn("save_mikan_weekday_hidden_filter", runtime)
+
 if __name__ == "__main__":
     unittest.main()

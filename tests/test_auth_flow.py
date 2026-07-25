@@ -109,6 +109,35 @@ class AuthFlowTests(unittest.TestCase):
                 self.assertEqual(forced_catalog.status_code, 200, forced_catalog.text)
                 self.assertEqual(discovery_factory.return_value.catalog.call_count, 2)
 
+                saved_filter = client.put(
+                    "/api/discovery/mikan/catalog/filters",
+                    json={
+                        "year": 2026,
+                        "season": "夏",
+                        "weekday": "星期一",
+                        "hidden_bangumi_ids": [3822],
+                    },
+                )
+                self.assertEqual(saved_filter.status_code, 200, saved_filter.text)
+                filtered_catalog = client.get(
+                    "/api/discovery/mikan/catalog",
+                    params={"year": 2026, "season": "夏"},
+                )
+                self.assertEqual(filtered_catalog.status_code, 200, filtered_catalog.text)
+                self.assertTrue(filtered_catalog.json()["rows"][0]["items"][0]["hidden"])
+                self.assertEqual(filtered_catalog.json()["hidden_count"], 1)
+
+                restored_filter = client.put(
+                    "/api/discovery/mikan/catalog/filters",
+                    json={
+                        "year": 2026,
+                        "season": "夏",
+                        "weekday": "星期一",
+                        "hidden_bangumi_ids": [],
+                    },
+                )
+                self.assertEqual(restored_filter.status_code, 200, restored_filter.text)
+
                 discovery_factory.return_value.search.return_value = {
                     "query": "金牌得主",
                     "provider": "mikan",
