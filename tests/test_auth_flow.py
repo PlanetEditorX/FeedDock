@@ -1,13 +1,14 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 _TEST_DATA = tempfile.TemporaryDirectory()
 os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.4.0"
+os.environ["APP_VERSION"] = "1.5.0"
 
 from fastapi.testclient import TestClient
 
@@ -62,6 +63,55 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(home.status_code, 200)
             self.assertIn("系统与更新", home.text)
             self.assertIn("qBittorrent 下载器", home.text)
+            self.assertIn("搜索并添加番剧", home.text)
+
+            with patch("app.main.DiscoveryService") as discovery_factory:
+                discovery_factory.return_value.search.return_value = {
+                    "query": "金牌得主",
+                    "provider": "mikan",
+                    "results": [
+                        {
+                            "provider": "mikan",
+                            "result_type": "bangumi",
+                            "id": "mikan-bangumi-3822",
+                            "title": "金牌得主 第二季",
+                            "base_url": "https://mikan.test",
+                            "bangumi_id": 3822,
+                        }
+                    ],
+                    "errors": [],
+                }
+                search = client.get(
+                    "/api/discovery/search",
+                    params={"q": "金牌得主", "provider": "mikan"},
+                )
+                self.assertEqual(search.status_code, 200, search.text)
+                self.assertEqual(search.json()["results"][0]["bangumi_id"], 3822)
+
+                discovery_factory.return_value.mikan_detail.return_value = {
+                    "provider": "mikan",
+                    "bangumi_id": 3822,
+                    "title": "金牌得主 第二季",
+                    "base_url": "https://mikan.test",
+                    "detail_url": "https://mikan.test/Home/Bangumi/3822",
+                    "groups": [
+                        {
+                            "subgroup_id": 370,
+                            "name": "LoliHouse",
+                            "rss_url": "https://mikan.test/RSS/Bangumi?bangumiId=3822&subgroupid=370",
+                            "preset": {
+                                "name": "金牌得主 第二季",
+                                "rss_url": "https://mikan.test/RSS/Bangumi?bangumiId=3822&subgroupid=370",
+                            },
+                        }
+                    ],
+                }
+                detail = client.get(
+                    "/api/discovery/mikan/3822",
+                    params={"base_url": "https://mikan.test", "title": "金牌得主 第二季"},
+                )
+                self.assertEqual(detail.status_code, 200, detail.text)
+                self.assertEqual(detail.json()["groups"][0]["name"], "LoliHouse")
 
             created_subscription = client.post(
                 "/api/subscriptions",

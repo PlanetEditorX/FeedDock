@@ -45,6 +45,9 @@ class Settings:
     watchtower_token: str
     deployed_image: str
     update_github_token: str
+    mikan_base_url: str
+    mikan_fallback_urls: tuple[str, ...]
+    dmhy_base_url: str
 
 
 def load_settings() -> Settings:
@@ -54,7 +57,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.4.0"),
+        app_version=os.getenv("APP_VERSION", "1.5.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -65,7 +68,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.4 (+self-hosted RSS automation)",
+            "FeedDock/1.5 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -79,6 +82,16 @@ def load_settings() -> Settings:
         watchtower_token=os.getenv("WATCHTOWER_TOKEN", ""),
         deployed_image=os.getenv("FEEDDOCK_IMAGE", "ghcr.io/planeteditorx/feeddock:latest").strip(),
         update_github_token=os.getenv("UPDATE_GITHUB_TOKEN", "").strip(),
+        mikan_base_url=os.getenv("MIKAN_BASE_URL", "https://mikanime.tv").strip().rstrip("/"),
+        mikan_fallback_urls=tuple(
+            value.strip().rstrip("/")
+            for value in os.getenv(
+                "MIKAN_FALLBACK_URLS",
+                "https://mikanani.me,https://mikanani.kas.pub",
+            ).split(",")
+            if value.strip()
+        ),
+        dmhy_base_url=os.getenv("DMHY_BASE_URL", "https://share.dmhy.org").strip().rstrip("/"),
     )
 
 

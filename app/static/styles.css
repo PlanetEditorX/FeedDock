@@ -120,3 +120,21 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .preview-box.bad { color: var(--bad); border-color: var(--bad); }
 .subscription-meta { display: grid; gap: 4px; margin: 10px 0; padding: 10px; border-radius: 8px; background: var(--panel); }
 .subscription-meta span { color: var(--muted); }
+.discovery-results { display: grid; gap: 12px; margin-top: 16px; }
+.discovery-card { border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: var(--bg); overflow: hidden; }
+.discovery-title { display: flex; align-items: flex-start; gap: 10px; }
+.discovery-title h3 { margin: 0; flex: 1; font-size: 16px; }
+.provider-badge { flex: 0 0 auto; display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 750; border: 1px solid currentColor; }
+.provider-badge.mikan { color: #ff9f43; }
+.provider-badge.dmhy { color: #7ee787; }
+.discovery-meta { display: grid; gap: 4px; margin-top: 8px; color: var(--muted); overflow-wrap: anywhere; }
+.discovery-group-box { margin-top: 12px; }
+.discovery-group-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.discovery-groups { display: grid; gap: 8px; }
+.discovery-group { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.discovery-group > div:first-child { display: grid; gap: 3px; }
+.discovery-group .card-actions { margin-top: 0; align-items: center; }
+.discovery-group .card-actions a { white-space: nowrap; }
+@media (max-width: 640px) {
+  .discovery-title, .discovery-group, .discovery-group-head { align-items: flex-start; flex-direction: column; }
+}

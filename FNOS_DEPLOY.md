@@ -104,7 +104,7 @@ http://飞牛IP:7789/health
 
 ## 五、更新
 
-GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.4.0` 时，会自动发布 `v1.4.0`。相同版本重复构建不会重复创建。
+GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.5.0` 时，会自动发布 `v1.5.0`。相同版本重复构建不会重复创建。
 
 当前默认配置支持在 FeedDock 页面检查 GitHub Release 是否有新版本：
 
@@ -143,6 +143,27 @@ WATCHTOWER_TOKEN: ""
 
 ## 手动检查更新与高级订阅
 
-FeedDock v1.4.0 不会在页面打开或订阅轮询时自动访问 GitHub。需要检查时，手动点击顶部“检查更新”。如果公网 IP 的 GitHub API 限额已用完，等待提示的恢复时间后再点。可选在 Compose 的环境变量中填写 `UPDATE_GITHUB_TOKEN` 提高限额。
+FeedDock v1.5.0 不会在页面打开或订阅轮询时自动访问 GitHub。需要检查时，手动点击顶部“检查更新”。如果公网 IP 的 GitHub API 限额已用完，等待提示的恢复时间后再点。可选在 Compose 的环境变量中填写 `UPDATE_GITHUB_TOKEN` 提高限额。
 
 添加订阅页面现已支持主/备用 RSS、日期、季、集数偏移、总集数、正则捕获组、自定义下载路径、遗漏检测和只下载最新集。保存前先使用“预览规则和路径”。旧数据目录会自动迁移，无需删除 `/vol1/1000/应用/feeddock/data`。
+
+
+## 七、搜索并选择番剧
+
+v1.5.0 起，首页新增“搜索并添加番剧”：
+
+1. 输入番剧名称，例如 `金牌得主`。
+2. 来源可选择 Mikan、动漫花园或同时搜索。
+3. Mikan：先点番剧，再选择字幕组，系统会把专用 RSS 填入订阅表单。
+4. 动漫花园：选择关键词 RSS 或某条发布，系统会把 RSS 和样本标题填入订阅表单。
+5. 在订阅表单继续填写分辨率、字幕、排除、集数偏移和下载路径，预览后保存。
+
+搜索只在点击按钮时执行，不会后台自动访问站点。飞牛默认 Compose 已加入：
+
+```yaml
+MIKAN_BASE_URL: "https://mikanime.tv"
+MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
+DMHY_BASE_URL: "https://share.dmhy.org"
+```
+
+若提示某个来源无法访问，可以在 Compose 中替换为当前网络可访问的镜像地址，然后重新部署。修改这些地址不会影响现有数据库和订阅。

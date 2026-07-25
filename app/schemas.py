@@ -204,3 +204,68 @@ class QBittorrentSettingsUpdate(BaseModel):
     @classmethod
     def strip_qbit_text(cls, value: str) -> str:
         return value.strip()
+
+
+class DiscoverySubscriptionPresetOut(BaseModel):
+    name: str
+    reference_title: str = ""
+    tmdb_title: str = ""
+    bgm_url: str = ""
+    air_date: date | None = None
+    season: int = 1
+    primary_rss_name: str = ""
+    rss_url: str
+    backup_rss_name: str = ""
+    backup_rss_url: str | None = None
+    include_keywords: str = ""
+    exclude_keywords: str = ""
+    episode_regex: str = ""
+    episode_group: int = 0
+    episode_offset: int = 0
+    total_episodes: int = 0
+    save_path_template: str = "{base}/{subscription}/Season {season}"
+    custom_download_path: str = ""
+    missing_detection: bool = False
+    only_latest: bool = False
+    enabled: bool = True
+    sample_title: str = ""
+
+
+class DiscoveryResultOut(BaseModel):
+    provider: str
+    result_type: str
+    id: str
+    title: str
+    description: str = ""
+    detail_url: str = ""
+    rss_url: str = ""
+    source_url: str = ""
+    published_at: str = ""
+    download_url: str = ""
+    base_url: str = ""
+    bangumi_id: int | None = None
+    preset: DiscoverySubscriptionPresetOut | None = None
+
+
+class DiscoverySearchOut(BaseModel):
+    query: str
+    provider: str
+    results: list[DiscoveryResultOut] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class MikanGroupOut(BaseModel):
+    subgroup_id: int
+    name: str
+    rss_url: str
+    detail_url: str = ""
+    preset: DiscoverySubscriptionPresetOut
+
+
+class MikanBangumiDetailOut(BaseModel):
+    provider: str = "mikan"
+    bangumi_id: int
+    title: str
+    base_url: str
+    detail_url: str
+    groups: list[MikanGroupOut] = Field(default_factory=list)

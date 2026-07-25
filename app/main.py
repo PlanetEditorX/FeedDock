@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .downloader import QBittorrentClient
+from .discovery import DiscoveryService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .rss_service import (
     calculate_missing_episodes,
@@ -31,10 +32,12 @@ from .scheduler import start_scheduler, stop_scheduler
 from .schemas import (
     AuthStatusOut,
     ChangePasswordRequest,
+    DiscoverySearchOut,
     FeedItemOut,
     GlobalRulesUpdate,
     LoginRequest,
     LogOut,
+    MikanBangumiDetailOut,
     QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
@@ -254,6 +257,40 @@ def get_global_rules(db: Session = Depends(get_db)) -> dict[str, str]:
 def update_global_rules(payload: GlobalRulesUpdate, db: Session = Depends(get_db)) -> dict[str, str]:
     value = set_app_setting(db, "global_exclude_rules", payload.exclude_rules.strip())
     return {"exclude_rules": value}
+
+
+@app.get(
+    "/api/discovery/search",
+    response_model=DiscoverySearchOut,
+    dependencies=[Depends(require_admin)],
+)
+def search_sources(
+    q: str = Query(min_length=1, max_length=200),
+    provider: str = Query(default="all", pattern="^(all|mikan|dmhy)$"),
+    limit: int = Query(default=20, ge=1, le=50),
+) -> dict[str, Any]:
+    try:
+        return DiscoveryService().search(provider, q, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/discovery/mikan/{bangumi_id}",
+    response_model=MikanBangumiDetailOut,
+    dependencies=[Depends(require_admin)],
+)
+def mikan_bangumi_detail(
+    bangumi_id: int,
+    base_url: str = Query(default="", max_length=500),
+    title: str = Query(default="", max_length=300),
+) -> dict[str, Any]:
+    try:
+        return DiscoveryService().mikan_detail(bangumi_id, base_url, title)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mikan 解析失败：{exc}") from exc
 
 
 @app.get("/api/dashboard", dependencies=[Depends(require_admin)])

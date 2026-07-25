@@ -17,6 +17,22 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
 
+    def test_fnos_compose_has_source_discovery_defaults(self) -> None:
+        compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
+        self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)
+        self.assertIn('MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"', compose)
+        self.assertIn('DMHY_BASE_URL: "https://share.dmhy.org"', compose)
+
+    def test_frontend_has_manual_source_search(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('id="sourceSearchForm"', index)
+        self.assertIn('value="mikan"', index)
+        self.assertIn('value="dmhy"', index)
+        self.assertIn("/api/discovery/search", script)
+        self.assertIn("/api/discovery/mikan/", script)
+        self.assertIn("applyDiscoveryPreset", script)
+
     def test_fnos_compose_has_first_login_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('ADMIN_USER: "admin"', compose)

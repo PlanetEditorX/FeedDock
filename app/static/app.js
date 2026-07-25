@@ -205,6 +205,175 @@ async function loadUpdateStatus(showResult = false) {
   }
 }
 
+function discoveryProviderLabel(provider) {
+  return provider === 'mikan' ? 'Mikan' : provider === 'dmhy' ? '动漫花园' : provider;
+}
+
+function applyDiscoveryPreset(preset) {
+  if (!preset) return;
+  resetSubscriptionForm();
+  const fields = [
+    'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season',
+    'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
+    'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
+    'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
+    'missing_detection', 'only_latest', 'enabled', 'sample_title',
+  ];
+  fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
+  document.getElementById('subscriptionFormTitle').textContent = `添加订阅：${preset.name || '未命名番剧'}`;
+  subscriptionPreviewBox.textContent = preset.sample_title
+    ? `已带入样本标题：${preset.sample_title}\n请点击“预览规则和路径”确认集数与保存位置。`
+    : '已带入 RSS，请补充规则后点击“预览规则和路径”。';
+  subscriptionPreviewBox.className = 'preview-box muted';
+  document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showNotice('已填入订阅表单，请确认规则和下载路径后保存');
+}
+
+function externalLink(label, href) {
+  const link = text('a', label);
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noreferrer noopener';
+  return link;
+}
+
+function renderMikanGroups(result, detail, container) {
+  container.replaceChildren();
+  const header = document.createElement('div');
+  header.className = 'discovery-group-head';
+  header.append(text('strong', `${detail.title} · ${detail.groups.length} 个字幕组`));
+  if (detail.detail_url) header.append(externalLink('打开番剧页', detail.detail_url));
+  container.append(header);
+
+  if (!detail.groups.length) {
+    container.append(text('p', '没有解析到字幕组，可打开番剧页确认站点是否调整了页面结构。', 'empty'));
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'discovery-groups';
+  for (const group of detail.groups) {
+    const item = document.createElement('div');
+    item.className = 'discovery-group';
+    const info = document.createElement('div');
+    info.append(text('strong', group.name));
+    info.append(text('span', `Subgroup ID ${group.subgroup_id}`, 'muted'));
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+    const choose = text('button', '选择并填入', 'small');
+    choose.type = 'button';
+    choose.addEventListener('click', () => applyDiscoveryPreset(group.preset));
+    actions.append(choose);
+    if (group.detail_url) actions.append(externalLink('字幕组页面', group.detail_url));
+    item.append(info, actions);
+    list.append(item);
+  }
+  container.append(list);
+}
+
+async function loadMikanGroups(result, container, button) {
+  button.disabled = true;
+  button.textContent = '正在读取字幕组…';
+  try {
+    const params = new URLSearchParams({
+      base_url: result.base_url || '',
+      title: result.title || '',
+    });
+    const detail = await api(`/api/discovery/mikan/${result.bangumi_id}?${params.toString()}`);
+    renderMikanGroups(result, detail, container);
+    button.textContent = '重新读取字幕组';
+  } catch (error) {
+    container.replaceChildren(text('p', error.message, 'error-text'));
+    button.textContent = '重试读取字幕组';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderDiscoveryResults(data) {
+  const container = document.getElementById('sourceSearchResults');
+  const state = document.getElementById('sourceSearchState');
+  container.replaceChildren();
+
+  const errorText = (data.errors || []).join('；');
+  if (!data.results.length) {
+    state.textContent = errorText || `没有找到与“${data.query}”相关的结果。`;
+    state.className = errorText ? 'hint error-text' : 'hint';
+    return;
+  }
+
+  state.textContent = `找到 ${data.results.length} 项结果${errorText ? `；部分来源失败：${errorText}` : ''}`;
+  state.className = errorText ? 'hint error-text' : 'hint';
+
+  for (const result of data.results) {
+    const card = document.createElement('article');
+    card.className = 'discovery-card';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'discovery-title';
+    titleRow.append(text('span', discoveryProviderLabel(result.provider), `provider-badge ${result.provider}`));
+    titleRow.append(text('h3', result.title));
+    card.append(titleRow);
+
+    if (result.description) card.append(text('p', result.description, 'muted'));
+    const meta = document.createElement('div');
+    meta.className = 'discovery-meta';
+    if (result.published_at) meta.append(text('span', `发布时间：${fmtDate(result.published_at)}`));
+    if (result.rss_url) meta.append(text('span', `RSS：${result.rss_url}`));
+    card.append(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+    if (result.result_type === 'bangumi' && result.bangumi_id) {
+      const choose = text('button', '选择字幕组');
+      choose.type = 'button';
+      const groupBox = document.createElement('div');
+      groupBox.className = 'discovery-group-box';
+      choose.addEventListener('click', () => loadMikanGroups(result, groupBox, choose));
+      actions.append(choose);
+      if (result.detail_url) actions.append(externalLink('打开 Mikan', result.detail_url));
+      card.append(actions, groupBox);
+    } else {
+      if (result.preset) {
+        const choose = text(
+          'button',
+          result.result_type === 'feed' ? '使用此关键词 RSS' : '用此条目预填',
+        );
+        choose.type = 'button';
+        choose.addEventListener('click', () => applyDiscoveryPreset(result.preset));
+        actions.append(choose);
+      }
+      if (result.source_url) actions.append(externalLink('打开来源', result.source_url));
+      card.append(actions);
+    }
+    container.append(card);
+  }
+}
+
+async function searchSources(form) {
+  const button = document.getElementById('sourceSearchButton');
+  const state = document.getElementById('sourceSearchState');
+  const query = form.elements.query.value.trim();
+  const provider = form.elements.provider.value;
+  if (!query) return;
+  button.disabled = true;
+  button.textContent = '正在搜索…';
+  state.textContent = `正在请求 ${provider === 'all' ? 'Mikan 和动漫花园' : discoveryProviderLabel(provider)}…`;
+  state.className = 'hint';
+  try {
+    const params = new URLSearchParams({ q: query, provider, limit: '20' });
+    const data = await api(`/api/discovery/search?${params.toString()}`);
+    renderDiscoveryResults(data);
+  } catch (error) {
+    document.getElementById('sourceSearchResults').replaceChildren();
+    state.textContent = error.message;
+    state.className = 'hint error-text';
+  } finally {
+    button.disabled = false;
+    button.textContent = '搜索';
+  }
+}
+
 function populateSubscriptionForm(sub) {
   const fields = [
     'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season',
@@ -388,6 +557,19 @@ document.getElementById('restoreDownloaderConfig').addEventListener('click', asy
     await Promise.all([loadDownloaderSettings(), loadConfig()]);
     showNotice('已恢复 Compose 默认配置');
   } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('sourceSearchForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await searchSources(event.currentTarget);
+});
+
+document.getElementById('clearSourceSearch').addEventListener('click', () => {
+  document.getElementById('sourceSearchForm').reset();
+  document.getElementById('sourceSearchResults').replaceChildren();
+  const state = document.getElementById('sourceSearchState');
+  state.textContent = '不会自动请求外部站点，只有点击“搜索”时才访问所选来源。';
+  state.className = 'hint';
 });
 
 document.getElementById('globalRulesForm').addEventListener('submit', async (event) => {

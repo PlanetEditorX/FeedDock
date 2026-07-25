@@ -20,6 +20,11 @@ services:
       POLL_INTERVAL_MINUTES: "10"
       REQUEST_TIMEOUT_SECONDS: "20"
 
+      # 内置搜索来源；若某个域名在当前网络不可用，可改为可访问的镜像地址
+      MIKAN_BASE_URL: "https://mikanime.tv"
+      MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
+      DMHY_BASE_URL: "https://share.dmhy.org"
+
       # 先不配置 qBittorrent
       QBIT_URL: ""
       QBIT_USERNAME: ""
