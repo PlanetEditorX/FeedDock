@@ -1,85 +1,59 @@
-# FeedDock 1.1.0 功能验证报告
+# FeedDock 1.2.0 功能验证报告
 
-验证日期：2026-07-25
+## 飞牛 OS 部署适配
 
-## 1. 登录与首次改密
+- 新增 `docker-compose.fnos.yml`，直接拉取 `ghcr.io/planeteditorx/feeddock:latest`，没有本地 `build`。
+- 新增 `.env.fnos.example` 和 `FNOS_DEPLOY.md`。
+- FeedDock 仅挂载 `./data:/data`，外部 qBittorrent 场景不挂载下载目录。
+- 同一台飞牛 OS 上的 qBittorrent 可通过 `host.docker.internal` 访问。
+- 容器入口支持 `PUID`、`PGID`、`UMASK`，并在权限调整失败时给出飞牛目录检查提示。
+- 飞牛专用 Compose 包含可选的一键更新支撑服务；FeedDock 与更新器仅通过内部 Compose 网络通信。
 
-验证结果：通过。
+## 更新链路修复
 
-实际启动 Uvicorn 服务后执行了以下流程：
+旧配置曾通过 `.env` 在运行时覆盖 `APP_VERSION`。镜像升级后，这可能导致页面继续显示旧版本。
 
-1. 未登录访问 `/`，返回 `303` 并跳转 `/login`。
-2. 使用错误密码登录，返回 `401`。
-3. 使用初始密码登录，返回：
+1.2.0 已改为：
 
-   ```json
-   {"authenticated":true,"username":"admin","must_change_password":true}
-   ```
+- Docker 镜像构建时写入版本号；
+- Compose 不再向容器传入 `APP_VERSION`；
+- `FEEDDOCK_IMAGE` 仅用于显示当前部署镜像；
+- 推送 `v*.*.*` 标签后，GitHub Actions 同时创建 GitHub Release；
+- 网页更新检查以该 Release 为版本来源，以 GHCR `latest` 为更新镜像。
 
-4. 未改密访问 `/api/dashboard`，返回：
+## 功能回归
 
-   ```text
-   HTTP 428
-   {"detail":"PASSWORD_CHANGE_REQUIRED"}
-   ```
+自动化测试覆盖：
 
-5. 访问 `/change-password`，页面包含“请修改初始密码”提示。
-6. 修改密码成功后，新会话可以访问 `/api/dashboard`，返回 `200`。
-7. 注销后再次访问业务接口，返回 `401`。
-
-密码使用 PBKDF2-SHA256 哈希保存；修改密码会增加会话版本，使旧 Cookie 失效。
-
-## 2. 外部 qBittorrent
-
-验证结果：通过。
-
-使用独立 HTTP 测试服务模拟位于另一主机的 qBittorrent Web API，验证：
-
-- `POST /api/v2/auth/login` 登录成功。
-- `GET /api/v2/app/version` 读取版本成功。
-- `POST /api/v2/torrents/add` 推送 Magnet 任务成功。
-- 客户端使用配置的完整外部 HTTP 地址，不依赖 Compose 内置 qBittorrent。
-- 默认 FeedDock 服务没有 `depends_on: qbittorrent`。
-- qBittorrent 仅在 `with-qbit` profile 下启动。
-
-## 3. 更新功能
-
-验证结果：通过。
-
-验证内容：
-
-- 从兼容 GitHub Releases API 的接口读取最新版本。
-- 比较 `1.1.0` 与 `1.2.0`，正确识别存在更新。
-- 使用 `Authorization: Bearer <token>` 调用 Watchtower `/v1/update`。
-- Watchtower 返回成功后，FeedDock 返回已触发更新提示。
-- Compose 中 Watchtower 仅在 `updater` profile 下启动。
-- Watchtower 使用 label 过滤，只更新 FeedDock，不更新 qBittorrent 或自身。
-
-## 自动化测试
+- 登录成功和登录失败；
+- 首次登录强制修改密码；
+- 改密前业务 API 锁定，改密后恢复；
+- 会话注销；
+- 外部 qBittorrent 登录、读取版本和推送 Magnet；
+- GitHub Release 版本比较和检查；
+- Watchtower Bearer Token 更新触发；
+- RSS、Atom、关键词、集数解析和路径越界保护；
+- 飞牛 Compose 不包含本地构建和下载目录挂载；
+- 运行时版本不被 `.env` 固定。
 
 执行命令：
 
 ```bash
 python -m unittest discover -s tests -v
+python -m compileall -q app docker-entrypoint.py
+node --check app/static/app.js
 ```
 
-结果：11 项全部通过。
+当前环境没有 Docker Engine，因此无法实际连接飞牛 OS Docker 服务进行镜像拉取和容器重建。Compose 文件、应用 HTTP 流程和外部服务协议均通过本地自动化验证。
 
-覆盖范围：
+## HTTP 冒烟测试
 
-- 登录、错误密码、首次改密强制跳转、API 锁定、改密、注销
-- 外部 qBittorrent 连接与任务推送
-- 版本比较、Release 检查与 Watchtower 更新触发
-- RSS、Atom、关键词过滤、集数提取和路径越界保护
+使用飞牛部署等价环境变量启动应用后：
 
-## 其他检查
+```text
+GET  /health             -> 200，version=1.2.0
+POST /api/auth/login     -> 200，must_change_password=true
+GET  /api/dashboard      -> 428 PASSWORD_CHANGE_REQUIRED
+```
 
-- Python 全项目编译检查：通过
-- JavaScript `node --check`：通过
-- `docker-compose.yml` YAML 解析：通过
-- GitHub Actions 工作流 YAML 解析：通过
-- 容器入口脚本降权测试：从 root 修正数据目录权限后，以 UID/GID `1000:1000` 启动主进程
-
-## 验证边界
-
-当前执行环境没有 Docker Engine，因此没有在本机执行 `docker build`、真实 GHCR 拉取或真实 Watchtower 容器重建。应用 HTTP 流程已实际启动验证；qBittorrent 和 Watchtower 使用协议兼容的本地模拟服务完成集成测试。
+这确认镜像内置版本生效，且首次登录改密门禁未被飞牛适配改动破坏。

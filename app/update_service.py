@@ -88,7 +88,7 @@ class UpdateService:
         headers = {
             "Accept": "application/vnd.github+json",
             "User-Agent": f"FeedDock/{settings.app_version}",
-            "X-GitHub-Api-Version": "2022-11-28",
+            "X-GitHub-Api-Version": "2026-03-10",
         }
         try:
             response = httpx.get(url, headers=headers, timeout=self.timeout, follow_redirects=True)

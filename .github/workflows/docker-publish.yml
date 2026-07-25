@@ -15,6 +15,9 @@ on:
       - "app/**"
       - "tests/**"
       - docker-compose.yml
+      - docker-compose.fnos.yml
+      - .env.fnos.example
+      - FNOS_DEPLOY.md
       - ".github/workflows/docker-publish.yml"
   pull_request:
     paths:
@@ -25,6 +28,9 @@ on:
       - "app/**"
       - "tests/**"
       - docker-compose.yml
+      - docker-compose.fnos.yml
+      - .env.fnos.example
+      - FNOS_DEPLOY.md
       - ".github/workflows/docker-publish.yml"
   workflow_dispatch:
     inputs:
@@ -77,10 +83,26 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
+      - name: Validate fnOS Compose YAML
+        run: |
+          python -m pip install PyYAML==6.0.3
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          payload = yaml.safe_load(Path("docker-compose.fnos.yml").read_text())
+          assert payload["services"]["feeddock"]["image"].startswith("ghcr.io/planeteditorx/feeddock:")
+          assert "host.docker.internal:host-gateway" in payload["services"]["feeddock"]["extra_hosts"]
+          assert payload["services"]["feeddock"]["volumes"] == ["./data:/data"]
+          PY
+
   build-and-push:
     name: Build and publish
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -157,6 +179,20 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+
+      - name: Create GitHub Release for version tag
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME 已存在"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "FeedDock $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
 
       - name: Publish build summary
         if: always()

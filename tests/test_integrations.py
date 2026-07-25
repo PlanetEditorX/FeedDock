@@ -27,8 +27,8 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         if self.path == "/repos/demo/feeddock/releases/latest":
             payload = json.dumps(
                 {
-                    "tag_name": "v1.2.0",
-                    "html_url": "https://example.test/releases/v1.2.0",
+                    "tag_name": "v1.3.0",
+                    "html_url": "https://example.test/releases/v1.3.0",
                     "published_at": "2026-07-25T00:00:00Z",
                 }
             ).encode()
@@ -91,7 +91,7 @@ class IntegrationTests(unittest.TestCase):
             timeout=3,
         )
         status = service.check()
-        self.assertEqual(status.latest_version, "1.2.0")
+        self.assertEqual(status.latest_version, "1.3.0")
         self.assertTrue(status.update_available)
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)

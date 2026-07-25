@@ -20,7 +20,26 @@ FeedDock 定时读取用户自行添加的 RSS / Atom，按关键词或正则过
 - 可选 Watchtower 网页一键更新
 - GitHub Actions 多架构镜像构建与 GHCR 推送
 
-当前版本号：`1.1.0`
+当前版本号：`1.2.0`
+
+
+## 飞牛 OS（fnOS）部署
+
+项目提供飞牛 OS 专用文件：
+
+- `docker-compose.fnos.yml`：直接使用 `ghcr.io/planeteditorx/feeddock:latest`，无需在 NAS 上构建镜像。
+- `.env.fnos.example`：飞牛环境变量模板。
+- `FNOS_DEPLOY.md`：从创建 Compose 项目到登录、外部 qBittorrent 和更新验证的完整步骤。
+
+飞牛专用 Compose 只为 FeedDock 挂载 `./data:/data`。外部 qBittorrent 的下载目录不会映射给 FeedDock，`DOWNLOAD_PATH` 只作为保存路径发送给 qBittorrent。
+
+同一台飞牛 OS 上的 qBittorrent 可以使用：
+
+```dotenv
+QBIT_URL=http://host.docker.internal:8080
+```
+
+专用 Compose 已配置 `host.docker.internal:host-gateway`。详细步骤见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)。
 
 ## 1. 快速部署
 
@@ -35,7 +54,7 @@ ADMIN_PASSWORD=首次登录使用的强密码
 QBIT_URL=http://你的qBittorrent地址:8080
 QBIT_USERNAME=admin
 QBIT_PASSWORD=qBittorrent的WebUI密码
-UPDATE_REPOSITORY=你的GitHub用户名/你的仓库名
+UPDATE_REPOSITORY=planeteditorx/feeddock
 ```
 
 ### 使用外部 qBittorrent
@@ -136,7 +155,7 @@ FeedDock 提供两层更新能力。
 配置仓库：
 
 ```dotenv
-UPDATE_REPOSITORY=your-name/feeddock
+UPDATE_REPOSITORY=planeteditorx/feeddock
 UPDATE_API_URL=https://api.github.com
 ```
 
@@ -162,7 +181,7 @@ docker compose up -d --no-build --remove-orphans
 先确保使用可拉取的新镜像标签，例如：
 
 ```dotenv
-FEEDDOCK_IMAGE=ghcr.io/你的GitHub用户名/你的仓库名:latest
+FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
 WATCHTOWER_URL=http://watchtower:8080
 WATCHTOWER_TOKEN=替换为至少32位随机字符串
 ```
@@ -186,7 +205,7 @@ docker compose --profile updater --profile with-qbit up -d --no-build
 - Watchtower 需要挂载 `/var/run/docker.sock`，等同于拥有较高的 Docker 主机权限。
 - `WATCHTOWER_TOKEN` 不应公开，也不要把 Watchtower 端口暴露到公网。
 - 若不接受 Docker Socket 风险，不要启用 `updater` profile，使用手动升级即可。
-- 固定版本标签如 `:1.1.0` 不会自动跳到 `:1.2.0`；一键更新应使用 `:latest` 或其他持续更新的标签。
+- 固定版本标签如 `:1.2.0` 不会自动跳到后续版本；一键更新应使用 `:latest` 或其他持续更新的标签。
 
 ## 5. GitHub Actions 构建与发布镜像
 
@@ -201,8 +220,8 @@ docker compose --profile updater --profile with-qbit up -d --no-build
 发布版本：
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 镜像地址：
@@ -237,7 +256,7 @@ curl http://127.0.0.1:7789/health
 返回示例：
 
 ```json
-{"status":"ok","version":"1.1.0"}
+{"status":"ok","version":"1.2.0"}
 ```
 
 备份：
