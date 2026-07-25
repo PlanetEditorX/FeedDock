@@ -1,83 +1,36 @@
 services:
   feeddock:
-    image: ghcr.io/planeteditorx/feeddock:${FEEDDOCK_TAG:-latest}
+    image: ghcr.io/planeteditorx/feeddock:latest
     container_name: feeddock
     restart: unless-stopped
     pull_policy: always
-    init: true
-
     ports:
-      - "${FEEDDOCK_PORT:-7789}:8000"
-
+      - "7789:8000"
     environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
-      UMASK: "${UMASK:-022}"
+      TZ: "Asia/Shanghai"
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "022"
+      ADMIN_USER: "admin"
+      ADMIN_PASSWORD: "password"
+      SESSION_DAYS: "7"
+      COOKIE_SECURE: "false"
+      POLL_INTERVAL_MINUTES: "10"
+      REQUEST_TIMEOUT_SECONDS: "20"
 
-      APP_NAME: "FeedDock"
-      ADMIN_USER: "${ADMIN_USER:-admin}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-feeddock-change-me}"
-      SESSION_DAYS: "${SESSION_DAYS:-7}"
-      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
-
-      POLL_INTERVAL_MINUTES: "${POLL_INTERVAL_MINUTES:-10}"
-      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-20}"
-      RSS_USER_AGENT: "FeedDock (+fnOS)"
-
-      # qBittorrent 可在飞牛 OS 本机的另一个容器中，也可以在局域网其他设备上。
-      # 同一台飞牛 OS 上且通过宿主机端口访问时，可使用 host.docker.internal。
-      QBIT_URL: "${QBIT_URL:-http://host.docker.internal:8080}"
-      QBIT_USERNAME: "${QBIT_USERNAME:-admin}"
-      QBIT_PASSWORD: "${QBIT_PASSWORD:-}"
-      QBIT_CATEGORY: "${QBIT_CATEGORY:-rss}"
-      DOWNLOAD_PATH: "${DOWNLOAD_PATH:-/downloads/rss}"
+      # 先不配置 qBittorrent
+      QBIT_URL: ""
+      QBIT_USERNAME: ""
+      QBIT_PASSWORD: ""
+      QBIT_CATEGORY: "rss"
+      DOWNLOAD_PATH: "/downloads/rss"
 
       UPDATE_REPOSITORY: "planeteditorx/feeddock"
       UPDATE_API_URL: "https://api.github.com"
-      FEEDDOCK_IMAGE: "ghcr.io/planeteditorx/feeddock:${FEEDDOCK_TAG:-latest}"
-      WATCHTOWER_URL: "http://watchtower:8080"
-      WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-change-this-feeddock-watchtower-token}"
+
+      # 暂时关闭网页一键更新
+      WATCHTOWER_URL: ""
+      WATCHTOWER_TOKEN: ""
 
     volumes:
-      # 飞牛 Docker Compose 项目目录中的 data 文件夹，保存数据库和会话密钥。
-      - ./data:/data
-
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
-
-    networks:
-      - feeddock-net
-
-  # 为 FeedDock 网页中的“一键更新”提供支持。
-  # 此服务会挂载 Docker Socket；不需要一键更新时可删除整个 watchtower 服务，
-  # 并将 FeedDock 的 WATCHTOWER_URL / WATCHTOWER_TOKEN 留空。
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: feeddock-updater
-    restart: unless-stopped
-
-    environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:-change-this-feeddock-watchtower-token}"
-      WATCHTOWER_LABEL_ENABLE: "true"
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-
-    networks:
-      - feeddock-net
-
-networks:
-  feeddock-net:
-    name: feeddock-net
-    driver: bridge
+      - "/vol1/1000/应用/feeddock/data:/data"

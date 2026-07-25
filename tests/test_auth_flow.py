@@ -7,7 +7,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.2.0"
+os.environ["APP_VERSION"] = "1.2.1"
 
 from fastapi.testclient import TestClient
 
@@ -66,6 +66,23 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(logout.status_code, 200)
             unauthorized = client.get("/api/dashboard")
             self.assertEqual(unauthorized.status_code, 401)
+
+        # Simulate a container/app restart with the same persisted DATA_DIR.
+        # ADMIN_PASSWORD remains the initial Compose value, but it must not
+        # overwrite the password already stored in SQLite.
+        with TestClient(app, follow_redirects=False) as restarted_client:
+            old_password = restarted_client.post(
+                "/api/auth/login",
+                json={"username": "admin", "password": "initial-password"},
+            )
+            self.assertEqual(old_password.status_code, 401)
+
+            new_password = restarted_client.post(
+                "/api/auth/login",
+                json={"username": "admin", "password": "a-new-secure-password-2026"},
+            )
+            self.assertEqual(new_password.status_code, 200)
+            self.assertFalse(new_password.json()["must_change_password"])
 
 
 if __name__ == "__main__":
