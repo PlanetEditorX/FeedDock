@@ -1,28 +1,20 @@
-FROM python:3.13-slim
+FROM python:3.12-slim
 
-ARG APP_VERSION=1.7.1
-
-ENV APP_VERSION=${APP_VERSION} \
-    PYTHONDONTWRITEBYTECODE=1 \
+ARG APP_VERSION=dev
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    APP_VERSION=${APP_VERSION} \
+    DATA_DIR=/data \
+    DATABASE_PATH=/data/feeddock.db
 
 WORKDIR /app
-
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-
 COPY app ./app
-COPY docker-entrypoint.py /usr/local/bin/feeddock-entrypoint
-RUN mkdir -p /data /downloads/rss \
-    && chown -R 1000:1000 /app /data /downloads \
-    && chmod +x /usr/local/bin/feeddock-entrypoint
+COPY docker-entrypoint.py ./docker-entrypoint.py
+COPY VERSION ./VERSION
+RUN chmod +x /app/docker-entrypoint.py
 
 EXPOSE 8000
-VOLUME ["/data", "/downloads"]
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
-
-ENTRYPOINT ["/usr/local/bin/feeddock-entrypoint"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+VOLUME ["/data"]
+ENTRYPOINT ["python", "/app/docker-entrypoint.py"]

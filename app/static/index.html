@@ -4,236 +4,135 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.7.1">
+  <link rel="stylesheet" href="/static/style.css?v=1.8.0">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>FeedDock</h1>
-      <p>RSS 自动订阅 · 去重过滤 · qBittorrent 推送</p>
-    </div>
-    <div class="actions">
-      <span id="currentUser" class="user-chip">管理员</span>
-      <button id="checkUpdate" class="secondary">检查更新</button>
-      <button id="testDownloader" class="secondary">测试下载器</button>
-      <button id="refreshNow">立即刷新</button>
-      <button id="logout" class="secondary">退出</button>
-    </div>
-  </header>
+  <div id="toast" class="toast" hidden></div>
 
-  <main>
-    <div id="notice" class="notice hidden"></div>
-
-    <section class="stats" id="stats">
-      <article><strong>–</strong><span>启用订阅</span></article>
-      <article><strong>–</strong><span>已推送</span></article>
-      <article><strong>–</strong><span>已跳过</span></article>
-      <article><strong>–</strong><span>错误</span></article>
-    </section>
-
-    <section class="panel update-panel">
-      <div class="panel-head">
-        <div><h2>系统与更新</h2><p id="versionSummary">未检查更新；点击“检查更新”后才访问 GitHub。</p></div>
-        <div class="actions">
-          <a id="releaseLink" class="button-link secondary hidden" target="_blank" rel="noreferrer noopener">查看发布说明</a>
-          <button id="applyUpdate" class="hidden">立即更新</button>
-        </div>
-      </div>
-      <div class="system-grid">
-        <div><span>当前版本</span><strong id="currentVersion">—</strong></div>
-        <div><span>最新版本</span><strong id="latestVersion">未检查</strong></div>
-        <div><span>部署镜像</span><strong id="deployedImage">—</strong></div>
-        <div><span>更新器</span><strong id="updaterState">—</strong></div>
-      </div>
-      <p class="hint">页面加载和定时刷新都不会检查更新。只有手动点击顶部“检查更新”才会请求 GitHub Release API。</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div><h2>qBittorrent 下载器</h2><p id="qbitConfigState">正在读取下载器配置…</p></div>
-      </div>
-      <form id="downloaderForm" class="form-grid">
-        <label class="wide">qBittorrent WebUI 地址
-          <input name="qbit_url" type="url" placeholder="同一台飞牛可填 http://host.docker.internal:8080">
-        </label>
-        <label>用户名<input name="qbit_username" autocomplete="username" placeholder="admin"></label>
-        <label>密码<input name="qbit_password" type="password" autocomplete="new-password" placeholder="留空则保留已保存密码"></label>
-        <label>分类<input name="qbit_category" placeholder="rss"></label>
-        <label>下载保存根目录<input name="download_path" placeholder="/downloads/rss" required></label>
-        <label class="checkbox-label"><input name="clear_password" type="checkbox">清除已经保存的密码</label>
-        <div class="form-actions wide">
-          <button type="submit">保存配置</button>
-          <button id="saveAndTestDownloader" type="button" class="secondary">保存并测试连接</button>
-          <button id="restoreDownloaderConfig" type="button" class="secondary">恢复 Compose 默认</button>
-        </div>
-      </form>
-      <p class="hint">自定义下载路径会直接发送给 qBittorrent；FeedDock 不会访问该目录。</p>
-    </section>
-
-    <section class="panel" id="sourceDiscovery">
-      <div class="panel-head">
-        <div><h2>Mikan 番剧目录</h2><p>默认从 FeedDock 持久缓存读取；后台定时更新，避免页面操作频繁访问 Mikan。</p></div>
-      </div>
-      <form id="mikanCatalogForm" class="catalog-controls">
-        <label>年份
-          <select name="year" id="catalogYear"></select>
-        </label>
-        <label>季度
-          <select name="season" id="catalogSeason">
-            <option value="冬">冬</option>
-            <option value="春">春</option>
-            <option value="夏">夏</option>
-            <option value="秋">秋</option>
-          </select>
-        </label>
-        <label class="catalog-search">搜索标题
-          <input name="query" maxlength="200" placeholder="可选，例如：魔法少女">
-        </label>
-        <div class="form-actions">
-          <button id="loadMikanCatalog" type="submit">读取缓存</button>
-          <button id="forceRefreshMikanCatalog" type="button" class="secondary">强制更新</button>
-          <button id="clearMikanCatalog" type="button" class="secondary">清空</button>
-        </div>
-      </form>
-      <p id="mikanCatalogState" class="hint">首次没有缓存时会请求一次 Mikan；之后页面只读缓存，已浏览季度默认每 6 小时后台更新一次。</p>
-      <div id="mikanCatalog" class="mikan-catalog"></div>
-      <p class="hint">标题搜索只过滤本地季度缓存，不会再次访问 Mikan。番剧字幕组详情同样会缓存；需要立即更新时使用“强制更新”按钮。</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div><h2>全局规则</h2><p>这里的排除规则会应用到所有订阅。</p></div>
-      </div>
-      <form id="globalRulesForm" class="form-grid">
-        <label class="wide">全局排除
-          <textarea name="exclude_rules" rows="4" placeholder="一行一条，例如：&#10;剧场版&#10;合集"></textarea>
-        </label>
-        <button type="submit">保存全局规则</button>
-      </form>
-      <p class="hint">普通文字按包含匹配；带有 <code>\d</code>、<code>[]</code>、<code>()</code> 等正则符号时按正则匹配。</p>
-    </section>
-
-    <section class="panel" id="subscriptionEditor">
-      <div class="panel-head">
-        <div><h2 id="subscriptionFormTitle">添加订阅</h2><p>可先点击“预览规则和路径”，确认后再保存。</p></div>
-      </div>
-      <form id="subscriptionForm" class="advanced-form">
-        <input type="hidden" name="subscription_id">
-
-        <fieldset>
-          <legend>基础信息</legend>
-          <div class="form-grid">
-            <label>名称<input name="name" required maxlength="200" placeholder="金牌得主 第二季"></label>
-            <label>参考标题<input name="reference_title" placeholder="金牌得主 (2025)"></label>
-            <label>TMDB 标题<input name="tmdb_title" placeholder="金牌得主 (2025)"></label>
-            <label>BgmUrl<input name="bgm_url" type="url" placeholder="https://bgm.tv/subject/548818"></label>
-            <label>日期<input name="air_date" type="date"></label>
-            <label>季<input name="season" type="number" min="0" max="999" value="1"></label>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>RSS 来源</legend>
-          <div class="form-grid">
-            <label>主 RSS 名称<input name="primary_rss_name" placeholder="LoliHouse"></label>
-            <label class="wide">主 RSS 地址<input name="rss_url" type="url" required placeholder="https://mikanime.tv/RSS/Bangumi?bangumiId=3822&subgroupid=370"></label>
-            <label>备用 RSS 名称<input name="backup_rss_name" placeholder="可选"></label>
-            <label class="wide">备用 RSS 地址<input name="backup_rss_url" type="url" placeholder="主 RSS 失败或无条目时使用"></label>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>匹配与排除</legend>
-          <div class="form-grid">
-            <label>匹配
-              <textarea name="include_keywords" rows="5" placeholder="留空或填写“无”表示不限制"></textarea>
-            </label>
-            <label>排除
-              <textarea name="exclude_keywords" rows="5" placeholder="一行一条，例如：&#10;720&#10;\d-\d&#10;合集&#10;特别篇"></textarea>
-            </label>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>集数规则</legend>
-          <div class="form-grid">
-            <label class="wide">参考 RSS 标题<input name="sample_title" placeholder="粘贴一条真实 RSS 标题，用于预览集数和匹配结果"></label>
-            <label>自定义集数正则<input name="episode_regex" placeholder="例如：\d+(\.5)?"></label>
-            <label>捕获组<input name="episode_group" type="number" min="0" max="20" value="0" title="0 表示完整匹配，1 表示第一捕获组"></label>
-            <label>集数偏移<input name="episode_offset" type="number" min="-10000" max="10000" value="0"></label>
-            <label>总集数<input name="total_episodes" type="number" min="0" max="10000" value="0" title="0 表示未知"></label>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>下载路径与策略</legend>
-          <div class="form-grid">
-            <label class="wide">保存路径模板<input name="save_path_template" value="{base}/{subscription}/Season {season}" required></label>
-            <label class="wide">自定义下载路径<input name="custom_download_path" placeholder="例如：/vol2/1000/影视/金牌得主 (2025)/Season 2"></label>
-            <label class="checkbox-label"><input name="missing_detection" type="checkbox">遗漏检测</label>
-            <label class="checkbox-label"><input name="only_latest" type="checkbox">只下载最新集</label>
-            <label class="checkbox-label"><input name="enabled" type="checkbox" checked>启用订阅</label>
-          </div>
-          <div id="subscriptionPreview" class="preview-box muted">尚未预览。最终下载位置以预览结果为准。</div>
-        </fieldset>
-
-        <div class="form-actions">
-          <button id="saveSubscription" type="submit">保存订阅</button>
-          <button id="previewSubscription" type="button" class="secondary">预览规则和路径</button>
-          <button id="cancelSubscriptionEdit" type="button" class="secondary hidden">取消编辑</button>
-        </div>
-      </form>
-      <p class="hint">路径变量：<code>{base}</code>、<code>{subscription}</code>、<code>{reference_title}</code>、<code>{tmdb_title}</code>、<code>{season}</code>、<code>{episode}</code>、<code>{year}</code>。</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head"><div><h2>订阅列表</h2><p id="configSummary">正在读取配置…</p></div></div>
-      <div id="subscriptions" class="cards"></div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div><h2>最近条目</h2><p>展示最近 100 条处理记录。</p></div>
-        <select id="statusFilter">
-          <option value="">全部状态</option>
-          <option value="queued">已推送</option>
-          <option value="skipped">已跳过</option>
-          <option value="error">错误</option>
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>说明</th><th></th></tr></thead>
-          <tbody id="items"><tr><td colspan="6">正在加载…</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head"><div><h2>系统日志</h2><p>最近 50 条轮询日志。</p></div></div>
-      <div id="logs" class="logs"></div>
-    </section>
-
-    <section class="legal">
-      本工具不提供、存储或分发任何媒体资源。请只添加你有权访问和下载的 RSS 源，并遵守所在地区法律及源站规则。
-    </section>
+  <main id="login-view" class="auth-shell" hidden>
+    <form id="login-form" class="panel auth-card">
+      <div class="brand">FeedDock</div>
+      <h1>登录</h1>
+      <label>用户名<input name="username" autocomplete="username" value="admin" required></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">登录</button>
+      <p class="muted">飞牛 OS 默认首次账号：<code>admin / password</code>。首次登录后必须修改密码。</p>
+    </form>
   </main>
 
+  <main id="password-view" class="auth-shell" hidden>
+    <form id="password-form" class="panel auth-card">
+      <div class="brand">FeedDock</div>
+      <h1>修改初始密码</h1>
+      <label>当前密码<input name="current_password" type="password" required></label>
+      <label>新密码<input name="new_password" type="password" minlength="10" required></label>
+      <label>确认新密码<input name="confirm_password" type="password" minlength="10" required></label>
+      <button class="primary" type="submit">保存并重新登录</button>
+    </form>
+  </main>
 
-  <div id="mikanDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mikanDetailTitle">
-    <div class="modal-backdrop" data-close-mikan-modal></div>
-    <section class="modal-card">
-      <div class="modal-head">
-        <div>
-          <span class="provider-badge mikan">Mikan</span>
-          <h2 id="mikanDetailTitle">番剧详情</h2>
-        </div>
-        <button id="closeMikanModal" type="button" class="icon-button secondary" aria-label="关闭">×</button>
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <div><strong>FeedDock</strong><span id="version" class="version"></span></div>
+      <div class="top-actions">
+        <button id="check-update" class="ghost">检查更新</button>
+        <button id="logout" class="ghost">退出</button>
       </div>
-      <div id="mikanDetailBody" class="mikan-detail-body"></div>
-    </section>
+    </header>
+
+    <main class="page">
+      <section class="stats" id="stats"></section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Mikan 番剧目录</h2>
+            <p class="muted">默认读取本地缓存，每 6 小时最多后台更新一次；只有“强制更新”会立即访问 Mikan。</p>
+          </div>
+        </div>
+        <div class="toolbar catalog-toolbar">
+          <label>年份<input id="catalog-year" type="number" min="2010" max="2100"></label>
+          <label>季度
+            <select id="catalog-season">
+              <option value="winter">冬季</option>
+              <option value="spring">春季</option>
+              <option value="summer">夏季</option>
+              <option value="fall">秋季</option>
+            </select>
+          </label>
+          <label class="grow">筛选标题<input id="catalog-search" placeholder="只过滤当前页面，不访问 Mikan"></label>
+          <button id="load-catalog" class="primary">读取目录</button>
+          <button id="force-catalog" class="danger-soft">强制更新</button>
+        </div>
+        <div id="catalog-meta" class="meta-line"></div>
+        <div id="catalog" class="catalog"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head"><h2>添加或编辑订阅</h2></div>
+        <form id="subscription-form" class="form-grid">
+          <input type="hidden" name="id">
+          <label>订阅名称<input name="name" required placeholder="例如：金牌得主 第二季"></label>
+          <label>参考标题<input name="reference_title"></label>
+          <label>TMDB 标题<input name="tmdb_title"></label>
+          <label>Bangumi URL<input name="bgm_url"></label>
+          <label>日期<input name="release_date" type="date"></label>
+          <label>季<input name="season" type="number" min="1" value="1"></label>
+          <label>主 RSS 名称<input name="primary_rss_name" placeholder="例如：LoliHouse"></label>
+          <label class="span-2">主 RSS 地址<input name="primary_rss_url" type="url" required></label>
+          <label>备用 RSS 名称<input name="backup_rss_name"></label>
+          <label class="span-2">备用 RSS 地址<input name="backup_rss_url" type="url"></label>
+          <label>匹配规则<textarea name="include_rules" rows="4" placeholder="每行一条；支持正则"></textarea></label>
+          <label>排除规则<textarea name="exclude_rules" rows="4" placeholder="例如：720\n\d-\d\n合集\n特别篇"></textarea></label>
+          <label>全局排除<textarea name="global_exclude_rules" rows="4" placeholder="例如：剧场版"></textarea></label>
+          <label>自定义集数正则<input name="episode_regex" placeholder="\d+(\.5)?"></label>
+          <label>捕获组<input name="episode_group" type="number" min="0" value="0"></label>
+          <label>集数偏移<input name="episode_offset" type="number" step="0.5" value="0"></label>
+          <label>总集数<input name="total_episodes" type="number" min="0" value="0"></label>
+          <label class="span-2">自定义下载路径<input name="download_path" placeholder="/vol2/1000/影视/番剧/Season 2"></label>
+          <label class="check"><input name="missing_check" type="checkbox">遗漏检测</label>
+          <label class="check"><input name="latest_only" type="checkbox">只下载最新集</label>
+          <label class="check"><input name="enabled" type="checkbox" checked>启用</label>
+          <div class="form-actions span-all">
+            <button class="primary" type="submit">保存订阅</button>
+            <button id="reset-subscription" type="button" class="ghost">清空</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="section-head"><h2>订阅列表</h2></div>
+        <div id="subscriptions" class="table-wrap"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head"><h2>qBittorrent 下载器</h2></div>
+        <form id="qbit-form" class="form-grid compact">
+          <label class="span-2">WebUI 地址<input name="url" placeholder="http://host.docker.internal:8080"></label>
+          <label>用户名<input name="username"></label>
+          <label>密码<input name="password" type="password" placeholder="留空保留原密码"></label>
+          <label>分类<input name="category" value="rss"></label>
+          <label class="span-2">下载保存路径<input name="download_path"></label>
+          <div class="form-actions span-all">
+            <button class="primary" type="submit">保存并测试连接</button>
+            <button id="test-qbit" type="button" class="ghost">仅测试</button>
+            <button id="reset-qbit" type="button" class="ghost">恢复 Compose 默认</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="section-head"><h2>运行日志</h2><button id="reload-logs" class="ghost">刷新</button></div>
+        <div id="logs" class="log-list"></div>
+      </section>
+    </main>
   </div>
 
-  <script src="/static/app.js?v=1.7.1" defer></script>
+  <dialog id="bangumi-dialog" class="dialog">
+    <button id="close-dialog" class="dialog-close" aria-label="关闭">×</button>
+    <div id="bangumi-detail"></div>
+  </dialog>
+
+  <script src="/static/app.js?v=1.8.0" defer></script>
 </body>
 </html>

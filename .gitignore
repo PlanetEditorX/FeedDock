@@ -1,11 +1,7 @@
 .env
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.coverage
-htmlcov/
 data/
-downloads/
-qbit-config/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.db
 .DS_Store

@@ -1,8 +1,8 @@
 .git
-.env
-data
-qbit-config
-downloads
+.github
 __pycache__
-*.pyc
 .pytest_cache
+*.pyc
+*.db
+data
+*.zip

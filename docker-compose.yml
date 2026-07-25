@@ -1,67 +1,37 @@
 services:
   feeddock:
+    image: ${FEEDDOCK_IMAGE:-feeddock:local}
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.7.1}
-    image: ${FEEDDOCK_IMAGE:-feeddock:local}
+        APP_VERSION: ${APP_VERSION:-dev}
     container_name: feeddock
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-feeddock:local}"
     ports:
-      - "${APP_PORT:-7789}:8000"
+      - "${FEEDDOCK_PORT:-7789}:8000"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      UMASK: ${UMASK:-022}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-password}
+      SESSION_DAYS: ${SESSION_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      POLL_INTERVAL_MINUTES: ${POLL_INTERVAL_MINUTES:-10}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-20}
+      QBIT_URL: ${QBIT_URL:-}
+      QBIT_USERNAME: ${QBIT_USERNAME:-}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      QBIT_CATEGORY: ${QBIT_CATEGORY:-rss}
+      DOWNLOAD_PATH: ${DOWNLOAD_PATH:-/downloads/rss}
+      MIKAN_BASE_URL: ${MIKAN_BASE_URL:-https://mikanani.me}
+      MIKAN_FALLBACK_URLS: ${MIKAN_FALLBACK_URLS:-https://mikanime.tv,https://mikanani.kas.pub}
+      MIKAN_CACHE_HOURS: ${MIKAN_CACHE_HOURS:-6}
+      UPDATE_REPOSITORY: ${UPDATE_REPOSITORY:-planeteditorx/feeddock}
+      UPDATE_API_URL: ${UPDATE_API_URL:-https://api.github.com}
+      UPDATE_GITHUB_TOKEN: ${UPDATE_GITHUB_TOKEN:-}
     volumes:
       - ./data:/data
-      - ./downloads:/downloads
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
-    networks:
-      - feeddock-net
-
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: feeddock-qbittorrent
-    profiles: ["with-qbit"]
-    restart: unless-stopped
-    environment:
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
-      TZ: "${TZ:-Asia/Shanghai}"
-      WEBUI_PORT: "8080"
-      TORRENTING_PORT: "6881"
-    ports:
-      - "${QBIT_WEBUI_PORT:-8080}:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
-    volumes:
-      - ./qbit-config:/config
-      - ./downloads:/downloads
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-    networks:
-      - feeddock-net
-
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: feeddock-updater
-    profiles: ["updater"]
-    restart: unless-stopped
-    environment:
-      WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN}"
-      WATCHTOWER_LABEL_ENABLE: "true"
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-    networks:
-      - feeddock-net
-
-networks:
-  feeddock-net:
-    driver: bridge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
