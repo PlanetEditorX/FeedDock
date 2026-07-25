@@ -254,6 +254,31 @@ class DiscoverySearchOut(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class MikanCatalogItemOut(BaseModel):
+    bangumi_id: int
+    title: str
+    cover_url: str = ""
+    update_at: str = ""
+    detail_url: str
+    base_url: str
+
+
+class MikanCatalogRowOut(BaseModel):
+    weekday: str
+    day_of_week: int | None = None
+    items: list[MikanCatalogItemOut] = Field(default_factory=list)
+
+
+class MikanCatalogOut(BaseModel):
+    provider: str = "mikan"
+    year: int
+    season: str
+    query: str = ""
+    base_url: str
+    rows: list[MikanCatalogRowOut] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class MikanGroupOut(BaseModel):
     subgroup_id: int
     name: str

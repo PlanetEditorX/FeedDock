@@ -38,6 +38,7 @@ from .schemas import (
     LoginRequest,
     LogOut,
     MikanBangumiDetailOut,
+    MikanCatalogOut,
     QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
@@ -260,19 +261,33 @@ def update_global_rules(payload: GlobalRulesUpdate, db: Session = Depends(get_db
 
 
 @app.get(
+    "/api/discovery/mikan/catalog",
+    response_model=MikanCatalogOut,
+    dependencies=[Depends(require_admin)],
+)
+def mikan_catalog(
+    year: int = Query(ge=2000, le=2100),
+    season: str = Query(pattern="^(冬|春|夏|秋)$"),
+    q: str = Query(default="", max_length=200),
+) -> dict[str, Any]:
+    try:
+        return DiscoveryService().catalog(year, season, q)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mikan 番剧目录解析失败：{exc}") from exc
+
+
+@app.get(
     "/api/discovery/search",
     response_model=DiscoverySearchOut,
     dependencies=[Depends(require_admin)],
 )
 def search_sources(
     q: str = Query(min_length=1, max_length=200),
-    provider: str = Query(default="all", pattern="^(all|mikan|dmhy)$"),
     limit: int = Query(default=20, ge=1, le=50),
 ) -> dict[str, Any]:
-    try:
-        return DiscoveryService().search(provider, q, limit)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return DiscoveryService().search(q, limit)
 
 
 @app.get(

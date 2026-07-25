@@ -21,17 +21,24 @@ class DeploymentFileTests(unittest.TestCase):
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)
         self.assertIn('MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"', compose)
-        self.assertIn('DMHY_BASE_URL: "https://share.dmhy.org"', compose)
+        self.assertNotIn('DMHY_BASE_URL', compose)
 
-    def test_frontend_has_manual_source_search(self) -> None:
+    def test_frontend_has_manual_mikan_catalog(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
-        self.assertIn('id="sourceSearchForm"', index)
-        self.assertIn('value="mikan"', index)
-        self.assertIn('value="dmhy"', index)
-        self.assertIn("/api/discovery/search", script)
+        self.assertIn('id="mikanCatalogForm"', index)
+        self.assertIn('id="catalogYear"', index)
+        self.assertIn('id="catalogSeason"', index)
+        self.assertIn('id="mikanDetailModal"', index)
+        self.assertIn("/api/discovery/mikan/catalog", script)
         self.assertIn("/api/discovery/mikan/", script)
         self.assertIn("applyDiscoveryPreset", script)
+        self.assertNotIn("动漫花园", index)
+        self.assertNotIn("dmhy", script.lower())
+
+    def test_mikan_modal_is_hidden_until_anime_is_selected(self) -> None:
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn(".modal.hidden { display: none; }", styles)
 
     def test_fnos_compose_has_first_login_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
@@ -95,6 +102,12 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('WATCHTOWER_TOKEN: ""', compose)
         self.assertNotIn("watchtower:", compose)
 
+
+    def test_dmhy_integration_is_removed(self) -> None:
+        discovery = (ROOT / "app/discovery.py").read_text(encoding="utf-8").lower()
+        config = (ROOT / "app/config.py").read_text(encoding="utf-8").lower()
+        self.assertNotIn("dmhy", discovery)
+        self.assertNotIn("dmhy", config)
 
 if __name__ == "__main__":
     unittest.main()

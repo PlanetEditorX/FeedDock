@@ -205,10 +205,6 @@ async function loadUpdateStatus(showResult = false) {
   }
 }
 
-function discoveryProviderLabel(provider) {
-  return provider === 'mikan' ? 'Mikan' : provider === 'dmhy' ? '动漫花园' : provider;
-}
-
 function applyDiscoveryPreset(preset) {
   if (!preset) return;
   resetSubscriptionForm();
@@ -225,6 +221,7 @@ function applyDiscoveryPreset(preset) {
     ? `已带入样本标题：${preset.sample_title}\n请点击“预览规则和路径”确认集数与保存位置。`
     : '已带入 RSS，请补充规则后点击“预览规则和路径”。';
   subscriptionPreviewBox.className = 'preview-box muted';
+  closeMikanModal();
   document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
   showNotice('已填入订阅表单，请确认规则和下载路径后保存');
 }
@@ -237,140 +234,190 @@ function externalLink(label, href) {
   return link;
 }
 
-function renderMikanGroups(result, detail, container) {
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    const area = document.createElement('textarea');
+    area.value = value;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.append(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+  showNotice('RSS 地址已复制');
+}
+
+function closeMikanModal() {
+  document.getElementById('mikanDetailModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function openMikanModal(title) {
+  document.getElementById('mikanDetailTitle').textContent = title || '番剧详情';
+  document.getElementById('mikanDetailBody').replaceChildren(text('p', '正在读取字幕组和 RSS…', 'muted'));
+  document.getElementById('mikanDetailModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function renderMikanDetail(detail) {
+  const container = document.getElementById('mikanDetailBody');
   container.replaceChildren();
-  const header = document.createElement('div');
-  header.className = 'discovery-group-head';
-  header.append(text('strong', `${detail.title} · ${detail.groups.length} 个字幕组`));
-  if (detail.detail_url) header.append(externalLink('打开番剧页', detail.detail_url));
-  container.append(header);
+
+  const summary = document.createElement('div');
+  summary.className = 'mikan-detail-summary';
+  summary.append(text('strong', `${detail.groups.length} 个字幕组 RSS`));
+  if (detail.detail_url) summary.append(externalLink('打开 Mikan 番剧页', detail.detail_url));
+  container.append(summary);
 
   if (!detail.groups.length) {
-    container.append(text('p', '没有解析到字幕组，可打开番剧页确认站点是否调整了页面结构。', 'empty'));
+    container.append(text('p', '没有解析到字幕组。可以打开 Mikan 番剧页，确认当前季度是否已有资源发布。', 'empty'));
     return;
   }
 
   const list = document.createElement('div');
-  list.className = 'discovery-groups';
+  list.className = 'mikan-rss-list';
   for (const group of detail.groups) {
-    const item = document.createElement('div');
-    item.className = 'discovery-group';
+    const row = document.createElement('article');
+    row.className = 'mikan-rss-row';
+
     const info = document.createElement('div');
-    info.append(text('strong', group.name));
-    info.append(text('span', `Subgroup ID ${group.subgroup_id}`, 'muted'));
+    info.className = 'mikan-rss-info';
+    info.append(text('h3', group.name));
+    info.append(text('code', group.rss_url, 'rss-code'));
+
     const actions = document.createElement('div');
     actions.className = 'card-actions';
-    const choose = text('button', '选择并填入', 'small');
-    choose.type = 'button';
-    choose.addEventListener('click', () => applyDiscoveryPreset(group.preset));
-    actions.append(choose);
+    const subscribe = text('button', '订阅', 'small');
+    subscribe.type = 'button';
+    subscribe.addEventListener('click', () => applyDiscoveryPreset(group.preset));
+    const copy = text('button', '复制 RSS', 'small secondary');
+    copy.type = 'button';
+    copy.addEventListener('click', () => copyText(group.rss_url));
+    actions.append(subscribe, copy);
     if (group.detail_url) actions.append(externalLink('字幕组页面', group.detail_url));
-    item.append(info, actions);
-    list.append(item);
+    row.append(info, actions);
+    list.append(row);
   }
   container.append(list);
 }
 
-async function loadMikanGroups(result, container, button) {
-  button.disabled = true;
-  button.textContent = '正在读取字幕组…';
+async function openMikanDetail(item) {
+  openMikanModal(item.title);
   try {
     const params = new URLSearchParams({
-      base_url: result.base_url || '',
-      title: result.title || '',
+      base_url: item.base_url || '',
+      title: item.title || '',
     });
-    const detail = await api(`/api/discovery/mikan/${result.bangumi_id}?${params.toString()}`);
-    renderMikanGroups(result, detail, container);
-    button.textContent = '重新读取字幕组';
+    const detail = await api(`/api/discovery/mikan/${item.bangumi_id}?${params.toString()}`);
+    document.getElementById('mikanDetailTitle').textContent = detail.title;
+    renderMikanDetail(detail);
   } catch (error) {
-    container.replaceChildren(text('p', error.message, 'error-text'));
-    button.textContent = '重试读取字幕组';
-  } finally {
-    button.disabled = false;
+    const body = document.getElementById('mikanDetailBody');
+    body.replaceChildren(text('p', error.message, 'error-text'));
   }
 }
 
-function renderDiscoveryResults(data) {
-  const container = document.getElementById('sourceSearchResults');
-  const state = document.getElementById('sourceSearchState');
-  container.replaceChildren();
+function createMikanCard(item) {
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'mikan-anime-card';
+  card.addEventListener('click', () => openMikanDetail(item));
 
-  const errorText = (data.errors || []).join('；');
-  if (!data.results.length) {
-    state.textContent = errorText || `没有找到与“${data.query}”相关的结果。`;
-    state.className = errorText ? 'hint error-text' : 'hint';
+  const cover = document.createElement('div');
+  cover.className = 'mikan-cover';
+  if (item.cover_url) {
+    const image = document.createElement('img');
+    image.src = item.cover_url;
+    image.alt = item.title;
+    image.loading = 'lazy';
+    image.referrerPolicy = 'no-referrer';
+    image.addEventListener('error', () => {
+      image.remove();
+      cover.append(text('span', item.title.slice(0, 1) || '番'));
+    }, { once: true });
+    cover.append(image);
+  } else cover.append(text('span', item.title.slice(0, 1) || '番'));
+
+  const info = document.createElement('div');
+  info.className = 'mikan-anime-info';
+  info.append(text('strong', item.title));
+  if (item.update_at) info.append(text('span', item.update_at, 'muted'));
+  info.append(text('span', '点击查看字幕组 RSS', 'catalog-card-action'));
+  card.append(cover, info);
+  return card;
+}
+
+function renderMikanCatalog(data) {
+  const container = document.getElementById('mikanCatalog');
+  const state = document.getElementById('mikanCatalogState');
+  container.replaceChildren();
+  const count = data.rows.reduce((sum, row) => sum + row.items.length, 0);
+  if (!count) {
+    state.textContent = data.query
+      ? `${data.year} ${data.season}没有匹配“${data.query}”的番剧。`
+      : `${data.year} ${data.season}没有解析到番剧。`;
+    state.className = 'hint';
     return;
   }
 
-  state.textContent = `找到 ${data.results.length} 项结果${errorText ? `；部分来源失败：${errorText}` : ''}`;
-  state.className = errorText ? 'hint error-text' : 'hint';
-
-  for (const result of data.results) {
-    const card = document.createElement('article');
-    card.className = 'discovery-card';
-
-    const titleRow = document.createElement('div');
-    titleRow.className = 'discovery-title';
-    titleRow.append(text('span', discoveryProviderLabel(result.provider), `provider-badge ${result.provider}`));
-    titleRow.append(text('h3', result.title));
-    card.append(titleRow);
-
-    if (result.description) card.append(text('p', result.description, 'muted'));
-    const meta = document.createElement('div');
-    meta.className = 'discovery-meta';
-    if (result.published_at) meta.append(text('span', `发布时间：${fmtDate(result.published_at)}`));
-    if (result.rss_url) meta.append(text('span', `RSS：${result.rss_url}`));
-    card.append(meta);
-
-    const actions = document.createElement('div');
-    actions.className = 'card-actions';
-    if (result.result_type === 'bangumi' && result.bangumi_id) {
-      const choose = text('button', '选择字幕组');
-      choose.type = 'button';
-      const groupBox = document.createElement('div');
-      groupBox.className = 'discovery-group-box';
-      choose.addEventListener('click', () => loadMikanGroups(result, groupBox, choose));
-      actions.append(choose);
-      if (result.detail_url) actions.append(externalLink('打开 Mikan', result.detail_url));
-      card.append(actions, groupBox);
-    } else {
-      if (result.preset) {
-        const choose = text(
-          'button',
-          result.result_type === 'feed' ? '使用此关键词 RSS' : '用此条目预填',
-        );
-        choose.type = 'button';
-        choose.addEventListener('click', () => applyDiscoveryPreset(result.preset));
-        actions.append(choose);
-      }
-      if (result.source_url) actions.append(externalLink('打开来源', result.source_url));
-      card.append(actions);
-    }
-    container.append(card);
+  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · ${count} 部番剧`;
+  state.className = 'hint';
+  for (const row of data.rows) {
+    const section = document.createElement('section');
+    section.className = 'mikan-weekday-section';
+    const heading = document.createElement('div');
+    heading.className = 'mikan-weekday-head';
+    heading.append(text('h3', row.weekday));
+    heading.append(text('span', `${row.items.length} 部`, 'muted'));
+    const grid = document.createElement('div');
+    grid.className = 'mikan-anime-grid';
+    row.items.forEach((item) => grid.append(createMikanCard(item)));
+    section.append(heading, grid);
+    container.append(section);
   }
 }
 
-async function searchSources(form) {
-  const button = document.getElementById('sourceSearchButton');
-  const state = document.getElementById('sourceSearchState');
+function initializeCatalogSelectors() {
+  const yearSelect = document.getElementById('catalogYear');
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  for (let year = currentYear + 1; year >= 2010; year -= 1) {
+    const option = document.createElement('option');
+    option.value = String(year);
+    option.textContent = String(year);
+    option.selected = year === currentYear;
+    yearSelect.append(option);
+  }
+  const month = now.getMonth() + 1;
+  const season = month <= 3 ? '冬' : month <= 6 ? '春' : month <= 9 ? '夏' : '秋';
+  document.getElementById('catalogSeason').value = season;
+}
+
+async function loadMikanCatalog(form) {
+  const button = document.getElementById('loadMikanCatalog');
+  const state = document.getElementById('mikanCatalogState');
+  const year = form.elements.year.value;
+  const season = form.elements.season.value;
   const query = form.elements.query.value.trim();
-  const provider = form.elements.provider.value;
-  if (!query) return;
   button.disabled = true;
-  button.textContent = '正在搜索…';
-  state.textContent = `正在请求 ${provider === 'all' ? 'Mikan 和动漫花园' : discoveryProviderLabel(provider)}…`;
+  button.textContent = '正在加载…';
+  state.textContent = `正在读取 Mikan ${year} ${season}番剧目录…`;
   state.className = 'hint';
   try {
-    const params = new URLSearchParams({ q: query, provider, limit: '20' });
-    const data = await api(`/api/discovery/search?${params.toString()}`);
-    renderDiscoveryResults(data);
+    const params = new URLSearchParams({ year, season });
+    if (query) params.set('q', query);
+    const data = await api(`/api/discovery/mikan/catalog?${params.toString()}`);
+    renderMikanCatalog(data);
   } catch (error) {
-    document.getElementById('sourceSearchResults').replaceChildren();
+    document.getElementById('mikanCatalog').replaceChildren();
     state.textContent = error.message;
     state.className = 'hint error-text';
   } finally {
     button.disabled = false;
-    button.textContent = '搜索';
+    button.textContent = '加载番剧';
   }
 }
 
@@ -559,17 +606,24 @@ document.getElementById('restoreDownloaderConfig').addEventListener('click', asy
   } catch (error) { showNotice(error.message, false); }
 });
 
-document.getElementById('sourceSearchForm').addEventListener('submit', async (event) => {
+document.getElementById('mikanCatalogForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  await searchSources(event.currentTarget);
+  await loadMikanCatalog(event.currentTarget);
 });
 
-document.getElementById('clearSourceSearch').addEventListener('click', () => {
-  document.getElementById('sourceSearchForm').reset();
-  document.getElementById('sourceSearchResults').replaceChildren();
-  const state = document.getElementById('sourceSearchState');
-  state.textContent = '不会自动请求外部站点，只有点击“搜索”时才访问所选来源。';
+document.getElementById('clearMikanCatalog').addEventListener('click', () => {
+  const form = document.getElementById('mikanCatalogForm');
+  form.elements.query.value = '';
+  document.getElementById('mikanCatalog').replaceChildren();
+  const state = document.getElementById('mikanCatalogState');
+  state.textContent = '已清空。点击“加载番剧”重新读取所选季度。';
   state.className = 'hint';
+});
+
+document.getElementById('closeMikanModal').addEventListener('click', closeMikanModal);
+document.querySelector('[data-close-mikan-modal]').addEventListener('click', closeMikanModal);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeMikanModal();
 });
 
 document.getElementById('globalRulesForm').addEventListener('submit', async (event) => {
@@ -659,5 +713,6 @@ document.getElementById('logout').addEventListener('click', async () => {
 });
 
 document.getElementById('statusFilter').addEventListener('change', loadItems);
+initializeCatalogSelectors();
 resetSubscriptionForm();
 reloadAll();

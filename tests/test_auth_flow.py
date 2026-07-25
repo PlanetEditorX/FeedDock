@@ -8,7 +8,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.5.0"
+os.environ["APP_VERSION"] = "1.6.0"
 
 from fastapi.testclient import TestClient
 
@@ -63,9 +63,40 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(home.status_code, 200)
             self.assertIn("系统与更新", home.text)
             self.assertIn("qBittorrent 下载器", home.text)
-            self.assertIn("搜索并添加番剧", home.text)
+            self.assertIn("Mikan 番剧目录", home.text)
 
             with patch("app.main.DiscoveryService") as discovery_factory:
+                discovery_factory.return_value.catalog.return_value = {
+                    "provider": "mikan",
+                    "year": 2026,
+                    "season": "夏",
+                    "query": "",
+                    "base_url": "https://mikan.test",
+                    "rows": [
+                        {
+                            "weekday": "星期一",
+                            "day_of_week": 1,
+                            "items": [
+                                {
+                                    "bangumi_id": 3822,
+                                    "title": "金牌得主 第二季",
+                                    "cover_url": "https://mikan.test/cover.jpg",
+                                    "update_at": "7/24/2026",
+                                    "detail_url": "https://mikan.test/Home/Bangumi/3822",
+                                    "base_url": "https://mikan.test",
+                                }
+                            ],
+                        }
+                    ],
+                    "errors": [],
+                }
+                catalog = client.get(
+                    "/api/discovery/mikan/catalog",
+                    params={"year": 2026, "season": "夏"},
+                )
+                self.assertEqual(catalog.status_code, 200, catalog.text)
+                self.assertEqual(catalog.json()["rows"][0]["weekday"], "星期一")
+
                 discovery_factory.return_value.search.return_value = {
                     "query": "金牌得主",
                     "provider": "mikan",
@@ -83,7 +114,7 @@ class AuthFlowTests(unittest.TestCase):
                 }
                 search = client.get(
                     "/api/discovery/search",
-                    params={"q": "金牌得主", "provider": "mikan"},
+                    params={"q": "金牌得主"},
                 )
                 self.assertEqual(search.status_code, 200, search.text)
                 self.assertEqual(search.json()["results"][0]["bangumi_id"], 3822)

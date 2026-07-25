@@ -6,164 +6,111 @@
 /vol1/1000/应用/feeddock
 ```
 
-使用已经发布到 GHCR 的镜像：
+使用镜像：
 
 ```text
 ghcr.io/planeteditorx/feeddock:latest
 ```
 
-不需要在飞牛 OS 上编译源码，也不需要同时部署 qBittorrent。
+## 一、目录
 
-## 一、准备目录
-
-在飞牛文件管理器中确认下面的目录存在：
+确认以下目录存在：
 
 ```text
 /vol1/1000/应用/feeddock
 /vol1/1000/应用/feeddock/data
 ```
 
-`data` 目录用于保存：
+`data` 保存管理员密码、会话密钥、订阅、下载记录和应用数据库。升级或重建容器时不要删除。
 
-- 管理员新密码；
-- 登录会话密钥；
-- RSS 订阅；
-- 下载任务记录；
-- 应用数据库。
+## 二、部署 Compose
 
-升级或重建容器时不要删除这个目录。
+在飞牛 Docker 的 Compose 项目中使用 `docker-compose.fnos.yml`。
 
-## 二、默认 Compose
+默认值：
 
-在飞牛 Docker 的 Compose 项目中使用项目根目录的 `docker-compose.fnos.yml`。
+- 端口：`7789`
+- 首次用户名：`admin`
+- 首次密码：`password`
+- qBittorrent：先留空
+- Mikan 主地址：`https://mikanime.tv`
 
-默认配置为：
-
-- 访问端口：`7789`；
-- 首次用户名：`admin`；
-- 首次密码：`password`；
-- qBittorrent：暂不配置；
-- 更新检查仓库：`planeteditorx/feeddock`；
-- 网页一键更新：暂时关闭。
-
-部署完成后访问：
+部署完成后打开：
 
 ```text
 http://飞牛IP:7789
 ```
 
-首次登录：
+第一次使用 `admin / password` 登录，随后必须设置新密码。新密码保存在 `/vol1/1000/应用/feeddock/data`，以后重新部署不会恢复成 `password`。
+
+## 三、配置 qBittorrent
+
+登录后在网页的 **qBittorrent 下载器** 中配置。
+
+同一台飞牛 OS：
 
 ```text
-用户名：admin
-密码：password
+http://host.docker.internal:8080
 ```
 
-登录后系统会强制进入修改密码页面。新密码至少需要 10 个字符。
-
-> `ADMIN_PASSWORD: "password"` 只用于数据库第一次初始化。修改密码后，新密码保存在 `/vol1/1000/应用/feeddock/data` 中。以后重启、拉取镜像或重新创建容器，都不会重新改回 `password`。
-
-## 三、验证登录
-
-完成修改密码后，退出并使用新密码重新登录。
-
-也可以打开健康检查地址：
+局域网其他设备：
 
 ```text
-http://飞牛IP:7789/health
+http://192.168.1.20:8080
 ```
 
-正常时会返回：
-
-```json
-{"status":"ok","version":"当前版本号"}
-```
-
-## 四、在网页配置外部 qBittorrent
-
-现在 Compose 中的 qBittorrent 配置保持为空，FeedDock 可以先独立启动。登录并修改初始密码后，在首页找到 **qBittorrent 下载器**。
-
-按下面填写：
-
-1. qBittorrent 在同一台飞牛 OS：WebUI 地址先填 `http://host.docker.internal:8080`。
-2. qBittorrent 在局域网其他设备：填写类似 `http://192.168.1.20:8080`。
-3. 用户名和密码填写 qBittorrent WebUI 的登录信息。
-4. 分类可保留 `rss`。
-5. 下载保存路径填写 qBittorrent 能识别的路径，例如 `/downloads/rss`。
-6. 点击“保存并测试连接”。
-
-网页设置保存在：
+填写用户名、密码、分类和 qBittorrent 能识别的下载路径，然后点击“保存并测试连接”。配置会写入：
 
 ```text
 /vol1/1000/应用/feeddock/data/feeddock.db
 ```
 
-配置在容器重启后仍然有效，并优先于 Compose 环境变量。页面不会回显密码；以后只修改地址、分类或下载路径时，密码输入框留空即可保留原密码。
+## 四、浏览并订阅 Mikan 番剧
 
-需要改回 Compose 配置时，点击“恢复 Compose 默认”。如果 `host.docker.internal` 无法连接，可以改填飞牛 OS 的局域网 IP，例如 `http://192.168.1.10:8080`。
+v1.6.0 起，首页使用季度目录，而不是发布条目混合搜索：
 
-## 五、更新
+1. 打开 **Mikan 番剧目录**。
+2. 选择年份。
+3. 选择冬、春、夏或秋。
+4. 可选填写标题筛选词。
+5. 点击“加载番剧”。
+6. 页面按星期展示封面和标题。
+7. 点击某一番剧。
+8. 弹窗会列出字幕组名称和对应 RSS。
+9. 点击“订阅”将该 RSS 带入订阅表单。
+10. 配置过滤、集数和路径，预览后保存。
 
-GitHub Actions 在 Docker 镜像推送成功后，会自动读取 `VERSION`，创建对应的 Git 标签和 GitHub Release。例如 `VERSION` 为 `1.5.0` 时，会自动发布 `v1.5.0`。相同版本重复构建不会重复创建。
-
-当前默认配置支持在 FeedDock 页面检查 GitHub Release 是否有新版本：
-
-```yaml
-UPDATE_REPOSITORY: "planeteditorx/feeddock"
-UPDATE_API_URL: "https://api.github.com"
-```
-
-默认暂时关闭网页一键更新：
-
-```yaml
-WATCHTOWER_URL: ""
-WATCHTOWER_TOKEN: ""
-```
-
-需要更新时，先在飞牛 Docker 的 Compose 项目中执行：
-
-1. 拉取最新镜像；
-2. 重新创建或重新部署项目。
-
-数据保存在宿主机 `data` 目录中，不会因容器重建而丢失。
-
-## 六、忘记密码
-
-不要直接修改 Compose 中的 `ADMIN_PASSWORD`，因为数据库已经初始化后，它不会覆盖现有密码。
-
-若确实需要完全重置：
-
-1. 停止 FeedDock；
-2. 备份 `/vol1/1000/应用/feeddock/data`；
-3. 删除其中的 `feeddock.db`；
-4. 重新部署。
-
-这样会重新使用 `admin / password` 初始化，但同时会清空订阅和任务记录。
-
-
-## 手动检查更新与高级订阅
-
-FeedDock v1.5.0 不会在页面打开或订阅轮询时自动访问 GitHub。需要检查时，手动点击顶部“检查更新”。如果公网 IP 的 GitHub API 限额已用完，等待提示的恢复时间后再点。可选在 Compose 的环境变量中填写 `UPDATE_GITHUB_TOKEN` 提高限额。
-
-添加订阅页面现已支持主/备用 RSS、日期、季、集数偏移、总集数、正则捕获组、自定义下载路径、遗漏检测和只下载最新集。保存前先使用“预览规则和路径”。旧数据目录会自动迁移，无需删除 `/vol1/1000/应用/feeddock/data`。
-
-
-## 七、搜索并选择番剧
-
-v1.5.0 起，首页新增“搜索并添加番剧”：
-
-1. 输入番剧名称，例如 `金牌得主`。
-2. 来源可选择 Mikan、动漫花园或同时搜索。
-3. Mikan：先点番剧，再选择字幕组，系统会把专用 RSS 填入订阅表单。
-4. 动漫花园：选择关键词 RSS 或某条发布，系统会把 RSS 和样本标题填入订阅表单。
-5. 在订阅表单继续填写分辨率、字幕、排除、集数偏移和下载路径，预览后保存。
-
-搜索只在点击按钮时执行，不会后台自动访问站点。飞牛默认 Compose 已加入：
+Mikan 请求只会在点击按钮时发起。默认 Compose 中的来源设置是：
 
 ```yaml
 MIKAN_BASE_URL: "https://mikanime.tv"
 MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
-DMHY_BASE_URL: "https://share.dmhy.org"
 ```
 
-若提示某个来源无法访问，可以在 Compose 中替换为当前网络可访问的镜像地址，然后重新部署。修改这些地址不会影响现有数据库和订阅。
+若主域名在当前网络不可访问，会尝试备用域名。修改来源地址不会影响已有数据库和订阅。
+
+## 五、更新
+
+FeedDock 不会自动检查更新。需要时手动点击顶部“检查更新”。
+
+GitHub Actions 在镜像构建成功后，会根据 `VERSION` 创建对应 Git 标签和 Release。例如版本为 `1.6.0` 时发布 `v1.6.0`。
+
+飞牛升级步骤：
+
+1. 等待 GitHub Actions 构建成功。
+2. 在飞牛 Compose 项目中拉取最新镜像。
+3. 重新部署项目。
+4. 浏览器执行一次强制刷新。
+
+数据位于宿主机 `data` 目录，不会因为容器重建而丢失。
+
+## 六、忘记密码
+
+修改 Compose 中的 `ADMIN_PASSWORD` 不会覆盖数据库密码。若必须完全重置：
+
+1. 停止 FeedDock。
+2. 备份 `/vol1/1000/应用/feeddock/data`。
+3. 删除其中的 `feeddock.db`。
+4. 重新部署。
+
+这会重新使用 `admin / password` 初始化，也会清空订阅和任务记录。

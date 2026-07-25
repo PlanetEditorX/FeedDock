@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import html
 import re
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
@@ -19,6 +18,27 @@ _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _MIKAN_BANGUMI_RE = re.compile(r"/(?:Home|home)/Bangumi/(\d+)(?:[/?#]|$)")
 _MIKAN_GROUP_RE = re.compile(r"/(?:Home|home)/PublishGroup/(\d+)(?:[/?#]|$)")
 _GENERIC_LINK_LABELS = {"订阅", "詳情", "详情", "查看", "more", "rss", "download"}
+_ALLOWED_SEASONS = ("冬", "春", "夏", "秋")
+_WEEKDAY_ALIASES = {
+    "星期一": "星期一", "周一": "星期一", "礼拜一": "星期一", "月曜日": "星期一",
+    "星期二": "星期二", "周二": "星期二", "礼拜二": "星期二", "火曜日": "星期二",
+    "星期三": "星期三", "周三": "星期三", "礼拜三": "星期三", "水曜日": "星期三",
+    "星期四": "星期四", "周四": "星期四", "礼拜四": "星期四", "木曜日": "星期四",
+    "星期五": "星期五", "周五": "星期五", "礼拜五": "星期五", "金曜日": "星期五",
+    "星期六": "星期六", "周六": "星期六", "礼拜六": "星期六", "土曜日": "星期六",
+    "星期日": "星期日", "星期天": "星期日", "周日": "星期日", "周天": "星期日",
+    "礼拜日": "星期日", "礼拜天": "星期日", "日曜日": "星期日",
+}
+_DAY_NUMBER_NAMES = {
+    0: "星期日",
+    1: "星期一",
+    2: "星期二",
+    3: "星期三",
+    4: "星期四",
+    5: "星期五",
+    6: "星期六",
+    7: "星期日",
+}
 
 
 @dataclass(slots=True)
@@ -115,6 +135,61 @@ class _DocumentParser(HTMLParser):
         self._anchor_open = False
 
 
+@dataclass(slots=True)
+class _HtmlNode:
+    tag: str
+    attrs: dict[str, str] = field(default_factory=dict)
+    children: list["_HtmlNode"] = field(default_factory=list)
+    text_parts: list[str] = field(default_factory=list)
+
+    def text(self) -> str:
+        parts = list(self.text_parts)
+        for child in self.children:
+            parts.append(child.text())
+        return _clean_text(" ".join(parts))
+
+    def classes(self) -> set[str]:
+        return {part for part in self.attrs.get("class", "").split() if part}
+
+    def descendants(self, tag: str | None = None) -> Iterable["_HtmlNode"]:
+        for child in self.children:
+            if tag is None or child.tag == tag:
+                yield child
+            yield from child.descendants(tag)
+
+
+class _TreeParser(HTMLParser):
+    _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _HtmlNode("document")
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        node = _HtmlNode(tag, {key.lower(): (value or "") for key, value in attrs})
+        self._stack[-1].children.append(node)
+        if tag not in self._VOID_TAGS:
+            self._stack.append(node)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if self._stack[-1].tag == tag.lower():
+            self._stack.pop()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        for index in range(len(self._stack) - 1, 0, -1):
+            if self._stack[index].tag == tag:
+                del self._stack[index:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self._stack[-1].text_parts.append(data)
+
+
 def _clean_text(value: str) -> str:
     value = html.unescape(value or "")
     value = re.sub(r"\s+", " ", value).strip()
@@ -181,6 +256,114 @@ def _subscription_preset(
         "enabled": True,
         "sample_title": _clean_text(sample_title),
     }
+
+
+def _weekday_name(raw_text: str, raw_number: str) -> str:
+    compact = _clean_text(raw_text)
+    for alias, normalized in _WEEKDAY_ALIASES.items():
+        if alias in compact:
+            return normalized
+    try:
+        return _DAY_NUMBER_NAMES.get(int(raw_number), compact or "其他")
+    except (TypeError, ValueError):
+        return compact or "其他"
+
+
+def _first_descendant(node: _HtmlNode, *, tag: str | None = None, class_name: str = "", attr: str = "") -> _HtmlNode | None:
+    for candidate in node.descendants(tag):
+        if class_name and class_name not in candidate.classes():
+            continue
+        if attr and not candidate.attrs.get(attr):
+            continue
+        return candidate
+    return None
+
+
+def parse_mikan_catalog_html(
+    content: str,
+    base_url: str,
+    *,
+    year: int,
+    season: str,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    """Parse Mikan's season/day-of-week fragment into stable catalog rows."""
+
+    parser = _TreeParser()
+    parser.feed(content)
+    parser.close()
+    query_folded = _clean_text(query).casefold()
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+
+    for section in parser.root.descendants("div"):
+        if "sk-bangumi" not in section.classes():
+            continue
+        day_number = section.attrs.get("data-dayofweek", "")
+        heading_text = ""
+        for child in section.children:
+            if child.tag != "ul":
+                heading_text = child.text()
+                if heading_text:
+                    break
+        weekday = _weekday_name(heading_text, day_number)
+        items: list[dict[str, Any]] = []
+
+        for item_node in section.descendants("li"):
+            marker = _first_descendant(item_node, tag="span", attr="data-bangumiid")
+            if marker is None:
+                continue
+            try:
+                bangumi_id = int(marker.attrs["data-bangumiid"])
+            except (KeyError, ValueError):
+                continue
+            if bangumi_id in seen_ids:
+                continue
+
+            title_node = _first_descendant(item_node, class_name="an-text")
+            title = ""
+            if title_node is not None:
+                title = _clean_mikan_title(title_node.attrs.get("title", "") or title_node.text())
+            if not title:
+                title = _clean_mikan_title(marker.attrs.get("title", ""))
+            if not title:
+                image = _first_descendant(item_node, tag="img")
+                if image is not None:
+                    title = _clean_mikan_title(image.attrs.get("alt", "") or image.attrs.get("title", ""))
+            if not title:
+                title = f"Mikan 番剧 #{bangumi_id}"
+            if query_folded and query_folded not in title.casefold():
+                continue
+
+            date_node = _first_descendant(item_node, class_name="date-text")
+            cover_raw = marker.attrs.get("data-src", "")
+            if not cover_raw:
+                image = _first_descendant(item_node, tag="img")
+                if image is not None:
+                    cover_raw = image.attrs.get("src", "") or image.attrs.get("data-src", "")
+            detail_url = f"{base_url}/Home/Bangumi/{bangumi_id}"
+            items.append(
+                {
+                    "bangumi_id": bangumi_id,
+                    "title": title,
+                    "cover_url": urljoin(base_url + "/", cover_raw) if cover_raw else "",
+                    "update_at": date_node.text() if date_node is not None else "",
+                    "detail_url": detail_url,
+                    "base_url": base_url,
+                }
+            )
+            seen_ids.add(bangumi_id)
+
+        if items:
+            rows.append(
+                {
+                    "weekday": weekday,
+                    "day_of_week": int(day_number) if day_number.isdigit() else None,
+                    "items": items,
+                }
+            )
+
+    return rows
 
 
 def parse_mikan_search_html(content: str, base_url: str, limit: int = 30) -> list[dict[str, Any]]:
@@ -286,21 +469,10 @@ def parse_mikan_detail_html(
     }
 
 
-def build_dmhy_rss_url(query: str, base_url: str | None = None) -> str:
-    base = _normalize_base(base_url or settings.dmhy_base_url)
-    params = {
-        "keyword": _clean_text(query),
-        "sort_id": 2,
-        "team_id": 0,
-        "order": "date-desc",
-    }
-    return f"{base}/topics/rss/rss.xml?{urlencode(params)}"
-
-
 def _published_string(entry: dict[str, Any]) -> str:
     published = entry.get("published_datetime")
-    if isinstance(published, datetime):
-        return published.isoformat()
+    if published is not None and hasattr(published, "isoformat"):
+        return str(published.isoformat())
     return str(entry.get("published", "") or "")
 
 
@@ -310,12 +482,10 @@ class DiscoveryService:
         *,
         client: httpx.Client | None = None,
         mikan_bases: tuple[str, ...] | None = None,
-        dmhy_base: str | None = None,
         timeout: int | float | None = None,
     ) -> None:
         self.client = client
         self.mikan_bases = tuple(_normalize_base(value) for value in (mikan_bases or _allowed_mikan_bases()))
-        self.dmhy_base = _normalize_base(dmhy_base or settings.dmhy_base_url)
         self.timeout = timeout or settings.request_timeout_seconds
         self.headers = {
             "User-Agent": settings.rss_user_agent,
@@ -337,33 +507,51 @@ class DiscoveryService:
             raise ValueError("站点响应超过 8 MiB 限制")
         return response
 
-    def search(self, provider: str, query: str, limit: int = 30) -> dict[str, Any]:
-        provider = provider.strip().lower()
+    def catalog(self, year: int, season: str, query: str = "") -> dict[str, Any]:
+        if not 2000 <= year <= 2100:
+            raise ValueError("年份必须在 2000 到 2100 之间")
+        season = _clean_text(season)
+        if season not in _ALLOWED_SEASONS:
+            raise ValueError("季度仅支持冬、春、夏、秋")
+        if not self.mikan_bases:
+            raise RuntimeError("没有可用的 Mikan 站点地址")
+
+        errors: list[str] = []
+        for base in self.mikan_bases:
+            url = f"{base}/Home/BangumiCoverFlowByDayOfWeek?{urlencode({'year': year, 'seasonStr': season})}"
+            try:
+                response = self._get(url)
+                rows = parse_mikan_catalog_html(
+                    response.text,
+                    base,
+                    year=year,
+                    season=season,
+                    query=query,
+                )
+                if rows:
+                    return {
+                        "provider": "mikan",
+                        "year": year,
+                        "season": season,
+                        "query": _clean_text(query),
+                        "base_url": base,
+                        "rows": rows,
+                        "errors": errors,
+                    }
+                errors.append(f"{base}: 未解析到番剧")
+            except Exception as exc:
+                errors.append(f"{base}: {exc}")
+        raise RuntimeError("；".join(errors) or "未找到番剧目录")
+
+    def search(self, query: str, limit: int = 30) -> dict[str, Any]:
         query = _clean_text(query)
-        if provider not in {"all", "mikan", "dmhy"}:
-            raise ValueError("provider 仅支持 all、mikan 或 dmhy")
         if not query:
             raise ValueError("请输入搜索关键词")
-
-        results: list[dict[str, Any]] = []
-        errors: list[str] = []
-        if provider in {"all", "mikan"}:
-            try:
-                results.extend(self.search_mikan(query, limit=limit))
-            except Exception as exc:
-                errors.append(f"Mikan：{exc}")
-        if provider in {"all", "dmhy"}:
-            try:
-                results.extend(self.search_dmhy(query, limit=limit))
-            except Exception as exc:
-                errors.append(f"动漫花园：{exc}")
-
-        return {
-            "query": query,
-            "provider": provider,
-            "results": results[: max(limit, 1) * (2 if provider == "all" else 1)],
-            "errors": errors,
-        }
+        try:
+            results = self.search_mikan(query, limit=limit)
+            return {"query": query, "provider": "mikan", "results": results, "errors": []}
+        except Exception as exc:
+            return {"query": query, "provider": "mikan", "results": [], "errors": [f"Mikan：{exc}"]}
 
     def search_mikan(self, query: str, limit: int = 30) -> list[dict[str, Any]]:
         if not self.mikan_bases:
@@ -380,8 +568,7 @@ class DiscoveryService:
             except Exception as exc:
                 errors.append(f"{base}: {exc}")
 
-        # Mikan's RSS search endpoint is a useful fallback when the HTML layout
-        # changes or the search page does not expose a bangumi detail link.
+        # Fallback to Mikan's keyword RSS when the HTML search page changes.
         for base in self.mikan_bases:
             rss_url = f"{base}/RSS/Search?{urlencode({'searchstr': query})}"
             try:
@@ -443,57 +630,3 @@ class DiscoveryService:
             except Exception as exc:
                 errors.append(f"{base}: {exc}")
         raise RuntimeError("；".join(errors) or "未找到字幕组")
-
-    def search_dmhy(self, query: str, limit: int = 30) -> list[dict[str, Any]]:
-        rss_url = build_dmhy_rss_url(query, self.dmhy_base)
-        response = self._get(rss_url)
-        entries = parse_feed(response.content)
-
-        results: list[dict[str, Any]] = [
-            {
-                "provider": "dmhy",
-                "result_type": "feed",
-                "id": "dmhy-keyword-feed",
-                "title": f"订阅“{query}”的动漫花园搜索 RSS",
-                "description": "使用关键词 RSS 持续接收后续发布；保存前可继续配置分辨率、字幕和排除规则。",
-                "detail_url": f"{self.dmhy_base}/topics/list?{urlencode({'keyword': query})}",
-                "rss_url": rss_url,
-                "source_url": f"{self.dmhy_base}/topics/list?{urlencode({'keyword': query})}",
-                "published_at": "",
-                "download_url": "",
-                "base_url": self.dmhy_base,
-                "bangumi_id": None,
-                "preset": _subscription_preset(
-                    name=query,
-                    source_name="动漫花园",
-                    rss_url=rss_url,
-                    sample_title=entries[0].get("title", "") if entries else query,
-                ),
-            }
-        ]
-
-        for index, entry in enumerate(entries[:limit]):
-            title = _clean_text(str(entry.get("title", "") or "")) or f"动漫花园搜索结果 {index + 1}"
-            results.append(
-                {
-                    "provider": "dmhy",
-                    "result_type": "release",
-                    "id": f"dmhy-release-{index}",
-                    "title": title,
-                    "description": "选择此条目会使用当前关键词 RSS，并把该标题带入规则预览。",
-                    "detail_url": str(entry.get("link", "") or ""),
-                    "rss_url": rss_url,
-                    "source_url": str(entry.get("link", "") or ""),
-                    "published_at": _published_string(entry),
-                    "download_url": extract_download_url(entry),
-                    "base_url": self.dmhy_base,
-                    "bangumi_id": None,
-                    "preset": _subscription_preset(
-                        name=query,
-                        source_name="动漫花园",
-                        rss_url=rss_url,
-                        sample_title=title,
-                    ),
-                }
-            )
-        return results

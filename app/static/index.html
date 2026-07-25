@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.5.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.0">
 </head>
 <body>
   <header class="topbar">
@@ -72,27 +72,31 @@
 
     <section class="panel" id="sourceDiscovery">
       <div class="panel-head">
-        <div><h2>搜索并添加番剧</h2><p>内置 Mikan 和动漫花园解析；搜索后手动选择番剧、字幕组或发布条目。</p></div>
+        <div><h2>Mikan 番剧目录</h2><p>按年份、季度和星期浏览番剧；点开番剧后选择字幕组 RSS。</p></div>
       </div>
-      <form id="sourceSearchForm" class="form-grid">
-        <label>来源
-          <select name="provider">
-            <option value="all">Mikan + 动漫花园</option>
-            <option value="mikan">仅 Mikan</option>
-            <option value="dmhy">仅动漫花园</option>
+      <form id="mikanCatalogForm" class="catalog-controls">
+        <label>年份
+          <select name="year" id="catalogYear"></select>
+        </label>
+        <label>季度
+          <select name="season" id="catalogSeason">
+            <option value="冬">冬</option>
+            <option value="春">春</option>
+            <option value="夏">夏</option>
+            <option value="秋">秋</option>
           </select>
         </label>
-        <label>番剧关键词
-          <input name="query" required maxlength="200" placeholder="例如：金牌得主">
+        <label class="catalog-search">搜索标题
+          <input name="query" maxlength="200" placeholder="可选，例如：魔法少女">
         </label>
-        <div class="form-actions wide">
-          <button id="sourceSearchButton" type="submit">搜索</button>
-          <button id="clearSourceSearch" type="button" class="secondary">清空结果</button>
+        <div class="form-actions">
+          <button id="loadMikanCatalog" type="submit">加载番剧</button>
+          <button id="clearMikanCatalog" type="button" class="secondary">清空</button>
         </div>
       </form>
-      <p id="sourceSearchState" class="hint">不会自动请求外部站点，只有点击“搜索”时才访问所选来源。</p>
-      <div id="sourceSearchResults" class="discovery-results"></div>
-      <p class="hint">Mikan 会先搜索番剧，再选择字幕组生成专用 RSS；动漫花园使用关键词 RSS，并可选择某条发布作为规则预览样本。</p>
+      <p id="mikanCatalogState" class="hint">不会自动访问 Mikan，只有点击“加载番剧”才会请求所选季度。</p>
+      <div id="mikanCatalog" class="mikan-catalog"></div>
+      <p class="hint">点击番剧卡片后，会读取该番剧的字幕组并显示每个字幕组对应的 RSS；选择“订阅”即可带入下方订阅表单。</p>
     </section>
 
     <section class="panel">
@@ -214,6 +218,21 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=1.5.0" defer></script>
+
+  <div id="mikanDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mikanDetailTitle">
+    <div class="modal-backdrop" data-close-mikan-modal></div>
+    <section class="modal-card">
+      <div class="modal-head">
+        <div>
+          <span class="provider-badge mikan">Mikan</span>
+          <h2 id="mikanDetailTitle">番剧详情</h2>
+        </div>
+        <button id="closeMikanModal" type="button" class="icon-button secondary" aria-label="关闭">×</button>
+      </div>
+      <div id="mikanDetailBody" class="mikan-detail-body"></div>
+    </section>
+  </div>
+
+  <script src="/static/app.js?v=1.6.0" defer></script>
 </body>
 </html>

@@ -1,30 +1,34 @@
 # FeedDock
 
-FeedDock 是一个自托管 RSS 规则处理与 qBittorrent 自动化服务。它定时读取用户自行添加的 RSS / Atom，按文字或正则规则过滤、识别集数、去重后推送到 qBittorrent，并通过中文 Web 页面管理订阅、任务、日志与版本更新。
+FeedDock 是一个自托管 RSS 规则处理与 qBittorrent 自动化服务。它可以浏览 Mikan 番剧季度目录、选择字幕组 RSS，并按规则轮询、过滤、识别集数、去重后推送到 qBittorrent。
 
-> 本项目不提供、存储或分发任何媒体资源。请只处理你有权访问和下载的内容，并遵守所在地区法律、源站条款及版权要求。
+> 本项目不提供、存储或分发媒体资源。请只处理你有权访问和下载的内容，并遵守所在地区法律、源站规则及版权要求。
 
-当前版本：`1.5.0`
+当前版本：`1.6.0`
 
-## v1.5.0
+## v1.6.0
 
-- 新增“搜索并添加番剧”页面区域，只有手动点击搜索时才请求外部站点。
-- 内置 Mikan 搜索解析：搜索番剧、打开番剧详情、列出字幕组并生成字幕组专用 RSS。
-- Mikan 主地址不可用时可按顺序尝试备用地址；HTML 页面变化时会回退到关键词 RSS 搜索。
-- 内置动漫花园搜索解析：生成关键词 RSS、展示最近发布，并可选择某条发布作为规则预览样本。
-- 搜索结果只负责预填订阅表单，仍需用户确认匹配、排除、集数和下载路径后保存。
-- 新增 `MIKAN_BASE_URL`、`MIKAN_FALLBACK_URLS`、`DMHY_BASE_URL` 环境变量，方便飞牛网络环境切换镜像站。
+- 移除不符合番剧目录使用方式的多来源发布搜索。
+- 新增 Ani-RSS 风格的 Mikan 番剧目录。
+- 可按年份和季度加载番剧。
+- 按星期分组展示封面、标题和更新时间。
+- 支持在当前季度内按标题筛选。
+- 点击番剧后弹窗列出字幕组和各自 RSS。
+- 支持复制 RSS，或一键带入订阅表单。
+- 所有外部请求仍只在用户手动点击后执行。
 
 ## 主要功能
 
 - 应用内登录，首次登录后强制修改初始密码。
+- Mikan 年份、季度、星期番剧目录。
+- 字幕组 RSS 选择和订阅表单预填。
 - RSS / Atom 定时轮询、手动刷新、指纹去重和错误重试。
-- Mikan 番剧/字幕组搜索与动漫花园关键词 RSS 搜索，可手动选择后预填订阅。
 - 主 RSS 失败或没有条目时自动使用备用 RSS。
-- 包含、排除和全局排除均支持普通文字；含正则符号时按正则匹配。
-- qBittorrent 可部署在同机、局域网其他设备或远程 HTTPS 地址。
+- 包含、排除、全局排除及自定义集数正则。
+- 集数偏移、总集数、遗漏检测和只下载最新集。
+- qBittorrent 可位于同机、局域网其他设备或远程地址。
 - qBittorrent 配置可直接在网页保存和测试。
-- GitHub Release 手动检查与可选 Watchtower 一键更新。
+- GitHub Release 手动检查与可选 Watchtower 更新。
 - GitHub Actions 自动测试、构建多架构 GHCR 镜像并发布 Release。
 
 ## 飞牛 OS 部署
@@ -58,21 +62,6 @@ http://host.docker.internal:8080
 
 ```bash
 cp .env.example .env
-```
-
-至少修改：
-
-```dotenv
-ADMIN_PASSWORD=首次登录使用的强密码
-QBIT_URL=http://192.168.1.20:8080
-QBIT_USERNAME=admin
-QBIT_PASSWORD=你的qBittorrent密码
-DOWNLOAD_PATH=/downloads/rss
-```
-
-启动：
-
-```bash
 docker compose up -d --build
 ```
 
@@ -82,57 +71,48 @@ docker compose up -d --build
 http://服务器IP:7789
 ```
 
-附带 qBittorrent：
-
-```bash
-docker compose --profile with-qbit up -d --build
-```
-
-## 登录与密码
-
-初次启动由以下环境变量创建管理员：
+首次管理员由以下变量创建：
 
 ```dotenv
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password
 ```
 
-首次登录后必须修改密码。新密码以哈希形式保存在：
+首次登录后必须修改密码。新密码以哈希形式保存在 `data/feeddock.db`，容器重启不会被 Compose 中的初始密码覆盖。
 
-```text
-data/feeddock.db
-```
+## Mikan 番剧目录
 
-后续重启或重新部署不会用 Compose 中的初始密码覆盖数据库密码。
+登录后在首页找到 **Mikan 番剧目录**：
 
-## Mikan 与动漫花园搜索
-
-登录后在首页找到“搜索并添加番剧”：
-
-1. 选择 `Mikan + 动漫花园`、`仅 Mikan` 或 `仅动漫花园`。
-2. 输入番剧关键词并点击“搜索”。页面不会在后台自动搜索。
-3. Mikan 结果先选择番剧，再选择字幕组；系统生成：
+1. 选择年份，例如 `2026`。
+2. 选择季度：冬、春、夏或秋。
+3. 可选输入标题关键词。
+4. 点击“加载番剧”。
+5. 页面按星期分组显示番剧封面和标题。
+6. 点击番剧卡片，读取字幕组列表。
+7. 每个字幕组会显示专用 RSS：
 
 ```text
 /RSS/Bangumi?bangumiId=<番剧ID>&subgroupid=<字幕组ID>
 ```
 
-4. 动漫花园结果会提供关键词 RSS，并列出最近发布；可选择某条标题带入规则预览。
-5. 点击“选择并填入”后，检查订阅表单中的名称、RSS、匹配规则、集数和路径，再手动保存。
+8. 点击“复制 RSS”只复制地址；点击“订阅”会把名称、RSS 和来源名称带入订阅表单。
+9. 检查匹配规则、集数和下载路径，预览后再保存。
 
-默认来源：
+页面不会自动请求 Mikan。只有点击“加载番剧”或点击番剧读取字幕组时才访问站点。
+
+默认来源地址：
 
 ```dotenv
 MIKAN_BASE_URL=https://mikanime.tv
 MIKAN_FALLBACK_URLS=https://mikanani.me,https://mikanani.kas.pub
-DMHY_BASE_URL=https://share.dmhy.org
 ```
 
-若飞牛所在网络无法访问某个域名，可以只修改 Compose 中对应地址。FeedDock 不会代理、存储或提供站点资源；它只读取公开页面/RSS，并将用户选择的订阅配置保存到本地。
+若主地址不可访问，会依次尝试备用地址。FeedDock 只读取公开页面和 RSS，不代理或存储媒体资源。
 
 ## qBittorrent
 
-登录后在首页的“qBittorrent 下载器”区域填写：
+登录后在“qBittorrent 下载器”中填写：
 
 - WebUI 地址
 - 用户名
@@ -140,60 +120,21 @@ DMHY_BASE_URL=https://share.dmhy.org
 - 分类
 - 下载保存根目录
 
-`DOWNLOAD_PATH` 和每个订阅的自定义下载路径，都是 qBittorrent 所在主机或容器能够识别的路径。FeedDock 只将路径发送给 qBittorrent，不直接读取该目录。
+`DOWNLOAD_PATH` 及订阅的自定义下载路径必须是 qBittorrent 所在主机或容器能够识别的路径。FeedDock 只把路径发送给 qBittorrent。
 
-## 高级订阅配置
+## 高级订阅规则
 
-### 基础信息
+订阅支持：
 
-- 名称：FeedDock 中显示的订阅名称。
-- 参考标题、TMDB 标题、BgmUrl：用于记录元数据和路径变量，不会自动调用 TMDB。
-- 日期：条目发布日期早于该日期时跳过。
-- 季：可用于路径变量 `{season}`。
+- 参考标题、TMDB 标题、BgmUrl、日期和季。
+- 主 RSS 与备用 RSS。
+- 普通文字或正则包含、排除和全局排除。
+- 自定义集数正则和捕获组。
+- 集数偏移、小数集数和总集数限制。
+- 保存路径模板或 qBittorrent 可识别的绝对路径。
+- 遗漏检测、只下载最新集和启停控制。
 
-### RSS
-
-- `rss_url` 是主 RSS。
-- 主 RSS 请求失败或返回空列表时，才尝试备用 RSS。
-- 两个 RSS 的条目仍通过指纹去重。
-
-### 匹配和排除
-
-规则以逗号、中文逗号或换行分隔：
-
-```text
-720
-\d-\d
-合集
-特别篇
-```
-
-- 普通文字按不区分大小写的包含关系匹配。
-- 包含 `\d`、`[]`、`()`、`*`、`+` 等正则符号时按正则匹配。
-- 排除优先于匹配。
-- 全局排除应用到所有订阅。
-- “匹配”留空或填写 `无` 表示不限制。
-
-### 集数
-
-示例：
-
-```text
-自定义集数正则：\d+(\.5)?
-捕获组：0
-集数偏移：-13
-总集数：9
-```
-
-- 捕获组 `0` 表示使用整个正则匹配结果。
-- 捕获组 `1` 表示使用第一个括号捕获结果。
-- 偏移在识别后应用，例如 `14 - 13 = 1`。
-- 支持 `13.5` 这类特别集。
-- 总集数为 `0` 表示未知，不执行上限过滤。
-
-### 下载路径
-
-默认模板：
+默认路径模板：
 
 ```text
 {base}/{subscription}/Season {season}
@@ -211,51 +152,30 @@ DMHY_BASE_URL=https://share.dmhy.org
 {year}
 ```
 
-自定义下载路径可直接填写 qBittorrent 识别的绝对路径，例如：
-
-```text
-/vol2/1000/影视/金牌得主 (2025)/Season 2
-```
-
-保存前点击“预览规则和路径”，页面会显示匹配结果、原始集数、偏移后集数和最终下载位置。
-
-### 下载策略
-
-- 遗漏检测：根据已成功推送的整数集数和总集数显示缺失列表。
-- 只下载最新集：一次刷新发现多条新匹配记录时，只推送集数最高的一条；其他条目记录为跳过。
-- 启用订阅：关闭后调度器不再轮询该订阅。
+保存前使用“预览规则和路径”确认匹配结果、集数和最终目录。
 
 ## 更新功能
 
-更新检查不会自动执行。只有点击页面顶部“检查更新”时，才访问：
+更新检查不会自动执行。只有点击页面顶部“检查更新”时才访问 GitHub Release API。
 
-```text
-https://api.github.com/repos/planeteditorx/feeddock/releases/latest
-```
-
-GitHub 对 REST API 有访问限额。若飞牛所在公网 IP 与其他用户共享限额，可在 Compose 中可选设置 GitHub Token：
+如果 GitHub 返回限流，可在 Compose 中可选设置只读 Token：
 
 ```yaml
-UPDATE_GITHUB_TOKEN: "你的Fine-grained token"
+UPDATE_GITHUB_TOKEN: "你的 Fine-grained token"
 ```
 
-公开仓库只读取 Release 时，Token 不需要仓库写权限。不要把 Token 提交到公开仓库。
+不要把 Token 提交到公开仓库。
 
-没有 Watchtower 时，手动升级：
-
-```bash
-docker compose pull feeddock
-docker compose up -d --no-build --remove-orphans
-```
+没有 Watchtower 时，在飞牛中拉取最新镜像并重新部署 Compose 即可。宿主机 `data` 目录不会丢失。
 
 ## GitHub Actions
 
 `.github/workflows/docker-publish.yml` 会：
 
-1. 运行 Python 测试和 JavaScript/YAML 校验。
-2. 构建 `linux/amd64` 和 `linux/arm64` 镜像。
+1. 运行测试和语法检查。
+2. 构建 `linux/amd64` 与 `linux/arm64` 镜像。
 3. 推送到 GHCR。
-4. 根据 `VERSION` 创建对应 Git 标签和 GitHub Release。
+4. 根据 `VERSION` 创建 Git 标签和 GitHub Release。
 
 发布新版本只需修改 `VERSION` 后提交到 `main`。
 
@@ -276,10 +196,10 @@ curl http://127.0.0.1:7789/health
 返回示例：
 
 ```json
-{"status":"ok","version":"1.5.0"}
+{"status":"ok","version":"1.6.0"}
 ```
 
-需要备份：
+建议备份：
 
 ```text
 data/feeddock.db

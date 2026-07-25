@@ -6,11 +6,38 @@ import httpx
 
 from app.discovery import (
     DiscoveryService,
-    build_dmhy_rss_url,
+    parse_mikan_catalog_html,
     parse_mikan_detail_html,
     parse_mikan_search_html,
 )
 
+
+MIKAN_CATALOG_HTML = """
+<div class="sk-bangumi" data-dayofweek="1">
+  <div class="row"><span>星期一</span></div>
+  <ul>
+    <li>
+      <span class="js-bangumi-item" data-src="/images/Bangumi/202601/abc.jpg?width=240" data-bangumiid="3822"></span>
+      <a class="an-text" title="金牌得主 第二季" href="/Home/Bangumi/3822">金牌得主 第二季</a>
+      <div class="date-text">7/24/2026</div>
+    </li>
+    <li>
+      <span data-src="https://cdn.mikan.test/3981.jpg" data-bangumiid="3981"></span>
+      <a class="an-text" href="/Home/Bangumi/3981">魔法少女奈叶 EXCEEDS</a>
+      <div class="date-text">7/25/2026</div>
+    </li>
+  </ul>
+</div>
+<div class="sk-bangumi" data-dayofweek="6">
+  <div>星期六</div>
+  <ul>
+    <li>
+      <span data-src="/images/Bangumi/681.jpg" data-bangumiid="681"></span>
+      <a class="an-text" title="摩绪" href="/Home/Bangumi/681"></a>
+    </li>
+  </ul>
+</div>
+"""
 
 MIKAN_SEARCH_HTML = """
 <!doctype html><html><head><title>搜索结果 - Mikan Project</title></head><body>
@@ -31,19 +58,35 @@ MIKAN_DETAIL_HTML = """
 </body></html>
 """
 
-DMHY_RSS = b"""<?xml version='1.0' encoding='UTF-8'?>
-<rss version='2.0'><channel>
-<item>
-<title>[LoliHouse] Medalist S2 - 01 [1080p][CHS]</title>
-<link>https://share.dmhy.test/topics/view/123.html</link>
-<guid>dmhy-123</guid>
-<pubDate>Sat, 25 Jul 2026 12:00:00 +0000</pubDate>
-<enclosure url='https://dl.dmhy.test/123.torrent' type='application/x-bittorrent'/>
-</item>
-</channel></rss>"""
-
 
 class DiscoveryParserTests(unittest.TestCase):
+    def test_mikan_catalog_groups_by_weekday_and_extracts_cover(self) -> None:
+        rows = parse_mikan_catalog_html(
+            MIKAN_CATALOG_HTML,
+            "https://mikan.test",
+            year=2026,
+            season="夏",
+        )
+        self.assertEqual([row["weekday"] for row in rows], ["星期一", "星期六"])
+        self.assertEqual(rows[0]["items"][0]["bangumi_id"], 3822)
+        self.assertEqual(rows[0]["items"][0]["title"], "金牌得主 第二季")
+        self.assertEqual(
+            rows[0]["items"][0]["cover_url"],
+            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240",
+        )
+        self.assertEqual(rows[0]["items"][0]["update_at"], "7/24/2026")
+
+    def test_mikan_catalog_can_filter_title(self) -> None:
+        rows = parse_mikan_catalog_html(
+            MIKAN_CATALOG_HTML,
+            "https://mikan.test",
+            year=2026,
+            season="夏",
+            query="魔法少女",
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual([item["bangumi_id"] for item in rows[0]["items"]], [3981])
+
     def test_mikan_search_extracts_unique_bangumi(self) -> None:
         results = parse_mikan_search_html(MIKAN_SEARCH_HTML, "https://mikan.test")
         self.assertEqual([item["bangumi_id"] for item in results], [3822, 3981])
@@ -68,44 +111,35 @@ class DiscoveryParserTests(unittest.TestCase):
         )
         self.assertEqual(groups[370]["preset"]["primary_rss_name"], "Mikan · LoliHouse")
 
-    def test_dmhy_url_uses_keyword_rss(self) -> None:
-        url = build_dmhy_rss_url("金牌 得主", "https://share.dmhy.test")
-        self.assertIn("/topics/rss/rss.xml?", url)
-        self.assertIn("keyword=%E9%87%91%E7%89%8C+%E5%BE%97%E4%B8%BB", url)
-        self.assertIn("sort_id=2", url)
-
 
 class DiscoveryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "mikan.test" and request.url.path == "/Home/BangumiCoverFlowByDayOfWeek":
+                self.assertEqual(request.url.params["year"], "2026")
+                self.assertEqual(request.url.params["seasonStr"], "夏")
+                return httpx.Response(200, text=MIKAN_CATALOG_HTML, request=request)
             if request.url.host == "mikan.test" and request.url.path == "/Home/Search":
                 return httpx.Response(200, text=MIKAN_SEARCH_HTML, request=request)
             if request.url.host == "mikan.test" and request.url.path == "/Home/Bangumi/3822":
                 return httpx.Response(200, text=MIKAN_DETAIL_HTML, request=request)
-            if request.url.host == "share.dmhy.test" and request.url.path == "/topics/rss/rss.xml":
-                return httpx.Response(
-                    200,
-                    content=DMHY_RSS,
-                    headers={"Content-Type": "application/rss+xml"},
-                    request=request,
-                )
             return httpx.Response(404, request=request)
 
         self.client = httpx.Client(transport=httpx.MockTransport(handler))
         self.service = DiscoveryService(
             client=self.client,
             mikan_bases=("https://mikan.test",),
-            dmhy_base="https://share.dmhy.test",
             timeout=3,
         )
 
     def tearDown(self) -> None:
         self.client.close()
 
-    def test_search_mikan_then_select_group(self) -> None:
-        response = self.service.search("mikan", "金牌得主", limit=20)
-        self.assertFalse(response["errors"])
-        result = response["results"][0]
+    def test_catalog_then_select_group(self) -> None:
+        response = self.service.catalog(2026, "夏")
+        self.assertEqual(response["year"], 2026)
+        self.assertEqual(response["season"], "夏")
+        result = response["rows"][0]["items"][0]
         self.assertEqual(result["bangumi_id"], 3822)
 
         detail = self.service.mikan_detail(
@@ -116,33 +150,30 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(detail["groups"]), 2)
         self.assertTrue(detail["groups"][0]["preset"]["rss_url"].startswith("https://mikan.test/RSS/Bangumi"))
 
-    def test_search_dmhy_returns_feed_and_release_presets(self) -> None:
-        response = self.service.search("dmhy", "金牌得主", limit=20)
+    def test_keyword_search_remains_available_as_fallback(self) -> None:
+        response = self.service.search("金牌得主", limit=20)
         self.assertFalse(response["errors"])
-        self.assertEqual(response["results"][0]["result_type"], "feed")
-        self.assertEqual(response["results"][0]["preset"]["name"], "金牌得主")
-        release = response["results"][1]
-        self.assertEqual(release["result_type"], "release")
-        self.assertEqual(release["download_url"], "https://dl.dmhy.test/123.torrent")
-        self.assertIn("Medalist", release["preset"]["sample_title"])
+        self.assertEqual(response["provider"], "mikan")
+        self.assertEqual(response["results"][0]["bangumi_id"], 3822)
 
-    def test_all_search_keeps_partial_results_and_reports_errors(self) -> None:
-        def failing_handler(request: httpx.Request) -> httpx.Response:
-            if request.url.host == "mikan.test":
+    def test_catalog_rejects_invalid_season(self) -> None:
+        with self.assertRaisesRegex(ValueError, "季度仅支持"):
+            self.service.catalog(2026, "雨季")
+
+    def test_catalog_uses_fallback_mikan_domain(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "primary.test":
                 return httpx.Response(503, request=request)
-            if request.url.host == "share.dmhy.test":
-                return httpx.Response(200, content=DMHY_RSS, request=request)
-            return httpx.Response(404, request=request)
+            return httpx.Response(200, text=MIKAN_CATALOG_HTML, request=request)
 
-        with httpx.Client(transport=httpx.MockTransport(failing_handler)) as client:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             service = DiscoveryService(
                 client=client,
-                mikan_bases=("https://mikan.test",),
-                dmhy_base="https://share.dmhy.test",
+                mikan_bases=("https://primary.test", "https://fallback.test"),
             )
-            response = service.search("all", "金牌得主", limit=10)
-        self.assertTrue(any(item["provider"] == "dmhy" for item in response["results"]))
-        self.assertTrue(any(error.startswith("Mikan：") for error in response["errors"]))
+            response = service.catalog(2026, "夏")
+        self.assertEqual(response["base_url"], "https://fallback.test")
+        self.assertTrue(response["errors"])
 
 
 if __name__ == "__main__":

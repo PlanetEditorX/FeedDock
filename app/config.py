@@ -47,7 +47,6 @@ class Settings:
     update_github_token: str
     mikan_base_url: str
     mikan_fallback_urls: tuple[str, ...]
-    dmhy_base_url: str
 
 
 def load_settings() -> Settings:
@@ -57,7 +56,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.5.0"),
+        app_version=os.getenv("APP_VERSION", "1.6.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -68,7 +67,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.5 (+self-hosted RSS automation)",
+            "FeedDock/1.6 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -91,7 +90,6 @@ def load_settings() -> Settings:
             ).split(",")
             if value.strip()
         ),
-        dmhy_base_url=os.getenv("DMHY_BASE_URL", "https://share.dmhy.org").strip().rstrip("/"),
     )
 
 
