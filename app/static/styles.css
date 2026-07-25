@@ -198,3 +198,28 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 }
 .modal.hidden { display: none; }
 .cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }
+
+/* v1.9 metadata, Emby naming, and remembered panel state */
+.panel { transition: padding .18s ease, background .18s ease; }
+.panel > .panel-head { position: relative; }
+.panel-toggle { margin-left: auto; flex: 0 0 auto; }
+.panel.is-collapsed { padding-bottom: 10px; }
+.panel.is-collapsed > :not(.panel-head) { display: none !important; }
+.panel.is-collapsed > .panel-head { margin-bottom: 0; }
+.metadata-search-row { display: grid; grid-template-columns: 180px minmax(240px, 1fr) auto; gap: 12px; align-items: end; }
+.metadata-search-row label { display: grid; gap: 6px; color: var(--muted); }
+.metadata-results { display: grid; gap: 10px; margin-top: 14px; }
+.metadata-card { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.metadata-card > img { width: 86px; height: 122px; border-radius: 7px; object-fit: cover; background: var(--panel-2); }
+.metadata-card-body { min-width: 0; display: grid; align-content: start; gap: 6px; }
+.metadata-card-title { display: grid; gap: 2px; }
+.metadata-card-title strong { font-size: 15px; }
+.metadata-overview { margin: 2px 0; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.metadata-card .card-actions { align-items: center; margin-top: 4px; }
+.subscription-card .card-actions { flex-wrap: wrap; }
+td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .metadata-search-row { grid-template-columns: 1fr; }
+  .metadata-card { grid-template-columns: 66px minmax(0, 1fr); }
+  .metadata-card > img { width: 66px; height: 94px; }
+}

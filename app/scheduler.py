@@ -5,6 +5,7 @@ import time
 
 from .config import settings
 from .mikan_cache import refresh_due_mikan_catalogs
+from .postprocess import normalize_pending_items
 from .rss_service import refresh_all
 
 
@@ -25,29 +26,34 @@ class PollScheduler:
         self._thread.start()
 
     def _run(self) -> None:
-        # Give the API time to finish startup. Mikan due-cache checks run at
-        # least every 10 minutes and are independent of the RSS poll interval.
         if self._stop_event.wait(10):
             return
         next_rss_refresh = 0.0
+        next_rename_check = 0.0
         while not self._stop_event.is_set():
             now = time.monotonic()
             if now >= next_rss_refresh:
                 try:
                     refresh_all()
                 except Exception:
-                    # A transient RSS failure must not stop future runs.
                     pass
                 next_rss_refresh = time.monotonic() + settings.poll_interval_minutes * 60
+
+            if now >= next_rename_check:
+                try:
+                    normalize_pending_items(limit=50)
+                except Exception:
+                    pass
+                next_rename_check = time.monotonic() + 120
 
             try:
                 refresh_due_mikan_catalogs()
             except Exception:
-                # Cache refresh failures are recorded per entry and retried later.
                 pass
 
-            seconds_until_rss = max(1.0, next_rss_refresh - time.monotonic())
-            if self._stop_event.wait(min(600.0, seconds_until_rss)):
+            next_event = min(next_rss_refresh, next_rename_check)
+            wait_seconds = max(1.0, next_event - time.monotonic())
+            if self._stop_event.wait(min(600.0, wait_seconds)):
                 return
 
     def stop(self) -> None:

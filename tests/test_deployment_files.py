@@ -140,5 +140,38 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("def update_mikan_weekday_filter", main)
         self.assertIn("save_mikan_weekday_hidden_filter", runtime)
 
+    def test_metadata_naming_and_scraping_ui_is_wired(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        for element_id in (
+            'metadataSettingsForm', 'metadataSearchProvider', 'metadataSearchResults',
+            'normalizeTorrents', 'refreshEmby',
+        ):
+            self.assertIn(f'id="{element_id}"', index)
+        self.assertIn('/api/metadata/search', script)
+        self.assertIn('/api/metadata/detail', script)
+        self.assertIn('/api/actions/normalize-torrents', script)
+        self.assertIn('/api/actions/emby-refresh', script)
+        self.assertIn('def metadata_detail', main)
+
+    def test_all_main_panels_remember_collapsed_state(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertGreaterEqual(index.count('data-panel-id='), 8)
+        self.assertIn('feeddock.panelState.v1', script)
+        self.assertIn('feeddock.mikanWeekdayState.v1', script)
+        self.assertIn('localStorage.setItem', script)
+        self.assertIn('.panel.is-collapsed > :not(.panel-head)', styles)
+
+    def test_fnos_compose_has_optional_metadata_and_media_mount(self) -> None:
+        compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
+        self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)
+        self.assertIn('BANGUMI_ACCESS_TOKEN: ""', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: ""', compose)
+        self.assertIn('EMBY_URL: ""', compose)
+        self.assertIn('# - "/vol2/1000/影视:/media"', compose)
+
 if __name__ == "__main__":
     unittest.main()

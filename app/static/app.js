@@ -5,6 +5,8 @@ let subscriptionsById = new Map();
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
 const mikanWeekdayDrafts = new Map();
+const PANEL_STATE_KEY = 'feeddock.panelState.v1';
+const MIKAN_WEEKDAY_STATE_KEY = 'feeddock.mikanWeekdayState.v1';
 
 function showNotice(message, ok = true) {
   notice.textContent = message;
@@ -55,16 +57,26 @@ function setFormValue(form, name, value) {
 function resetSubscriptionForm() {
   subscriptionForm.reset();
   setFormValue(subscriptionForm, 'subscription_id', '');
+  setFormValue(subscriptionForm, 'naming_mode', 'auto');
+  setFormValue(subscriptionForm, 'media_type', 'tv');
+  setFormValue(subscriptionForm, 'metadata_year', 0);
+  setFormValue(subscriptionForm, 'tmdb_id', 0);
+  setFormValue(subscriptionForm, 'bangumi_id', 0);
   setFormValue(subscriptionForm, 'season', 1);
   setFormValue(subscriptionForm, 'episode_group', 0);
   setFormValue(subscriptionForm, 'episode_offset', 0);
   setFormValue(subscriptionForm, 'total_episodes', 0);
-  setFormValue(subscriptionForm, 'save_path_template', '{base}/{subscription}/Season {season}');
+  setFormValue(subscriptionForm, 'total_episodes_source', '');
+  setFormValue(subscriptionForm, 'save_path_template', '{base}/{media_folder}/Season {season:02}');
+  setFormValue(subscriptionForm, 'file_name_template', '{title} - S{season:02}E{episode:02}');
+  setFormValue(subscriptionForm, 'rename_enabled', true);
   setFormValue(subscriptionForm, 'enabled', true);
+  document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
+  document.getElementById('metadataSearchResults').className = 'metadata-results muted';
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
   document.getElementById('saveSubscription').textContent = '保存订阅';
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
-  subscriptionPreviewBox.textContent = '尚未预览。最终下载位置以预览结果为准。';
+  subscriptionPreviewBox.textContent = '尚未预览。';
   subscriptionPreviewBox.className = 'preview-box muted';
 }
 
@@ -75,33 +87,31 @@ function subscriptionPayload({ forPreview = false, formData = null } = {}) {
     const value = Number.parseInt(get(name), 10);
     return Number.isFinite(value) ? value : fallback;
   };
+  const checkbox = (name) => Boolean(subscriptionForm.elements[name]?.checked);
   const payload = {
-    name: get('name'),
-    reference_title: get('reference_title'),
-    tmdb_title: get('tmdb_title'),
-    bgm_url: get('bgm_url'),
-    air_date: get('air_date') || null,
-    season: integer('season', 1),
-    primary_rss_name: get('primary_rss_name'),
-    rss_url: get('rss_url'),
-    backup_rss_name: get('backup_rss_name'),
-    backup_rss_url: get('backup_rss_url') || null,
-    include_keywords: get('include_keywords'),
-    exclude_keywords: get('exclude_keywords'),
-    episode_regex: get('episode_regex'),
-    episode_group: integer('episode_group', 0),
-    episode_offset: integer('episode_offset', 0),
-    total_episodes: integer('total_episodes', 0),
-    save_path_template: get('save_path_template') || '{base}/{subscription}/Season {season}',
-    custom_download_path: get('custom_download_path'),
-    missing_detection: subscriptionForm.elements.missing_detection.checked,
-    only_latest: subscriptionForm.elements.only_latest.checked,
-    enabled: subscriptionForm.elements.enabled.checked,
+    name: get('name'), reference_title: get('reference_title'), tmdb_title: get('tmdb_title'),
+    manual_title: get('manual_title'), naming_mode: get('naming_mode') || 'auto',
+    media_type: get('media_type') || 'tv', bgm_url: get('bgm_url'), air_date: get('air_date') || null,
+    metadata_year: integer('metadata_year', 0), metadata_source: get('metadata_source'),
+    metadata_overview: get('metadata_overview'), poster_url: get('poster_url'), backdrop_url: get('backdrop_url'),
+    tmdb_id: integer('tmdb_id', 0),
+    bangumi_id: integer('bangumi_id', 0), auto_metadata: checkbox('auto_metadata'),
+    season: integer('season', 1), primary_rss_name: get('primary_rss_name'), rss_url: get('rss_url'),
+    backup_rss_name: get('backup_rss_name'), backup_rss_url: get('backup_rss_url') || null,
+    include_keywords: get('include_keywords'), exclude_keywords: get('exclude_keywords'),
+    episode_regex: get('episode_regex'), episode_group: integer('episode_group', 0),
+    episode_offset: integer('episode_offset', 0), total_episodes: integer('total_episodes', 0),
+    total_episodes_locked: checkbox('total_episodes_locked'), total_episodes_source: get('total_episodes_source'),
+    rename_enabled: checkbox('rename_enabled'), file_name_template: get('file_name_template') || '{title} - S{season:02}E{episode:02}',
+    scrape_enabled: checkbox('scrape_enabled'),
+    save_path_template: get('save_path_template') || '{base}/{media_folder}/Season {season:02}',
+    custom_download_path: get('custom_download_path'), missing_detection: checkbox('missing_detection'),
+    only_latest: checkbox('only_latest'), enabled: checkbox('enabled'),
   };
   if (forPreview) {
     payload.sample_title = get('sample_title');
     if (!payload.rss_url) payload.rss_url = 'https://preview.invalid/feed.xml';
-    if (!payload.name) payload.name = payload.reference_title || '未命名订阅';
+    if (!payload.name) payload.name = payload.manual_title || payload.tmdb_title || payload.reference_title || '未命名订阅';
   }
   return payload;
 }
@@ -183,6 +193,115 @@ async function saveDownloaderSettings() {
   return result;
 }
 
+function initializeCollapsiblePanels() {
+  let states = {};
+  try { states = JSON.parse(localStorage.getItem(PANEL_STATE_KEY) || '{}'); } catch (_) {}
+  document.querySelectorAll('.panel[data-panel-id]').forEach((panel) => {
+    const head = panel.querySelector(':scope > .panel-head');
+    if (!head || head.querySelector('.panel-toggle')) return;
+    const id = panel.dataset.panelId;
+    const collapsed = Boolean(states[id]);
+    panel.classList.toggle('is-collapsed', collapsed);
+    const button = text('button', collapsed ? '展开' : '收起', 'small secondary panel-toggle');
+    button.type = 'button';
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.addEventListener('click', () => {
+      const next = !panel.classList.contains('is-collapsed');
+      panel.classList.toggle('is-collapsed', next);
+      button.textContent = next ? '展开' : '收起';
+      button.setAttribute('aria-expanded', String(!next));
+      let current = {};
+      try { current = JSON.parse(localStorage.getItem(PANEL_STATE_KEY) || '{}'); } catch (_) {}
+      current[id] = next;
+      localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(current));
+    });
+    head.append(button);
+  });
+}
+
+async function loadMetadataSettings() {
+  const data = await api('/api/metadata/settings');
+  const form = document.getElementById('metadataSettingsForm');
+  form.elements.tmdb_read_access_token.value = '';
+  form.elements.tmdb_read_access_token.placeholder = data.tmdb_token_configured ? '已保存；留空表示不修改' : '请填写 TMDB Read Access Token';
+  form.elements.bangumi_access_token.value = '';
+  form.elements.bangumi_access_token.placeholder = data.bangumi_token_configured ? '已保存；留空表示不修改' : '公开查询通常可留空';
+  form.elements.metadata_language.value = data.metadata_language || data.language || 'zh-CN';
+  form.elements.media_local_root.value = data.media_local_root || '';
+  form.elements.emby_url.value = data.emby_url || '';
+  form.elements.emby_api_key.value = '';
+  form.elements.emby_api_key.placeholder = data.emby_api_key_configured ? '已保存；留空表示不修改' : '可选';
+  form.elements.clear_tmdb_token.checked = false;
+  form.elements.clear_bangumi_token.checked = false;
+  form.elements.clear_emby_api_key.checked = false;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi ${data.bangumi_token_configured ? '已配置 Token' : '公开访问'} · 本地刮削 ${data.media_local_root ? '已启用' : '未启用'} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
+}
+
+function metadataSettingsPayload() {
+  const form = document.getElementById('metadataSettingsForm');
+  return {
+    tmdb_read_access_token: form.elements.tmdb_read_access_token.value.trim() || null,
+    clear_tmdb_token: form.elements.clear_tmdb_token.checked,
+    bangumi_access_token: form.elements.bangumi_access_token.value.trim() || null,
+    clear_bangumi_token: form.elements.clear_bangumi_token.checked,
+    metadata_language: form.elements.metadata_language.value.trim() || 'zh-CN',
+    media_local_root: form.elements.media_local_root.value.trim(),
+    emby_url: form.elements.emby_url.value.trim(),
+    emby_api_key: form.elements.emby_api_key.value.trim() || null,
+    clear_emby_api_key: form.elements.clear_emby_api_key.checked,
+  };
+}
+
+async function applyMetadataCandidateToForm(candidate) {
+  const season = Number.parseInt(subscriptionForm.elements.season.value || '1', 10) || 0;
+  const params = new URLSearchParams({ provider: candidate.provider, metadata_id: String(candidate.id), media_type: candidate.media_type || 'tv', season: String(season) });
+  const detail = await api(`/api/metadata/detail?${params}`);
+  setFormValue(subscriptionForm, 'media_type', detail.media_type || 'tv');
+  setFormValue(subscriptionForm, 'metadata_year', detail.year || 0);
+  setFormValue(subscriptionForm, 'metadata_source', detail.provider);
+  setFormValue(subscriptionForm, 'metadata_overview', detail.overview || '');
+  setFormValue(subscriptionForm, 'poster_url', detail.poster_url || '');
+  setFormValue(subscriptionForm, 'backdrop_url', detail.backdrop_url || '');
+  if (detail.air_date) setFormValue(subscriptionForm, 'air_date', detail.air_date);
+  if (!subscriptionForm.elements.total_episodes_locked.checked && detail.total_episodes > 0) {
+    setFormValue(subscriptionForm, 'total_episodes', detail.total_episodes);
+    setFormValue(subscriptionForm, 'total_episodes_source', detail.provider);
+  }
+  if (detail.provider === 'tmdb') {
+    setFormValue(subscriptionForm, 'tmdb_id', detail.id);
+    setFormValue(subscriptionForm, 'tmdb_title', detail.title);
+    setFormValue(subscriptionForm, 'naming_mode', 'tmdb');
+  } else {
+    setFormValue(subscriptionForm, 'bangumi_id', detail.id);
+    setFormValue(subscriptionForm, 'reference_title', detail.title);
+    setFormValue(subscriptionForm, 'bgm_url', detail.detail_url || `https://bangumi.tv/subject/${detail.id}`);
+    if (!subscriptionForm.elements.tmdb_id.value || subscriptionForm.elements.tmdb_id.value === '0') setFormValue(subscriptionForm, 'naming_mode', 'bangumi');
+  }
+  showNotice(`已读取 ${detail.provider.toUpperCase()} 详情；总集数 ${detail.total_episodes || '未知'}`);
+}
+
+function renderMetadataResults(results) {
+  const container = document.getElementById('metadataSearchResults');
+  container.replaceChildren();
+  container.className = 'metadata-results';
+  if (!results.length) { container.append(text('p', '没有找到匹配条目。', 'empty')); return; }
+  results.forEach((candidate) => {
+    const card = document.createElement('article'); card.className = 'metadata-card';
+    if (candidate.poster_url) { const img = document.createElement('img'); img.src = candidate.poster_url; img.loading = 'lazy'; img.alt = ''; card.append(img); }
+    const body = document.createElement('div'); body.className = 'metadata-card-body';
+    const heading = document.createElement('div'); heading.className = 'metadata-card-title';
+    heading.append(text('strong', candidate.title || candidate.original_title));
+    heading.append(text('span', `${candidate.provider.toUpperCase()} · ${candidate.year || '年份未知'} · 匹配 ${(Number(candidate.score || 0) * 100).toFixed(0)}%`, 'muted'));
+    body.append(heading);
+    if (candidate.original_title && candidate.original_title !== candidate.title) body.append(text('span', `原名：${candidate.original_title}`, 'muted'));
+    if (candidate.overview) body.append(text('p', candidate.overview.slice(0, 180), 'metadata-overview'));
+    const actions = document.createElement('div'); actions.className = 'card-actions';
+    const choose = text('button', '选择此条目'); choose.type = 'button'; choose.addEventListener('click', async () => { choose.disabled = true; try { await applyMetadataCandidateToForm(candidate); } catch (error) { showNotice(error.message, false); } finally { choose.disabled = false; } }); actions.append(choose);
+    if (candidate.detail_url) actions.append(externalLink('查看来源', candidate.detail_url));
+    body.append(actions); card.append(body); container.append(card);
+  });
+}
+
 async function loadGlobalRules() {
   const data = await api('/api/rules/global');
   document.getElementById('globalRulesForm').elements.exclude_rules.value = data.exclude_rules || '';
@@ -220,7 +339,7 @@ function applyDiscoveryPreset(preset) {
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
-    'missing_detection', 'only_latest', 'enabled', 'sample_title',
+    'missing_detection', 'only_latest', 'enabled', 'sample_title', 'bangumi_id',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
   document.getElementById('subscriptionFormTitle').textContent = `添加订阅：${preset.name || '未命名番剧'}`;
@@ -375,6 +494,18 @@ async function openMikanDetail(item, forceRefresh = false) {
 
 function mikanWeekdayKey(data, row) {
   return `${data.year}|${data.season}|${row.weekday}`;
+}
+
+function getMikanWeekdayCollapsed(key) {
+  try { return Boolean(JSON.parse(localStorage.getItem(MIKAN_WEEKDAY_STATE_KEY) || '{}')[key]); }
+  catch (_) { return false; }
+}
+
+function setMikanWeekdayCollapsed(key, collapsed) {
+  let states = {};
+  try { states = JSON.parse(localStorage.getItem(MIKAN_WEEKDAY_STATE_KEY) || '{}'); } catch (_) {}
+  states[key] = collapsed;
+  localStorage.setItem(MIKAN_WEEKDAY_STATE_KEY, JSON.stringify(states));
 }
 
 function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle = null } = {}) {
@@ -563,10 +694,19 @@ function renderMikanCatalog(data) {
       });
       actions.append(edit);
     }
+    const collapsed = getMikanWeekdayCollapsed(key);
+    const collapse = text('button', collapsed ? '展开本周' : '收起本周', 'small secondary');
+    collapse.type = 'button';
+    collapse.addEventListener('click', () => {
+      setMikanWeekdayCollapsed(key, !getMikanWeekdayCollapsed(key));
+      renderMikanCatalog(data);
+    });
+    actions.append(collapse);
     heading.append(titleBox, actions);
 
     const grid = document.createElement('div');
     grid.className = 'mikan-anime-grid';
+    if (collapsed) grid.classList.add('hidden');
     if (!visibleItems.length) {
       const empty = text(
         'p',
@@ -652,11 +792,13 @@ async function loadMikanCatalog(form, forceRefresh = false) {
 
 function populateSubscriptionForm(sub) {
   const fields = [
-    'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season',
+    'name', 'reference_title', 'tmdb_title', 'manual_title', 'naming_mode', 'media_type',
+    'bgm_url', 'air_date', 'metadata_year', 'metadata_source', 'metadata_overview', 'poster_url', 'backdrop_url', 'tmdb_id', 'bangumi_id', 'auto_metadata', 'season',
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
-    'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
-    'missing_detection', 'only_latest', 'enabled',
+    'episode_offset', 'total_episodes', 'total_episodes_locked', 'total_episodes_source',
+    'rename_enabled', 'file_name_template', 'scrape_enabled', 'save_path_template',
+    'custom_download_path', 'missing_detection', 'only_latest', 'enabled',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, sub[field]));
   setFormValue(subscriptionForm, 'subscription_id', sub.id);
@@ -674,108 +816,49 @@ async function loadSubscriptions() {
   const data = await api('/api/subscriptions');
   subscriptionsById = new Map(data.map((sub) => [String(sub.id), sub]));
   container.replaceChildren();
-  if (!data.length) {
-    container.append(text('p', '还没有订阅。请先添加一个你有权使用的 RSS 地址。', 'empty'));
-    return;
-  }
-
+  if (!data.length) { container.append(text('p', '还没有订阅。', 'empty')); return; }
   for (const sub of data) {
-    const card = document.createElement('article');
-    card.className = 'subscription-card';
-
-    const titleRow = document.createElement('div');
-    titleRow.className = 'subscription-title';
-    titleRow.append(text('h3', sub.name));
-    titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`));
-    card.append(titleRow);
-
-    const meta = document.createElement('div');
-    meta.className = 'subscription-meta';
-    meta.append(text('span', `参考标题：${sub.reference_title || '—'}`));
-    meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
-    if (sub.backup_rss_url) meta.append(text('span', `备用 RSS：${sub.backup_rss_name || '未命名'} · ${sub.backup_rss_url}`));
-    meta.append(text('span', `季 ${sub.season} · 偏移 ${sub.episode_offset} · 总集数 ${sub.total_episodes || '未知'}`));
+    const card = document.createElement('article'); card.className = 'subscription-card';
+    const titleRow = document.createElement('div'); titleRow.className = 'subscription-title';
+    titleRow.append(text('h3', sub.canonical_title || sub.name));
+    titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); card.append(titleRow);
+    const meta = document.createElement('div'); meta.className = 'subscription-meta';
+    meta.append(text('span', `原订阅名：${sub.name}`));
+    meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
+    meta.append(text('span', `来源：${sub.metadata_source || '未匹配'} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'}`));
+    meta.append(text('span', `季 ${sub.season} · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
     meta.append(text('span', `路径：${sub.custom_download_path || sub.save_path_template}`));
-    meta.append(text('span', `策略：${sub.only_latest ? '只下载最新集' : '下载全部匹配'} · ${sub.missing_detection ? '遗漏检测开启' : '遗漏检测关闭'}`));
-    if (sub.missing_detection) {
-      const missing = sub.missing_episodes.length ? sub.missing_episodes.join(', ') : '无';
-      meta.append(text('span', `遗漏集数：${missing}`));
-    }
+    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 本地刮削 ${sub.scrape_enabled ? '开启' : '关闭'}`));
+    meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
     card.append(meta);
-
-    card.append(text('p', `匹配：${sub.include_keywords || '无'} ｜ 排除：${sub.exclude_keywords || '无'}`));
-    card.append(text(
-      'p',
-      `上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`,
-      sub.last_error ? 'error-text' : 'muted',
-    ));
-
-    const controls = document.createElement('div');
-    controls.className = 'card-actions';
-    const edit = text('button', '编辑', 'secondary');
-    edit.addEventListener('click', () => populateSubscriptionForm(sub));
-    const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary');
-    toggle.addEventListener('click', async () => {
-      await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) });
-      showNotice('订阅状态已更新');
-      await reloadAll();
-    });
-    const remove = text('button', '删除', 'danger');
-    remove.addEventListener('click', async () => {
-      if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
-      await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
-      if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm();
-      showNotice('订阅已删除');
-      await reloadAll();
-    });
-    controls.append(edit, toggle, remove);
-    card.append(controls);
-    container.append(card);
+    card.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
+    const controls = document.createElement('div'); controls.className = 'card-actions';
+    const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
+    const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
+    const scrape = text('button', '刮削本地文件', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape?notify_emby=true`, { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); } });
+    const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
+    const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
+    controls.append(edit, sync, scrape, toggle, remove); card.append(controls); container.append(card);
   }
 }
 
 async function loadItems() {
   const status = document.getElementById('statusFilter').value;
   const data = await api(`/api/items?limit=100${status ? `&status=${encodeURIComponent(status)}` : ''}`);
-  const tbody = document.getElementById('items');
-  tbody.replaceChildren();
-  if (!data.length) {
-    const row = document.createElement('tr');
-    const cell = text('td', '暂无记录');
-    cell.colSpan = 6;
-    row.append(cell);
-    tbody.append(row);
-    return;
-  }
+  const tbody = document.getElementById('items'); tbody.replaceChildren();
+  if (!data.length) { const row = document.createElement('tr'); const cell = text('td', '暂无记录'); cell.colSpan = 7; row.append(cell); tbody.append(row); return; }
   for (const item of data) {
-    const row = document.createElement('tr');
-    row.append(text('td', fmtDate(item.created_at)));
+    const row = document.createElement('tr'); row.append(text('td', fmtDate(item.created_at)));
     const titleCell = document.createElement('td');
-    if (item.source_url) {
-      const link = text('a', item.title);
-      link.href = item.source_url;
-      link.target = '_blank';
-      link.rel = 'noreferrer noopener';
-      titleCell.append(link);
-    } else titleCell.textContent = item.title;
-    row.append(titleCell);
-    row.append(text('td', item.episode || '—'));
-    const statusCell = document.createElement('td');
-    statusCell.append(text('span', ({ queued: '已推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
-    row.append(statusCell);
-    row.append(text('td', item.reason || '—'));
+    if (item.source_url) { const link = text('a', item.title); link.href = item.source_url; link.target = '_blank'; link.rel = 'noreferrer noopener'; titleCell.append(link); } else titleCell.textContent = item.title;
+    row.append(titleCell); row.append(text('td', item.episode || '—'));
+    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`)); row.append(statusCell);
+    const rename = item.rename_status ? `${item.rename_status}${item.desired_name ? `：${item.desired_name}` : ''}${item.rename_message ? `
+${item.rename_message}` : ''}` : (item.desired_name || '未启用');
+    row.append(text('td', rename, item.rename_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
     const actionCell = document.createElement('td');
-    if (item.status === 'error') {
-      const retry = text('button', '重试', 'small secondary');
-      retry.addEventListener('click', async () => {
-        const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' });
-        showNotice(result.message, result.ok);
-        await reloadAll();
-      });
-      actionCell.append(retry);
-    }
-    row.append(actionCell);
-    tbody.append(row);
+    if (item.status === 'error') { const retry = text('button', '重试', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
+    row.append(actionCell); tbody.append(row);
   }
 }
 
@@ -802,7 +885,7 @@ async function reloadAll() {
   try {
     await loadAuth();
     await Promise.all([
-      loadDashboard(), loadConfig(), loadDownloaderSettings(), loadGlobalRules(),
+      loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
       loadSubscriptions(), loadItems(), loadLogs(),
     ]);
   } catch (error) {
@@ -861,6 +944,34 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeMikanModal();
 });
 
+document.getElementById('metadataSettingsForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try { await api('/api/metadata/settings', { method: 'PUT', body: JSON.stringify(metadataSettingsPayload()) }); await loadMetadataSettings(); showNotice('元数据与 Emby 配置已保存'); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('restoreMetadataSettings').addEventListener('click', async () => {
+  if (!window.confirm('确认删除网页保存的元数据配置并恢复 Compose 默认值？')) return;
+  try { await api('/api/metadata/settings', { method: 'DELETE' }); await loadMetadataSettings(); showNotice('已恢复 Compose 默认元数据配置'); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('searchMetadata').addEventListener('click', async () => {
+  const provider = document.getElementById('metadataSearchProvider').value;
+  const query = document.getElementById('metadataSearchQuery').value.trim() || subscriptionForm.elements.name.value.trim() || subscriptionForm.elements.reference_title.value.trim();
+  if (!query) { showNotice('请先输入订阅名称或元数据搜索词', false); return; }
+  const mediaType = subscriptionForm.elements.media_type.value || 'tv';
+  const year = Number.parseInt(subscriptionForm.elements.metadata_year.value || '0', 10) || 0;
+  const container = document.getElementById('metadataSearchResults'); container.textContent = '正在搜索…'; container.className = 'metadata-results muted';
+  try { const params = new URLSearchParams({ provider, q: query, media_type: mediaType, year: String(year), limit: '10' }); renderMetadataResults(await api(`/api/metadata/search?${params}`)); } catch (error) { container.textContent = error.message; container.className = 'metadata-results error-text'; }
+});
+
+document.getElementById('normalizeTorrents').addEventListener('click', async () => {
+  try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`规范化完成：成功 ${result.renamed || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('refreshEmby').addEventListener('click', async () => {
+  try { const result = await api('/api/actions/emby-refresh', { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); }
+});
+
 document.getElementById('globalRulesForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const value = event.currentTarget.elements.exclude_rules.value;
@@ -896,7 +1007,9 @@ document.getElementById('previewSubscription').addEventListener('click', async (
       `匹配结果：${result.matched ? '通过' : '不通过'}（${result.match_reason}）`,
       `原始集数：${result.parsed_episode || '未识别'}`,
       `偏移后集数：${result.adjusted_episode || '未识别'}`,
+      `媒体目录：${result.media_folder || '—'}`,
       `最终下载位置：${result.save_path}`,
+      `规范文件名：${result.desired_name || '未生成'}`,
     ].join('\n');
     subscriptionPreviewBox.className = `preview-box ${result.matched ? 'good' : 'bad'}`;
   } catch (error) {
@@ -948,6 +1061,7 @@ document.getElementById('logout').addEventListener('click', async () => {
 });
 
 document.getElementById('statusFilter').addEventListener('change', loadItems);
+initializeCollapsiblePanels();
 initializeCatalogSelectors();
 resetSubscriptionForm();
 reloadAll();

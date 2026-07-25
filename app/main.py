@@ -15,7 +15,11 @@ from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
+from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
+from .naming import canonical_title, media_folder_name
+from .postprocess import normalize_pending_items
+from .scraper import refresh_emby_library, scrape_subscription
 from .rss_service import (
     calculate_missing_episodes,
     preview_subscription,
@@ -24,9 +28,12 @@ from .rss_service import (
 )
 from .runtime_config import (
     get_app_setting,
+    load_metadata_config,
     load_mikan_hidden_filters,
     load_qbittorrent_config,
+    reset_metadata_config,
     reset_qbittorrent_config,
+    save_metadata_config,
     save_mikan_weekday_hidden_filter,
     save_qbittorrent_config,
     set_app_setting,
@@ -40,6 +47,11 @@ from .schemas import (
     GlobalRulesUpdate,
     LoginRequest,
     LogOut,
+    MetadataApplyRequest,
+    MetadataCandidateOut,
+    MetadataRecordOut,
+    MetadataSettingsUpdate,
+    MetadataSyncRequest,
     MikanBangumiDetailOut,
     MikanCatalogOut,
     MikanWeekdayFilterOut,
@@ -133,6 +145,8 @@ def _apply_mikan_hidden_filters(
 
 def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
     output = SubscriptionOut.model_validate(subscription)
+    output.canonical_title = canonical_title(subscription)
+    output.media_folder = media_folder_name(subscription)
     if subscription.missing_detection:
         output.missing_episodes = calculate_missing_episodes(db, subscription)
     return output
@@ -247,6 +261,7 @@ def logout(response: Response) -> dict[str, bool]:
 @app.get("/api/config", dependencies=[Depends(require_admin)])
 def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
     qbit = load_qbittorrent_config(db)
+    metadata = load_metadata_config(db)
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
@@ -257,6 +272,8 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
         "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
         "deployed_image": settings.deployed_image,
         "mikan_cache_hours": settings.mikan_cache_hours,
+        "metadata_auto_sync_hours": settings.metadata_auto_sync_hours,
+        **metadata.public_dict(),
     }
 
 
@@ -288,6 +305,88 @@ def update_downloader_settings(
 @app.delete("/api/downloader/settings", dependencies=[Depends(require_admin)])
 def restore_downloader_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
     return reset_qbittorrent_config(db).public_dict()
+
+
+@app.get("/api/metadata/settings", dependencies=[Depends(require_admin)])
+def get_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return load_metadata_config(db).public_dict()
+
+
+@app.put("/api/metadata/settings", dependencies=[Depends(require_admin)])
+def update_metadata_settings(
+    payload: MetadataSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, str | bool]:
+    try:
+        config = save_metadata_config(
+            db,
+            tmdb_read_access_token=payload.tmdb_read_access_token,
+            clear_tmdb_token=payload.clear_tmdb_token,
+            bangumi_access_token=payload.bangumi_access_token,
+            clear_bangumi_token=payload.clear_bangumi_token,
+            metadata_language=payload.metadata_language,
+            media_local_root=payload.media_local_root,
+            emby_url=payload.emby_url,
+            emby_api_key=payload.emby_api_key,
+            clear_emby_api_key=payload.clear_emby_api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config.public_dict()
+
+
+@app.delete("/api/metadata/settings", dependencies=[Depends(require_admin)])
+def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return reset_metadata_config(db).public_dict()
+
+
+@app.get(
+    "/api/metadata/search",
+    response_model=list[MetadataCandidateOut],
+    dependencies=[Depends(require_admin)],
+)
+def search_metadata(
+    provider: str = Query(pattern="^(tmdb|bangumi)$"),
+    q: str = Query(min_length=1, max_length=300),
+    media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
+    year: int = Query(default=0, ge=0, le=9999),
+    limit: int = Query(default=10, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    try:
+        return MetadataService().search(
+            db, provider=provider, query=q, media_type=media_type, year=year, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"元数据搜索失败：{exc}") from exc
+
+
+@app.get(
+    "/api/metadata/detail",
+    response_model=MetadataRecordOut,
+    dependencies=[Depends(require_admin)],
+)
+def metadata_detail(
+    provider: str = Query(pattern="^(tmdb|bangumi)$"),
+    metadata_id: int = Query(gt=0),
+    media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
+    season: int = Query(default=1, ge=0, le=999),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return MetadataService().get(
+            db,
+            provider=provider,
+            metadata_id=metadata_id,
+            media_type=media_type,
+            season=season,
+        ).as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"元数据详情读取失败：{exc}") from exc
 
 
 @app.get("/api/rules/global", dependencies=[Depends(require_admin)])
@@ -515,6 +614,76 @@ def update_subscription(
     return _subscription_out(db, subscription)
 
 
+@app.post(
+    "/api/subscriptions/{subscription_id}/metadata/apply",
+    response_model=SubscriptionOut,
+    dependencies=[Depends(require_admin)],
+)
+def apply_subscription_metadata(
+    subscription_id: int,
+    payload: MetadataApplyRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    try:
+        MetadataService().apply(
+            db,
+            subscription,
+            provider=payload.provider,
+            metadata_id=payload.metadata_id,
+            media_type=payload.media_type,
+            season=payload.season,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"元数据读取失败：{exc}") from exc
+    return _subscription_out(db, subscription)
+
+
+@app.post(
+    "/api/subscriptions/{subscription_id}/metadata/sync",
+    response_model=SubscriptionOut,
+    dependencies=[Depends(require_admin)],
+)
+def sync_subscription_metadata(
+    subscription_id: int,
+    payload: MetadataSyncRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    try:
+        MetadataService().sync(db, subscription, payload.provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"元数据同步失败：{exc}") from exc
+    return _subscription_out(db, subscription)
+
+
+@app.post(
+    "/api/subscriptions/{subscription_id}/scrape",
+    dependencies=[Depends(require_admin)],
+)
+def scrape_subscription_route(
+    subscription_id: int,
+    notify_emby: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    result = scrape_subscription(db, subscription)
+    payload = result.as_dict()
+    if result.ok and notify_emby:
+        payload["emby"] = refresh_emby_library(db).as_dict()
+    return payload
+
+
 @app.delete("/api/subscriptions/{subscription_id}", dependencies=[Depends(require_admin)])
 def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
     subscription = db.get(Subscription, subscription_id)
@@ -558,6 +727,16 @@ def list_logs(
 def manual_refresh(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
     background_tasks.add_task(refresh_all)
     return {"ok": True, "message": "刷新任务已启动"}
+
+
+@app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])
+def normalize_torrents_now() -> dict[str, Any]:
+    return normalize_pending_items(limit=200)
+
+
+@app.post("/api/actions/emby-refresh", dependencies=[Depends(require_admin)])
+def refresh_emby_now(db: Session = Depends(get_db)) -> dict[str, Any]:
+    return refresh_emby_library(db).as_dict()
 
 
 @app.post("/api/actions/test-downloader", dependencies=[Depends(require_admin)])

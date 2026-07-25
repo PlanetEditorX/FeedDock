@@ -271,3 +271,184 @@ def save_mikan_weekday_hidden_filter(
         json.dumps(serializable, ensure_ascii=False, separators=(",", ":")),
     )
     return cleaned_ids
+
+
+METADATA_SETTING_KEYS = {
+    "tmdb_read_access_token",
+    "bangumi_access_token",
+    "metadata_language",
+    "media_local_root",
+    "emby_url",
+    "emby_api_key",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataConfig:
+    tmdb_read_access_token: str
+    bangumi_access_token: str
+    language: str
+    media_local_root: str
+    emby_url: str
+    emby_api_key: str
+    source: str
+
+    @property
+    def tmdb_configured(self) -> bool:
+        return bool(self.tmdb_read_access_token)
+
+    @property
+    def bangumi_configured(self) -> bool:
+        # Most public Bangumi reads work without a token. A token is still
+        # supported for administrators who need authenticated access.
+        return True
+
+    @property
+    def scraper_configured(self) -> bool:
+        return bool(self.media_local_root)
+
+    @property
+    def emby_configured(self) -> bool:
+        return bool(self.emby_url and self.emby_api_key)
+
+    def public_dict(self) -> dict[str, str | bool]:
+        return {
+            "tmdb_token_configured": self.tmdb_configured,
+            "bangumi_token_configured": bool(self.bangumi_access_token),
+            "metadata_language": self.language,
+            "media_local_root": self.media_local_root,
+            "emby_url": self.emby_url,
+            "emby_api_key_configured": bool(self.emby_api_key),
+            "scraper_configured": self.scraper_configured,
+            "emby_configured": self.emby_configured,
+            "source": self.source,
+        }
+
+
+def _environment_metadata_config() -> MetadataConfig:
+    return MetadataConfig(
+        tmdb_read_access_token=settings.tmdb_read_access_token,
+        bangumi_access_token=settings.bangumi_access_token,
+        language=settings.metadata_language,
+        media_local_root=str(settings.media_local_root or ""),
+        emby_url=settings.emby_url,
+        emby_api_key=settings.emby_api_key,
+        source="compose",
+    )
+
+
+def _load_metadata_with_session(db: Session) -> MetadataConfig:
+    fallback = _environment_metadata_config()
+    try:
+        rows = {
+            row.key: row.value
+            for row in db.scalars(select(AppSetting).where(AppSetting.key.in_(METADATA_SETTING_KEYS)))
+        }
+    except (OperationalError, ProgrammingError):
+        return fallback
+    if not rows:
+        return fallback
+    return MetadataConfig(
+        tmdb_read_access_token=rows.get(
+            "tmdb_read_access_token", fallback.tmdb_read_access_token
+        ),
+        bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
+        language=rows.get("metadata_language", fallback.language).strip() or "zh-CN",
+        media_local_root=rows.get("media_local_root", fallback.media_local_root).strip(),
+        emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
+        emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
+        source="web",
+    )
+
+
+def load_metadata_config(db: Session | None = None) -> MetadataConfig:
+    if db is not None:
+        return _load_metadata_with_session(db)
+    with SessionLocal() as session:
+        return _load_metadata_with_session(session)
+
+
+def _validate_optional_http_url(value: str, label: str) -> str:
+    cleaned = value.strip().rstrip("/")
+    if not cleaned:
+        return ""
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{label}必须是有效的 HTTP 或 HTTPS 地址")
+    if len(cleaned) > 2000:
+        raise ValueError(f"{label}过长")
+    return cleaned
+
+
+def save_metadata_config(
+    db: Session,
+    *,
+    tmdb_read_access_token: str | None,
+    clear_tmdb_token: bool,
+    bangumi_access_token: str | None,
+    clear_bangumi_token: bool,
+    metadata_language: str,
+    media_local_root: str,
+    emby_url: str,
+    emby_api_key: str | None,
+    clear_emby_api_key: bool,
+) -> MetadataConfig:
+    current = load_metadata_config(db)
+    language = metadata_language.strip() or "zh-CN"
+    if len(language) > 20:
+        raise ValueError("元数据语言代码过长")
+
+    local_root = media_local_root.strip().rstrip("/")
+    if local_root and not local_root.startswith("/"):
+        raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
+    if len(local_root) > 2000:
+        raise ValueError("本地媒体挂载目录过长")
+
+    clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
+    tmdb_token = "" if clear_tmdb_token else (
+        current.tmdb_read_access_token
+        if tmdb_read_access_token is None
+        else tmdb_read_access_token.strip()
+    )
+    bangumi_token = "" if clear_bangumi_token else (
+        current.bangumi_access_token
+        if bangumi_access_token is None
+        else bangumi_access_token.strip()
+    )
+    emby_key = "" if clear_emby_api_key else (
+        current.emby_api_key if emby_api_key is None else emby_api_key.strip()
+    )
+    for value, label, limit in (
+        (tmdb_token, "TMDB Token", 2000),
+        (bangumi_token, "Bangumi Token", 2000),
+        (emby_key, "Emby API Key", 1000),
+    ):
+        if len(value) > limit:
+            raise ValueError(f"{label}过长")
+
+    values = {
+        "tmdb_read_access_token": tmdb_token,
+        "bangumi_access_token": bangumi_token,
+        "metadata_language": language,
+        "media_local_root": local_root,
+        "emby_url": clean_emby_url,
+        "emby_api_key": emby_key,
+    }
+    existing = {
+        row.key: row
+        for row in db.scalars(select(AppSetting).where(AppSetting.key.in_(METADATA_SETTING_KEYS)))
+    }
+    for key, value in values.items():
+        row = existing.get(key)
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+    db.commit()
+    return load_metadata_config(db)
+
+
+def reset_metadata_config(db: Session) -> MetadataConfig:
+    db.execute(delete(AppSetting).where(AppSetting.key.in_(METADATA_SETTING_KEYS)))
+    db.commit()
+    return load_metadata_config(db)

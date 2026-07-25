@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.8.2}
+        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.9.0}
     image: ${FEEDDOCK_IMAGE:-feeddock:local}
     container_name: feeddock
     restart: unless-stopped
@@ -16,6 +16,8 @@ services:
     volumes:
       - ./data:/data
       - ./downloads:/downloads
+      # 可选：本地 NFO/图片刮削需要与 qBittorrent 使用同一媒体目录
+      # - /你的/媒体目录:/media
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     networks:

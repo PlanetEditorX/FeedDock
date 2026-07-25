@@ -5,7 +5,7 @@ import html
 import posixpath
 import re
 import threading
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -17,6 +17,7 @@ from .config import settings
 from .database import SessionLocal
 from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
+from .naming import media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
 from .runtime_config import get_app_setting, load_qbittorrent_config
 
@@ -155,16 +156,11 @@ def _safe_segment(value: str) -> str:
     return cleaned or "未命名订阅"
 
 
-def _path_context(subscription: Subscription, episode: str, download_path: str) -> dict[str, str | int]:
-    return {
-        "base": download_path.rstrip("/"),
-        "subscription": _safe_segment(subscription.name),
-        "reference_title": _safe_segment(subscription.reference_title or subscription.name),
-        "tmdb_title": _safe_segment(subscription.tmdb_title or subscription.reference_title or subscription.name),
-        "season": subscription.season,
-        "episode": episode or "unknown",
-        "year": (subscription.air_date or "")[:4],
-    }
+def _path_context(subscription: Subscription, episode: str, download_path: str) -> dict[str, Any]:
+    # naming_context preserves every legacy variable and adds Emby-friendly
+    # variables such as {title}, {media_folder}, {tmdb_id} and padded season /
+    # episode values. Existing custom templates continue to work unchanged.
+    return naming_context(subscription, episode, download_path)
 
 
 def render_save_path(subscription: Subscription, episode: str, db: Session | None = None) -> str:
@@ -172,7 +168,11 @@ def render_save_path(subscription: Subscription, episode: str, db: Session | Non
     context = _path_context(subscription, episode, download_path)
     template = (subscription.custom_download_path or subscription.save_path_template).strip()
     if not template:
-        template = "{base}/{subscription}/Season {season}"
+        template = (
+            "{base}/{media_folder}"
+            if (subscription.media_type or "tv") == "movie"
+            else "{base}/{media_folder}/Season {season:02}"
+        )
     try:
         rendered = template.format_map(context)
     except (KeyError, ValueError):
@@ -262,6 +262,8 @@ def preview_subscription(subscription: Subscription, sample_title: str, db: Sess
         "matched": matched,
         "match_reason": reason,
         "save_path": render_save_path(subscription, adjusted, db),
+        "desired_name": render_desired_name(subscription, adjusted) if subscription.rename_enabled else "",
+        "media_folder": media_folder_name(subscription),
     }
 
 
@@ -282,8 +284,29 @@ def calculate_missing_episodes(db: Session, subscription: Subscription) -> list[
     return [episode for episode in range(1, subscription.total_episodes + 1) if episode not in downloaded]
 
 
+def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
+    if not subscription.auto_metadata:
+        return
+    last = subscription.metadata_last_synced_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - last < timedelta(hours=settings.metadata_auto_sync_hours):
+            return
+    try:
+        from .metadata_service import MetadataService
+
+        MetadataService().sync(db, subscription, "auto")
+    except Exception as exc:
+        # Metadata outages must never prevent RSS processing. The error is
+        # visible in the system log and the next scheduled run retries it.
+        add_log(db, "WARNING", f"自动元数据同步失败：{subscription.name}", str(exc))
+        db.commit()
+
+
 def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
     stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
+    _sync_metadata_if_due(db, subscription)
     try:
         entries, source_name = _load_subscription_entries(subscription)
     except Exception as exc:
@@ -388,14 +411,33 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
 
         save_path = render_save_path(subscription, candidate["episode"], db)
         item.save_path = save_path
-        result = downloader.add_url(candidate["download_url"], save_path)
+        desired_name = (
+            render_desired_name(subscription, candidate["episode"])
+            if subscription.rename_enabled and candidate["episode"]
+            else ""
+        )
+        qbit_tag = f"feeddock-item-{item.id}" if desired_name else ""
+        item.desired_name = desired_name
+        item.qbit_tag = qbit_tag
+        result = downloader.add_url(
+            candidate["download_url"],
+            save_path,
+            rename=desired_name,
+            tags=qbit_tag,
+        )
         if result.ok:
             item.status = "queued"
             item.reason = result.message
+            item.rename_status = "pending" if desired_name else "skipped"
+            item.rename_message = (
+                "等待 qBittorrent 获取种子文件列表" if desired_name else "未启用规范命名"
+            )
             stats["queued"] += 1
         else:
             item.status = "error"
             item.reason = result.message
+            item.rename_status = "error" if desired_name else ""
+            item.rename_message = result.message if desired_name else ""
             stats["errors"] += 1
 
     subscription.last_checked_at = datetime.now(timezone.utc)
@@ -425,6 +467,12 @@ def refresh_all() -> dict[str, int | bool | str]:
                 result = process_subscription(db, subscription)
                 for key in ("new", "queued", "skipped", "errors"):
                     totals[key] += result[key]
+        try:
+            from .postprocess import normalize_pending_items
+
+            normalize_pending_items(limit=50)
+        except Exception:
+            pass
         return {"ok": True, "message": "刷新完成", **totals}
     finally:
         _refresh_lock.release()
@@ -438,9 +486,23 @@ def retry_item(db: Session, item: FeedItem) -> tuple[bool, str]:
         return False, "该条目没有可下载链接"
 
     save_path = item.save_path or render_save_path(subscription, item.episode, db)
-    result = QBittorrentClient().add_url(item.download_url, save_path)
+    desired_name = (
+        render_desired_name(subscription, item.episode)
+        if subscription.rename_enabled and item.episode
+        else ""
+    )
+    item.qbit_tag = item.qbit_tag or (f"feeddock-item-{item.id}" if desired_name else "")
+    item.desired_name = desired_name
+    result = QBittorrentClient().add_url(
+        item.download_url,
+        save_path,
+        rename=desired_name,
+        tags=item.qbit_tag,
+    )
     item.save_path = save_path
     item.status = "queued" if result.ok else "error"
     item.reason = result.message
+    item.rename_status = "pending" if result.ok and desired_name else ("error" if desired_name else "skipped")
+    item.rename_message = "等待 qBittorrent 获取种子文件列表" if result.ok and desired_name else result.message
     db.commit()
     return result.ok, result.message

@@ -35,6 +35,16 @@ services:
       QBIT_CATEGORY: "rss"
       DOWNLOAD_PATH: "/downloads/rss"
 
+      # 元数据与 Emby 规范命名
+      METADATA_LANGUAGE: "zh-CN"
+      METADATA_AUTO_SYNC_HOURS: "24"
+      TMDB_READ_ACCESS_TOKEN: ""
+      BANGUMI_ACCESS_TOKEN: ""
+      # 仅在下方挂载媒体目录后填写 /media
+      MEDIA_LOCAL_ROOT: ""
+      EMBY_URL: ""
+      EMBY_API_KEY: ""
+
       UPDATE_REPOSITORY: "planeteditorx/feeddock"
       UPDATE_API_URL: "https://api.github.com"
       # 可选：仅用于提高手动检查更新的 GitHub API 限额
@@ -46,3 +56,5 @@ services:
 
     volumes:
       - "/vol1/1000/应用/feeddock/data:/data"
+      # 可选：启用本地 NFO/海报刮削时取消注释并修改真实媒体目录
+      # - "/vol2/1000/影视:/media"

@@ -1,182 +1,142 @@
 # FeedDock
 
-FeedDock 是一个自托管 RSS 规则处理与 qBittorrent 自动化服务。它可以浏览 Mikan 番剧季度目录、选择字幕组 RSS，并按规则轮询、过滤、识别集数、去重后推送到 qBittorrent。
+FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取你配置的 RSS，将匹配条目推送给 qBittorrent，并提供 Mikan 季度目录、持久过滤、封面缓存、TMDB/Bangumi 元数据匹配、Emby 规范命名、总集数同步和可选本地 NFO 刮削。
 
-> 本项目不提供、存储或分发媒体资源。请只处理你有权访问和下载的内容，并遵守所在地区法律、源站规则及版权要求。
+当前版本：`1.9.0`
 
-当前版本：`1.8.2`
+## v1.9.0 新增
 
+- 手动、TMDB、Bangumi、自动四种命名模式。
+- Emby 友好目录：`标题 (年份) [tmdbid=ID]/Season 01`。
+- Emby 友好文件名：`标题 - S01E01.mkv`，字幕同步改名。
+- TMDB/Bangumi 搜索、详情读取、首播年份、简介、海报和总集数同步。
+- 总集数手动锁定；锁定后第三方同步不会覆盖。
+- 所有主板块可收起/展开，浏览器自动记住状态。
+- 可选生成 `tvshow.nfo`、`season.nfo`、`movie.nfo`、`poster.jpg`、`backdrop.jpg`。
+- 可选通知 Emby 扫描媒体库。
+- Mikan 240×320 WebP 封面本地优先缓存。
 
-## v1.8.2
-
-- Mikan 封面改为请求 `240×320` WebP 缩略图，显著减少首次加载的数据量。
-- 封面采用本地磁盘优先策略：只要 `/data/mikan-image-cache` 中的文件有效，就直接读取，不因时间到期重新访问 Mikan。
-- 只有本地文件缺失、为空或元数据损坏时，才重新从 Mikan 获取并原子替换缓存。
-- 浏览器封面缓存默认延长到 30 天；前端失败时不再绕过代理直接访问 Mikan。
-- 目录缓存升级到 schema 4，旧目录会自动刷新一次并切换为缩略图 URL。
-- 修复 Mikan 官网桌面目录封面解析：官网将封面放在列表项中的 `span.js-expand_bangumi[data-src]`，标题则位于兄弟节点 `div.an-info-group` 内。
-- 解析器现在优先以完整 `<li>` 作为番剧卡片，能够同时读取番剧 ID、标题、更新时间和封面。
-- Mikan 目录缓存结构升级到 schema 3，旧的空封面缓存会在升级后自动重新获取一次。
-- Mikan 每个星期新增“编辑过滤”模式。
-- 可批量隐藏不喜欢的番剧，也可使用“本周全部显示”恢复。
-- 隐藏设置按年份、季度和星期保存到现有 SQLite 数据库。
-- 页面刷新、Mikan 强制更新、容器重启和重新部署后仍然生效。
-- 过滤只读写本地数据库，不会增加 Mikan 请求次数。
-
-番剧目录数据直接读取 Mikan 官网接口：
+## 工作流程
 
 ```text
-/Home/BangumiCoverFlowByDayOfWeek?year=年份&seasonStr=季度
+Mikan/RSS
+   ↓
+标题与集数识别
+   ↓
+TMDB 或 Bangumi 元数据匹配
+   ↓
+生成 Emby 目录和文件名
+   ↓
+推送 qBittorrent（savepath + rename + 唯一 tag）
+   ↓
+qBittorrent 获取磁力元数据后，通过 WebUI API 重命名视频和同名字幕
+   ↓
+可选写入本地 NFO/海报，并通知 Emby 刷新
 ```
 
-没有使用第三方番剧数据库。
+FeedDock 不提供媒体资源，也不会绕过 qBittorrent 直接移动正在做种的文件。
 
-## v1.7.1
+## 推荐目录结构
 
-- 修复 Mikan 别名重定向后仍使用旧域名拼接相对封面路径的问题。
-- `data-src="/images/..."` 现在会基于最终响应域名生成封面，例如 `https://mikanani.me/images/...`。
-- 封面代理允许在已配置的 Mikan 域名之间安全重定向。
-- 旧版 Mikan 目录缓存会在升级后自动刷新一次，修复已经缓存的空封面或错误域名。
-- 保留每 6 小时后台更新、页面默认读缓存和手动强制更新策略。
-
-## v1.7.0
-
-- 新增持久化 Mikan 季度目录缓存，页面重复读取不会再次访问 Mikan。
-- 已浏览的季度默认每 6 小时由后台刷新一次，失败后至少间隔 1 小时再重试。
-- 标题搜索改为在本地缓存中筛选，不产生额外来源请求。
-- 新增“强制更新”按钮，可立即更新所选年份和季度。
-- 字幕组详情首次读取后写入缓存，重复打开不再请求 Mikan，并可单独强制更新。
-- 番剧封面写入 `/data/mikan-image-cache`，后续优先从本地读取。
-- 缓存数据、时间和上次刷新错误会显示在页面中。
-
-## 主要功能
-
-- 应用内登录，首次登录后强制修改初始密码。
-- Mikan 年份、季度、星期番剧目录。
-- 字幕组 RSS 选择和订阅表单预填。
-- RSS / Atom 定时轮询、手动刷新、指纹去重和错误重试。
-- 主 RSS 失败或没有条目时自动使用备用 RSS。
-- 包含、排除、全局排除及自定义集数正则。
-- 集数偏移、总集数、遗漏检测和只下载最新集。
-- qBittorrent 可位于同机、局域网其他设备或远程地址。
-- qBittorrent 配置可直接在网页保存和测试。
-- GitHub Release 手动检查与可选 Watchtower 更新。
-- GitHub Actions 自动测试、构建多架构 GHCR 镜像并发布 Release。
-
-## 飞牛 OS 部署
-
-飞牛 OS 使用：
-
-- `docker-compose.fnos.yml`
-- `FNOS_DEPLOY.md`
-
-默认镜像：
+电视剧/季度番剧：
 
 ```text
-ghcr.io/planeteditorx/feeddock:latest
+/downloads/rss/
+└── 金牌得主 (2025) [tmdbid=123456]/
+    └── Season 02/
+        ├── 金牌得主 - S02E01.mkv
+        ├── 金牌得主 - S02E01.zh-CN.ass
+        └── season.nfo
 ```
 
-默认数据目录：
+剧场版/电影：
 
 ```text
-/vol1/1000/应用/feeddock/data
+/downloads/rss/
+└── 电影标题 (2026) [tmdbid=123456]/
+    ├── 电影标题 (2026).mkv
+    ├── movie.nfo
+    ├── poster.jpg
+    └── backdrop.jpg
 ```
 
-同一台飞牛上的 qBittorrent 地址通常填写：
-
-```text
-http://host.docker.internal:8080
-```
-
-详细步骤见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)。
-
-## 通用 Docker Compose 部署
+## 快速启动
 
 ```bash
+cd /你的/FeedDock目录
 cp .env.example .env
 docker compose up -d --build
 ```
 
-打开：
+打开：`http://服务器地址:7789`
+
+首次账号由环境变量决定。飞牛默认 Compose 使用：
 
 ```text
-http://服务器IP:7789
+用户名：admin
+密码：password
 ```
 
-首次管理员由以下变量创建：
+首次登录后必须修改密码，密码保存在 `/data/feeddock.db`。
 
-```dotenv
-ADMIN_USER=admin
-ADMIN_PASSWORD=change-this-to-a-strong-password
-```
+## 元数据配置
 
-首次登录后必须修改密码。新密码以哈希形式保存在 `data/feeddock.db`，容器重启不会被 Compose 中的初始密码覆盖。
+网页打开“元数据与刮削设置”。
 
-## Mikan 番剧目录
+### TMDB
 
-登录后在首页找到 **Mikan 番剧目录**：
+填写 TMDB API Read Access Token。TMDB 用于：
 
-1. 选择年份和冬、春、夏、秋。
-2. 点击“读取缓存”。若该季度从未缓存，FeedDock 只在这一次访问 Mikan 并保存完整季度数据。
-3. 之后重复打开、切换标题搜索条件只读取本地 SQLite 缓存。
-4. 已浏览季度到期后由后台更新，默认间隔 6 小时。
-5. 需要立即获取最新目录时点击“强制更新”。
-6. 页面按星期显示番剧；点击番剧读取字幕组 RSS。字幕组详情同样会缓存。
-7. 弹窗中的“强制更新字幕组”可立即刷新单个番剧的字幕组列表。
-8. 点击“订阅”将名称、来源和 RSS 带入订阅表单，检查规则和路径后保存。
+- Emby 最稳定的名称和外部 ID；
+- 电视剧季度详情；
+- 当前季度总集数；
+- 中文简介、海报和背景图。
 
-缓存策略：
+### Bangumi
 
-```dotenv
-MIKAN_CACHE_HOURS=6
-MIKAN_IMAGE_CACHE_DAYS=30
-MIKAN_THUMBNAIL_WIDTH=240
-MIKAN_THUMBNAIL_HEIGHT=320
-```
+Bangumi 公开读取通常不要求 Token，可直接搜索。它用于：
 
-`MIKAN_IMAGE_CACHE_DAYS` 控制浏览器缓存响应时间。服务端磁盘缓存采用本地优先策略：本地文件有效时直接读取；只有本地文件缺失、为空或元数据损坏时才访问 Mikan。Mikan 封面路径发生变化时会自然生成新的缓存文件。
+- 中文名和日文原名；
+- 动画条目、放送日期和话数；
+- 动漫专属简介与封面。
 
-默认来源地址：
+### 推荐匹配顺序
 
-```dotenv
-MIKAN_BASE_URL=https://mikanime.tv
-MIKAN_FALLBACK_URLS=https://mikanani.me,https://mikanani.kas.pub
-```
+1. 先用 Bangumi 找到准确动漫条目。
+2. 再用 TMDB 搜索并选择正确电视剧/电影条目。
+3. 命名来源选择 `TMDB` 或 `自动`。
+4. 保存前点击“预览规则和命名”。
 
-季度目录、字幕组详情和缓存元数据保存在 `data/feeddock.db`；封面保存在 `data/mikan-image-cache`。删除容器不会丢失这些数据，只要宿主机 `data` 目录仍然保留。
-
-后台只自动刷新已经浏览过的季度，不会遍历全部年份，也不会每 6 小时批量刷新所有番剧详情。这样可以降低来源请求数量。字幕组详情默认使用已有缓存，需要最新数据时手动强制更新。
-
-若旧页面仍显示旧按钮，请先确认镜像版本为 `1.8.2`，再使用 `Ctrl + F5` 强制刷新浏览器缓存。
-
-## qBittorrent
-
-登录后在“qBittorrent 下载器”中填写：
-
-- WebUI 地址
-- 用户名
-- 密码
-- 分类
-- 下载保存根目录
-
-`DOWNLOAD_PATH` 及订阅的自定义下载路径必须是 qBittorrent 所在主机或容器能够识别的路径。FeedDock 只把路径发送给 qBittorrent。
-
-## 高级订阅规则
-
-订阅支持：
-
-- 参考标题、TMDB 标题、BgmUrl、日期和季。
-- 主 RSS 与备用 RSS。
-- 普通文字或正则包含、排除和全局排除。
-- 自定义集数正则和捕获组。
-- 集数偏移、小数集数和总集数限制。
-- 保存路径模板或 qBittorrent 可识别的绝对路径。
-- 遗漏检测、只下载最新集和启停控制。
-
-默认路径模板：
+自动模式的名称优先级：
 
 ```text
-{base}/{subscription}/Season {season}
+手动规范标题 > TMDB 标题 > Bangumi 标题 > 原订阅名称
+```
+
+## 自动获取总集数
+
+选择元数据搜索结果时，FeedDock 会立即读取详情：
+
+- TMDB 电视剧：读取指定 `Season N` 的 episode 列表数量；
+- TMDB 电影：总数为 1；
+- Bangumi：优先读取条目话数，缺失时读取 episode API 总数。
+
+勾选“锁定总集数”后，任何自动同步都不会覆盖手动值。
+
+勾选“定期自动同步元数据”后，RSS 轮询时会按照 `METADATA_AUTO_SYNC_HOURS` 检查是否需要更新，第三方网站临时故障不会阻断 RSS 下载。
+
+## qBittorrent 规范重命名
+
+默认文件模板：
+
+```text
+{title} - S{season:02}E{episode:02}
+```
+
+默认保存路径模板：
+
+```text
+{base}/{media_folder}/Season {season:02}
 ```
 
 可用变量：
@@ -186,73 +146,134 @@ MIKAN_FALLBACK_URLS=https://mikanani.me,https://mikanani.kas.pub
 {subscription}
 {reference_title}
 {tmdb_title}
+{manual_title}
+{title}
+{media_folder}
 {season}
+{season:02}
 {episode}
+{episode:02}
+{episode_pad}
 {year}
+{tmdb_id}
+{bangumi_id}
+{media_type}
 ```
 
-保存前使用“预览规则和路径”确认匹配结果、集数和最终目录。
+处理逻辑：
 
-## 更新功能
+1. 添加任务时传递 `savepath`、`rename` 和唯一标签 `feeddock-item-ID`。
+2. 每 2 分钟查询一次等待规范化的任务。
+3. 磁力元数据未完成时保持 `pending`。
+4. 只有一个视频文件时，通过 qBittorrent `renameFile` 改名。
+5. 同目录且与视频原文件同前缀的字幕同步改名。
+6. 多视频合集不会猜测集数，状态标记为 `manual_required`。
 
-更新检查不会自动执行。只有点击页面顶部“检查更新”时才访问 GitHub Release API。
+顶部“规范化文件名”按钮可以立即执行一次检查。
 
-如果 GitHub 返回限流，可在 Compose 中可选设置只读 Token：
+## 本地刮削
+
+仅让 Emby 在线识别时，不需要把媒体目录挂载给 FeedDock。目录包含 `[tmdbid=...]` 后，Emby 通常即可稳定识别。
+
+需要 FeedDock 写入本地文件时，必须让 FeedDock 与 qBittorrent 看见同一份媒体目录。
+
+飞牛示例：
 
 ```yaml
-UPDATE_GITHUB_TOKEN: "你的 Fine-grained token"
+volumes:
+  - "/vol1/1000/应用/feeddock/data:/data"
+  - "/vol2/1000/影视:/media"
+
+environment:
+  DOWNLOAD_PATH: "/downloads/rss"
+  MEDIA_LOCAL_ROOT: "/media"
 ```
 
-不要把 Token 提交到公开仓库。
+这里要求 qBittorrent 的 `DOWNLOAD_PATH` 与 FeedDock 的本地挂载存在可映射关系。最简单的方式是两个容器都把同一宿主机目录挂载到相同容器路径，例如都使用 `/media`：
 
-没有 Watchtower 时，在飞牛中拉取最新镜像并重新部署 Compose 即可。宿主机 `data` 目录不会丢失。
-
-## GitHub Actions
-
-`.github/workflows/docker-publish.yml` 会：
-
-1. 运行测试和语法检查。
-2. 构建 `linux/amd64` 与 `linux/arm64` 镜像。
-3. 推送到 GHCR。
-4. 根据 `VERSION` 创建 Git 标签和 GitHub Release。
-
-发布新版本只需修改 `VERSION` 后提交到 `main`。
-
-## 运维
-
-查看日志：
-
-```bash
-docker compose logs -f feeddock
+```yaml
+DOWNLOAD_PATH: "/media"
+MEDIA_LOCAL_ROOT: "/media"
 ```
 
-健康检查：
-
-```bash
-curl http://127.0.0.1:7789/health
-```
-
-返回示例：
-
-```json
-{"status":"ok","version":"1.7.1"}
-```
-
-建议备份：
+然后订阅路径使用：
 
 ```text
-data/feeddock.db
-data/session-secret.key
-.env
+{base}/{media_folder}/Season {season:02}
 ```
 
-## 测试
+启用“允许生成本地 NFO 与图片”后，成功规范化文件时会自动：
+
+- 写入 `tvshow.nfo` / `season.nfo` 或 `movie.nfo`；
+- 保存 `poster.jpg` 和 `backdrop.jpg`；
+- 本地图片已存在且有效时不重复下载；
+- 已配置 Emby 地址和 API Key 时通知 Emby 刷新。
+
+也可以在订阅卡片点击“刮削本地文件”。
+
+## 板块收缩与记忆
+
+所有主板块标题右侧都有“收起/展开”。状态保存在浏览器：
+
+```text
+localStorage: feeddock.panelState.v1
+```
+
+页面刷新、重新登录和容器重启不会丢失。同一账号在不同浏览器中分别保存状态。
+
+## Mikan 缓存
+
+目录缓存保存在 SQLite，封面缓存目录为：
+
+```text
+/data/mikan-image-cache
+```
+
+加载顺序：
+
+```text
+浏览器缓存 → FeedDock 本地图片 → Mikan 官网
+```
+
+只要本地图片有效，即使超过浏览器缓存时间也不会主动重新访问 Mikan。仅在文件缺失、为空、损坏或图片 URL 改变时重新获取。
+
+## 重要环境变量
+
+```dotenv
+FEEDDOCK_BUILD_VERSION=1.9.0
+METADATA_LANGUAGE=zh-CN
+METADATA_AUTO_SYNC_HOURS=24
+TMDB_READ_ACCESS_TOKEN=
+BANGUMI_ACCESS_TOKEN=
+MEDIA_LOCAL_ROOT=
+EMBY_URL=
+EMBY_API_KEY=
+MIKAN_THUMBNAIL_WIDTH=240
+MIKAN_THUMBNAIL_HEIGHT=320
+```
+
+敏感 Token 可以在网页中保存，数据库位于 `/data/feeddock.db`。接口返回只显示是否已配置，不返回密钥原文。
+
+## 数据库升级
+
+启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除旧订阅和历史条目。旧订阅默认不开启重命名；编辑旧订阅后可主动勾选。
+
+新增字段包括：
+
+- `naming_mode`、`media_type`、`manual_title`；
+- `tmdb_id`、`bangumi_id`、`metadata_year`；
+- `total_episodes_locked`、`total_episodes_source`；
+- `rename_enabled`、`file_name_template`、`scrape_enabled`；
+- 下载条目的 `desired_name`、`qbit_tag`、`torrent_hash` 和规范化状态。
+
+## 开发验证
 
 ```bash
-python -m unittest discover -s tests -v
+cd /你的/FeedDock目录
+python -m pip install -r requirements.txt
+python -m pytest -q
+python -m compileall -q app
 node --check app/static/app.js
 ```
 
-## License
-
-MIT
+详细飞牛部署见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)，功能设计与限制见 [METADATA_NAMING.md](METADATA_NAMING.md)。

@@ -10,11 +10,16 @@ _TEXT_FIELDS = (
     "reference_title",
     "tmdb_title",
     "bgm_url",
+    "manual_title",
+    "metadata_overview",
+    "poster_url",
+    "backdrop_url",
     "primary_rss_name",
     "backup_rss_name",
     "include_keywords",
     "exclude_keywords",
     "episode_regex",
+    "file_name_template",
     "save_path_template",
     "custom_download_path",
 )
@@ -28,6 +33,18 @@ class SubscriptionCreate(BaseModel):
     air_date: date | None = None
     season: int = Field(default=1, ge=0, le=999)
 
+    naming_mode: str = Field(default="auto", pattern="^(auto|manual|bangumi|tmdb)$")
+    media_type: str = Field(default="tv", pattern="^(tv|movie)$")
+    manual_title: str = ""
+    tmdb_id: int = Field(default=0, ge=0)
+    bangumi_id: int = Field(default=0, ge=0)
+    metadata_year: int = Field(default=0, ge=0, le=9999)
+    metadata_source: str = Field(default="", max_length=32)
+    metadata_overview: str = ""
+    poster_url: str = ""
+    backdrop_url: str = ""
+    auto_metadata: bool = False
+
     primary_rss_name: str = ""
     rss_url: HttpUrl
     backup_rss_name: str = ""
@@ -39,8 +56,13 @@ class SubscriptionCreate(BaseModel):
     episode_group: int = Field(default=0, ge=0, le=20)
     episode_offset: int = Field(default=0, ge=-10000, le=10000)
     total_episodes: int = Field(default=0, ge=0, le=10000)
+    total_episodes_locked: bool = False
+    total_episodes_source: str = Field(default="", max_length=32)
 
-    save_path_template: str = "{base}/{subscription}/Season {season}"
+    rename_enabled: bool = True
+    file_name_template: str = "{title} - S{season:02}E{episode:02}"
+    scrape_enabled: bool = False
+    save_path_template: str = "{base}/{media_folder}/Season {season:02}"
     custom_download_path: str = ""
     missing_detection: bool = False
     only_latest: bool = False
@@ -65,6 +87,18 @@ class SubscriptionUpdate(BaseModel):
     air_date: date | None = None
     season: int | None = Field(default=None, ge=0, le=999)
 
+    naming_mode: str | None = Field(default=None, pattern="^(auto|manual|bangumi|tmdb)$")
+    media_type: str | None = Field(default=None, pattern="^(tv|movie)$")
+    manual_title: str | None = None
+    tmdb_id: int | None = Field(default=None, ge=0)
+    bangumi_id: int | None = Field(default=None, ge=0)
+    metadata_year: int | None = Field(default=None, ge=0, le=9999)
+    metadata_source: str | None = Field(default=None, max_length=32)
+    metadata_overview: str | None = None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
+    auto_metadata: bool | None = None
+
     primary_rss_name: str | None = None
     rss_url: HttpUrl | None = None
     backup_rss_name: str | None = None
@@ -76,7 +110,12 @@ class SubscriptionUpdate(BaseModel):
     episode_group: int | None = Field(default=None, ge=0, le=20)
     episode_offset: int | None = Field(default=None, ge=-10000, le=10000)
     total_episodes: int | None = Field(default=None, ge=0, le=10000)
+    total_episodes_locked: bool | None = None
+    total_episodes_source: str | None = Field(default=None, max_length=32)
 
+    rename_enabled: bool | None = None
+    file_name_template: str | None = None
+    scrape_enabled: bool | None = None
     save_path_template: str | None = None
     custom_download_path: str | None = None
     missing_detection: bool | None = None
@@ -94,6 +133,18 @@ class SubscriptionOut(BaseModel):
     bgm_url: str
     air_date: str
     season: int
+    naming_mode: str
+    media_type: str
+    manual_title: str
+    tmdb_id: int
+    bangumi_id: int
+    metadata_year: int
+    metadata_source: str
+    metadata_overview: str
+    poster_url: str
+    backdrop_url: str
+    metadata_last_synced_at: datetime | None
+    auto_metadata: bool
     primary_rss_name: str
     rss_url: str
     backup_rss_name: str
@@ -104,6 +155,11 @@ class SubscriptionOut(BaseModel):
     episode_group: int
     episode_offset: int
     total_episodes: int
+    total_episodes_locked: bool
+    total_episodes_source: str
+    rename_enabled: bool
+    file_name_template: str
+    scrape_enabled: bool
     save_path_template: str
     custom_download_path: str
     missing_detection: bool
@@ -114,6 +170,8 @@ class SubscriptionOut(BaseModel):
     last_checked_at: datetime | None
     last_error: str
     missing_episodes: list[int] = Field(default_factory=list)
+    canonical_title: str = ""
+    media_folder: str = ""
 
 
 class SubscriptionPreviewRequest(SubscriptionCreate):
@@ -131,6 +189,8 @@ class SubscriptionPreviewOut(BaseModel):
     matched: bool
     match_reason: str
     save_path: str
+    desired_name: str = ""
+    media_folder: str = ""
 
 
 class GlobalRulesUpdate(BaseModel):
@@ -150,6 +210,11 @@ class FeedItemOut(BaseModel):
     status: str
     reason: str
     save_path: str
+    desired_name: str
+    qbit_tag: str
+    torrent_hash: str
+    rename_status: str
+    rename_message: str
     created_at: datetime
     updated_at: datetime
 
@@ -206,6 +271,49 @@ class QBittorrentSettingsUpdate(BaseModel):
         return value.strip()
 
 
+class MetadataSettingsUpdate(BaseModel):
+    tmdb_read_access_token: str | None = Field(default=None, max_length=2000)
+    clear_tmdb_token: bool = False
+    bangumi_access_token: str | None = Field(default=None, max_length=2000)
+    clear_bangumi_token: bool = False
+    metadata_language: str = Field(default="zh-CN", max_length=20)
+    media_local_root: str = Field(default="", max_length=2000)
+    emby_url: str = Field(default="", max_length=2000)
+    emby_api_key: str | None = Field(default=None, max_length=1000)
+    clear_emby_api_key: bool = False
+
+
+class MetadataCandidateOut(BaseModel):
+    provider: str
+    id: int
+    media_type: str
+    title: str
+    original_title: str = ""
+    year: int = 0
+    overview: str = ""
+    poster_url: str = ""
+    detail_url: str = ""
+    score: float = 0.0
+
+
+class MetadataRecordOut(MetadataCandidateOut):
+    total_episodes: int = 0
+    backdrop_url: str = ""
+    season: int = 1
+    air_date: str = ""
+
+
+class MetadataApplyRequest(BaseModel):
+    provider: str = Field(pattern="^(tmdb|bangumi)$")
+    metadata_id: int = Field(gt=0)
+    media_type: str = Field(default="tv", pattern="^(tv|movie)$")
+    season: int = Field(default=1, ge=0, le=999)
+
+
+class MetadataSyncRequest(BaseModel):
+    provider: str = Field(default="auto", pattern="^(auto|tmdb|bangumi)$")
+
+
 class DiscoverySubscriptionPresetOut(BaseModel):
     name: str
     reference_title: str = ""
@@ -223,7 +331,7 @@ class DiscoverySubscriptionPresetOut(BaseModel):
     episode_group: int = 0
     episode_offset: int = 0
     total_episodes: int = 0
-    save_path_template: str = "{base}/{subscription}/Season {season}"
+    save_path_template: str = "{base}/{media_folder}/Season {season:02}"
     custom_download_path: str = ""
     missing_detection: bool = False
     only_latest: bool = False

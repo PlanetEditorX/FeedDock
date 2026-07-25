@@ -38,32 +38,59 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "episode_group": "INTEGER NOT NULL DEFAULT 0",
     "episode_offset": "INTEGER NOT NULL DEFAULT 0",
     "total_episodes": "INTEGER NOT NULL DEFAULT 0",
+    "total_episodes_locked": "BOOLEAN NOT NULL DEFAULT 0",
+    "total_episodes_source": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "naming_mode": "VARCHAR(20) NOT NULL DEFAULT 'auto'",
+    "media_type": "VARCHAR(20) NOT NULL DEFAULT 'tv'",
+    "manual_title": "TEXT NOT NULL DEFAULT ''",
+    "tmdb_id": "INTEGER NOT NULL DEFAULT 0",
+    "bangumi_id": "INTEGER NOT NULL DEFAULT 0",
+    "metadata_year": "INTEGER NOT NULL DEFAULT 0",
+    "metadata_source": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "metadata_overview": "TEXT NOT NULL DEFAULT ''",
+    "poster_url": "TEXT NOT NULL DEFAULT ''",
+    "backdrop_url": "TEXT NOT NULL DEFAULT ''",
+    "metadata_last_synced_at": "DATETIME NULL",
+    "auto_metadata": "BOOLEAN NOT NULL DEFAULT 0",
+    # Existing installs remain opt-in. New subscriptions receive the Pydantic
+    # default from the request body.
+    "rename_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "file_name_template": "TEXT NOT NULL DEFAULT '{title} - S{season:02}E{episode:02}'",
+    "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 0",
     "custom_download_path": "TEXT NOT NULL DEFAULT ''",
     "missing_detection": "BOOLEAN NOT NULL DEFAULT 0",
     "only_latest": "BOOLEAN NOT NULL DEFAULT 0",
 }
 
+_FEED_ITEM_COLUMNS: dict[str, str] = {
+    "desired_name": "TEXT NOT NULL DEFAULT ''",
+    "qbit_tag": "VARCHAR(120) NOT NULL DEFAULT ''",
+    "torrent_hash": "VARCHAR(80) NOT NULL DEFAULT ''",
+    "rename_status": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "rename_message": "TEXT NOT NULL DEFAULT ''",
+}
 
-def ensure_schema() -> None:
-    """Apply small additive migrations for existing self-hosted SQLite installs.
 
-    FeedDock intentionally keeps migrations dependency-free. New subscription
-    options are nullable/defaulted additions, so ALTER TABLE is sufficient and
-    existing subscriptions remain usable.
-    """
-
-    if not settings.database_url.startswith("sqlite"):
-        return
+def _add_missing_columns(table: str, columns: dict[str, str]) -> None:
     inspector = inspect(engine)
-    if "subscriptions" not in inspector.get_table_names():
+    if table not in inspector.get_table_names():
         return
-    existing = {column["name"] for column in inspector.get_columns("subscriptions")}
-    missing = [(name, ddl) for name, ddl in _SUBSCRIPTION_COLUMNS.items() if name not in existing]
+    existing = {column["name"] for column in inspector.get_columns(table)}
+    missing = [(name, ddl) for name, ddl in columns.items() if name not in existing]
     if not missing:
         return
     with engine.begin() as connection:
         for name, ddl in missing:
-            connection.execute(text(f'ALTER TABLE subscriptions ADD COLUMN "{name}" {ddl}'))
+            connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {ddl}'))
+
+
+def ensure_schema() -> None:
+    """Apply dependency-free additive migrations for existing SQLite installs."""
+
+    if not settings.database_url.startswith("sqlite"):
+        return
+    _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
+    _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
 
 
 def get_db() -> Generator[Session, None, None]:

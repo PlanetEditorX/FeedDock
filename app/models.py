@@ -66,6 +66,29 @@ class Subscription(Base):
     episode_group: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     episode_offset: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_episodes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_episodes_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    total_episodes_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+
+    # Metadata matching and Emby-friendly naming. Existing installations are
+    # migrated additively in database.ensure_schema().
+    naming_mode: Mapped[str] = mapped_column(String(20), default="auto", nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), default="tv", nullable=False)
+    manual_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    tmdb_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    bangumi_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metadata_year: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metadata_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    metadata_overview: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    poster_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    backdrop_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    auto_metadata: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    rename_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    file_name_template: Mapped[str] = mapped_column(
+        Text, default="{title} - S{season:02}E{episode:02}", nullable=False
+    )
+    scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     save_path_template: Mapped[str] = mapped_column(
         Text,
@@ -112,6 +135,11 @@ class FeedItem(Base):
     status: Mapped[str] = mapped_column(String(32), default="discovered", nullable=False)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     save_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    desired_name: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    qbit_tag: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    torrent_hash: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    rename_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    rename_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False

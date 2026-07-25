@@ -1,121 +1,130 @@
-# FeedDock 在飞牛 OS（fnOS）上的部署
+# FeedDock 飞牛 OS 部署说明
 
-本文按以下目录部署：
+## 1. 数据目录
 
-```text
-/vol1/1000/应用/feeddock
-```
-
-使用镜像：
+创建：
 
 ```text
-ghcr.io/planeteditorx/feeddock:latest
-```
-
-## 一、目录
-
-确认以下目录存在：
-
-```text
-/vol1/1000/应用/feeddock
 /vol1/1000/应用/feeddock/data
 ```
 
-`data` 保存管理员密码、会话密钥、订阅、下载记录和应用数据库。升级或重建容器时不要删除。
+数据库、Mikan 目录缓存和封面缓存都保存在这里。升级时不要删除。
 
-## 二、部署 Compose
+## 2. 基础部署
 
-在飞牛 Docker 的 Compose 项目中使用 `docker-compose.fnos.yml`。
-
-默认值：
-
-- 端口：`7789`
-- 首次用户名：`admin`
-- 首次密码：`password`
-- qBittorrent：先留空
-- Mikan 主地址：`https://mikanime.tv`
-
-部署完成后打开：
+使用项目中的 `docker-compose.fnos.yml`。默认端口：
 
 ```text
-http://飞牛IP:7789
+http://飞牛地址:7789
 ```
 
-第一次使用 `admin / password` 登录，随后必须设置新密码。新密码保存在 `/vol1/1000/应用/feeddock/data`，以后重新部署不会恢复成 `password`。
-
-## 三、配置 qBittorrent
-
-登录后在网页的 **qBittorrent 下载器** 中配置。
-
-同一台飞牛 OS：
+首次登录：
 
 ```text
-http://host.docker.internal:8080
+admin / password
 ```
 
-局域网其他设备：
+登录后立即修改密码。
+
+## 3. qBittorrent
+
+在 FeedDock 网页中填写：
 
 ```text
-http://192.168.1.20:8080
+WebUI 地址：http://host.docker.internal:8080
+用户名：你的 qBittorrent 用户名
+密码：你的 qBittorrent 密码
+下载保存根目录：qBittorrent 能识别的路径
 ```
 
-填写用户名、密码、分类和 qBittorrent 能识别的下载路径，然后点击“保存并测试连接”。配置会写入：
+若 qBittorrent 在其他设备，填写局域网地址。
 
-```text
-/vol1/1000/应用/feeddock/data/feeddock.db
-```
+## 4. TMDB 与 Bangumi
 
-## 四、浏览并订阅 Mikan 番剧
+网页打开“元数据与刮削设置”：
 
-首页的 Mikan 目录采用持久缓存：
+- TMDB Read Access Token：用于搜索和季度总集数；
+- Bangumi Token：可留空；
+- 元数据语言：建议 `zh-CN`。
 
-1. 选择年份和季度。
-2. 点击“读取缓存”。第一次没有缓存时会访问一次 Mikan。
-3. 以后重复加载和标题搜索都只读取 `/vol1/1000/应用/feeddock/data` 中的缓存。
-4. 已浏览季度默认每 6 小时后台更新一次。
-5. 需要马上更新时点击“强制更新”。
-6. 点击番剧查看字幕组 RSS；同一番剧重复打开使用详情缓存。
-7. 字幕组变化时可点击弹窗里的“强制更新字幕组”。
+保存后，在订阅编辑器中搜索并选择条目。选择时会立即读取详情和总集数。
 
-飞牛 Compose 默认配置：
+## 5. 仅使用 Emby 在线刮削
+
+这是推荐方式，不需要给 FeedDock 挂载媒体目录。
+
+1. 选择正确 TMDB 条目。
+2. 使用默认目录模板。
+3. 打开规范重命名。
+4. 在 Emby 中扫描 qBittorrent 下载目录。
+
+最终目录带 `[tmdbid=ID]`，Emby 更容易准确识别。
+
+## 6. 启用本地 NFO/海报刮削
+
+修改 Compose：
 
 ```yaml
-MIKAN_BASE_URL: "https://mikanime.tv"
-MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
-MIKAN_CACHE_HOURS: "6"
-MIKAN_IMAGE_CACHE_DAYS: "30"
-MIKAN_THUMBNAIL_WIDTH: "240"
-MIKAN_THUMBNAIL_HEIGHT: "320"
+services:
+  feeddock:
+    environment:
+      DOWNLOAD_PATH: "/media"
+      MEDIA_LOCAL_ROOT: "/media"
+      EMBY_URL: "http://host.docker.internal:8096"
+      EMBY_API_KEY: "你的 Emby API Key"
+    volumes:
+      - "/vol1/1000/应用/feeddock/data:/data"
+      - "/vol2/1000/影视:/media"
 ```
 
-季度目录和字幕组详情保存在 `feeddock.db`，240×320 WebP 缩略图保存在 `data/mikan-image-cache`。本地文件有效时直接读取，只有缺失或损坏时才重新访问 Mikan。后台只刷新已经浏览过的季度，每轮最多处理少量到期缓存；不会遍历全部年份和所有番剧详情。刷新失败后至少等待 1 小时再尝试，避免连续请求来源站。
+qBittorrent 也必须把同一宿主机目录挂载为 `/media`。路径不一致会导致 FeedDock 无法安全定位文件。
 
-修改 `MIKAN_CACHE_HOURS` 后重新部署即可调整刷新间隔。建议不要设置得过短。部署新版本后请执行一次 `Ctrl + F5` 强制刷新页面。
+重新部署后，在订阅中勾选：
 
-升级到 v1.8.2 后，旧季度缓存会自动刷新一次并切换为缩略图 URL，以修复旧缓存中的空封面或错误域名。Mikan 的相对图片路径会按最终响应域名拼接；例如页面从 `mikanime.tv` 重定向到 `mikanani.me`，封面也会使用 `mikanani.me/images/...`。
+```text
+允许生成本地 NFO 与图片
+```
 
-## 五、更新
+成功规范化单视频任务后会自动写入 NFO；也可在订阅卡片手动点击“刮削本地文件”。
 
-FeedDock 不会自动检查更新。需要时手动点击顶部“检查更新”。
+## 7. 更新
 
-GitHub Actions 在镜像构建成功后，会根据 `VERSION` 创建对应 Git 标签和 Release。例如版本为 `1.7.1` 时发布 `v1.7.1`。
+GitHub Actions 构建并发布新镜像后，在飞牛中重新拉取：
 
-飞牛升级步骤：
+```bash
+cd /你的/Compose目录
+docker compose -f docker-compose.fnos.yml pull
+docker compose -f docker-compose.fnos.yml up -d
+```
 
-1. 等待 GitHub Actions 构建成功。
-2. 在飞牛 Compose 项目中拉取最新镜像。
-3. 重新部署项目。
-4. 浏览器执行一次强制刷新。
+更新后浏览器执行一次强制刷新。数据库迁移为新增字段，不会删除旧数据。
 
-数据位于宿主机 `data` 目录，不会因为容器重建而丢失。
+## 8. 故障排查
 
-## 六、忘记密码
+### TMDB 搜索提示未配置
 
-修改 Compose 中的 `ADMIN_PASSWORD` 不会覆盖数据库密码。若必须完全重置：
+检查 Read Access Token 是否保存。网页只显示“已配置”，不会返回原文。
 
-1. 停止 FeedDock。
-2. 备份 `/vol1/1000/应用/feeddock/data`。
-3. 删除其中的 `feeddock.db`。
-4. 重新部署。
+### 总集数不正确
 
-这会重新使用 `admin / password` 初始化，也会清空订阅和任务记录。
+确认：
+
+- 媒体类型是否为电视番剧；
+- 季编号是否与 TMDB 一致；
+- 是否误勾选“锁定总集数”。
+
+### 文件一直 pending
+
+磁力链接尚未获取元数据，FeedDock 每 2 分钟重试。也可点击顶部“规范化文件名”。
+
+### 显示 manual_required
+
+种子中有多个视频文件。FeedDock不会把合集全部改成同一个集数名称，需要人工处理。
+
+### 本地刮削提示路径不在根目录
+
+`DOWNLOAD_PATH` 与 `MEDIA_LOCAL_ROOT` 映射不一致。建议两个容器使用同一个容器内路径 `/media`。
+
+### Emby 没有刷新
+
+检查 Emby 地址、API Key、网络连通性，并点击“通知 Emby 刷新”。
