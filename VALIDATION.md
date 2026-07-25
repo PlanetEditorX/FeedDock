@@ -1,4 +1,4 @@
-# FeedDock v1.3.1 功能验证
+# FeedDock v1.3.2 功能验证
 
 ## 本次新增
 
@@ -9,11 +9,10 @@
 - 可清除保存的密码，或恢复 Compose 默认配置。
 - 飞牛 OS Compose 增加 `host.docker.internal:host-gateway`，支持访问同机 qBittorrent WebUI。
 - RSS 推送与保存路径读取网页中的最新 qBittorrent 配置。
-- Docker 镜像推送成功后，自动按 `VERSION` 创建 Git 标签和 GitHub Release。
 
 ## 自动化验证
 
-共 17 项测试通过：
+共 19 项测试通过：
 
 - 首次登录与强制修改密码。
 - 修改密码后重启持久化。
@@ -25,6 +24,9 @@
 - GitHub Release 更新检查和 Watchtower 更新触发。
 - RSS、Atom、关键词、集数、去重和路径安全。
 - 飞牛 OS Compose 镜像、端口、数据目录及宿主机网关检查。
+- 添加订阅 API 实际创建并重新读取订阅。
+- 异步提交后使用稳定表单引用，避免 `event.currentTarget` 变为 `null`。
+- 静态资源版本参数与当前 VERSION 一致。
 
 执行命令：
 
@@ -38,7 +40,7 @@ node --check app/static/app.js
 
 ## 飞牛 OS 使用结果
 
-更新到 v1.3.1 后，登录首页即可看到“qBittorrent 下载器”区域。推荐填写：
+更新到 v1.3.2 后，登录首页即可看到“qBittorrent 下载器”区域。推荐填写：
 
 ```text
 同机 qBittorrent：http://host.docker.internal:8080
@@ -50,3 +52,10 @@ node --check app/static/app.js
 ## 未在当前环境执行
 
 当前执行环境没有 Docker Engine，也无法连接用户的飞牛 OS，因此没有实际执行 GHCR 镜像构建和 NAS 容器重建。应用 API、数据库持久化、外部 qBittorrent 协议和部署文件已完成本地验证。
+
+## 添加订阅表单回归验证
+
+- 保存前先固定保存表单对象引用，不在异步 `await` 后读取会被浏览器清空的 `event.currentTarget`。
+- 保存成功后可正常清空表单并恢复默认路径模板。
+- 首页、登录页和改密页静态资源均携带 `v=1.3.2` 缓存版本参数。
+

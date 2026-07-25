@@ -53,7 +53,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.3.1"),
+        app_version=os.getenv("APP_VERSION", "1.3.2"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",

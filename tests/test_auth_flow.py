@@ -7,7 +7,7 @@ os.environ["DATA_DIR"] = _TEST_DATA.name
 os.environ["ADMIN_USER"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "initial-password"
 os.environ["SESSION_SECRET"] = "test-session-secret-that-is-long-enough"
-os.environ["APP_VERSION"] = "1.3.1"
+os.environ["APP_VERSION"] = "1.3.2"
 
 from fastapi.testclient import TestClient
 
@@ -62,6 +62,26 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(home.status_code, 200)
             self.assertIn("系统与更新", home.text)
             self.assertIn("qBittorrent 下载器", home.text)
+
+            created_subscription = client.post(
+                "/api/subscriptions",
+                json={
+                    "name": "Frontend regression feed",
+                    "rss_url": "https://example.test/feed.xml",
+                    "include_keywords": "1080p, 简体",
+                    "exclude_keywords": "合集, 720p",
+                    "episode_regex": "",
+                    "save_path_template": "{base}/{subscription}",
+                    "enabled": True,
+                },
+            )
+            self.assertEqual(created_subscription.status_code, 200)
+            self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
+            subscriptions = client.get("/api/subscriptions")
+            self.assertEqual(subscriptions.status_code, 200)
+            self.assertTrue(
+                any(item["name"] == "Frontend regression feed" for item in subscriptions.json())
+            )
 
             saved_qbit = client.put(
                 "/api/downloader/settings",

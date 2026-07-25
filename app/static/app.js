@@ -277,12 +277,16 @@ document.getElementById('restoreDownloaderConfig').addEventListener('click', asy
 
 document.getElementById('subscriptionForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const payload = Object.fromEntries(form.entries());
+
+  // Event.currentTarget is only guaranteed during the synchronous event
+  // dispatch. Keep a stable form reference before the first await.
+  const formElement = event.currentTarget;
+  const formData = new FormData(formElement);
+  const payload = Object.fromEntries(formData.entries());
   try {
     await api('/api/subscriptions', { method: 'POST', body: JSON.stringify(payload) });
-    event.currentTarget.reset();
-    event.currentTarget.elements.save_path_template.value = '{base}/{subscription}';
+    formElement.reset();
+    formElement.elements.save_path_template.value = '{base}/{subscription}';
     showNotice('订阅已保存');
     await reloadAll();
   } catch (error) { showNotice(error.message, false); }
