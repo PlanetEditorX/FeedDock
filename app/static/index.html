@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FeedDock</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>FeedDock</h1>
+      <p>RSS 自动订阅 · 去重过滤 · qBittorrent 推送</p>
+    </div>
+    <div class="actions">
+      <span id="currentUser" class="user-chip">管理员</span>
+      <button id="checkUpdate" class="secondary">检查更新</button>
+      <button id="testDownloader" class="secondary">测试下载器</button>
+      <button id="refreshNow">立即刷新</button>
+      <button id="logout" class="secondary">退出</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="stats" id="stats">
+      <article><strong>–</strong><span>启用订阅</span></article>
+      <article><strong>–</strong><span>已推送</span></article>
+      <article><strong>–</strong><span>已跳过</span></article>
+      <article><strong>–</strong><span>错误</span></article>
+    </section>
+
+
+    <section class="panel update-panel">
+      <div class="panel-head">
+        <div><h2>系统与更新</h2><p id="versionSummary">正在读取版本信息…</p></div>
+        <div class="actions">
+          <a id="releaseLink" class="button-link secondary hidden" target="_blank" rel="noreferrer noopener">查看发布说明</a>
+          <button id="applyUpdate" class="hidden">立即更新</button>
+        </div>
+      </div>
+      <div class="system-grid">
+        <div><span>当前版本</span><strong id="currentVersion">—</strong></div>
+        <div><span>最新版本</span><strong id="latestVersion">—</strong></div>
+        <div><span>部署镜像</span><strong id="deployedImage">—</strong></div>
+        <div><span>更新器</span><strong id="updaterState">—</strong></div>
+      </div>
+      <p class="hint">“立即更新”需要启用 Compose 的 <code>updater</code> profile；未启用时仍可检查 GitHub Release 并查看手动升级提示。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>添加订阅</h2><p>包含词命中任意一个即可；排除词优先。</p></div>
+      </div>
+      <form id="subscriptionForm" class="form-grid">
+        <label>名称<input name="name" required maxlength="200" placeholder="例如：合法授权动画源"></label>
+        <label class="wide">RSS 地址<input name="rss_url" type="url" required placeholder="https://example.com/feed.xml"></label>
+        <label>包含词<input name="include_keywords" placeholder="1080p, 简体"></label>
+        <label>排除词<input name="exclude_keywords" placeholder="合集, 720p"></label>
+        <label>集数正则<input name="episode_regex" placeholder="可选，第一捕获组为集数"></label>
+        <label>保存路径模板<input name="save_path_template" value="{base}/{subscription}" required></label>
+        <button type="submit">保存订阅</button>
+      </form>
+      <p class="hint">可用变量：<code>{base}</code>、<code>{subscription}</code>、<code>{episode}</code>。路径会被限制在 DOWNLOAD_PATH 之下。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><h2>订阅列表</h2><p id="configSummary">正在读取配置…</p></div></div>
+      <div id="subscriptions" class="cards"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>最近条目</h2><p>展示最近 100 条处理记录。</p></div>
+        <select id="statusFilter">
+          <option value="">全部状态</option>
+          <option value="queued">已推送</option>
+          <option value="skipped">已跳过</option>
+          <option value="error">错误</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>说明</th><th></th></tr></thead>
+          <tbody id="items"><tr><td colspan="6">正在加载…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><h2>系统日志</h2><p>最近 50 条轮询日志。</p></div></div>
+      <div id="logs" class="logs"></div>
+    </section>
+
+    <section class="legal">
+      本工具不提供、存储或分发任何媒体资源。请只添加你有权访问和下载的 RSS 源，并遵守所在地区法律及源站规则。
+    </section>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
