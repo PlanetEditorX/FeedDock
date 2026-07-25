@@ -67,7 +67,7 @@ http://192.168.1.20:8080
 
 ## 四、浏览并订阅 Mikan 番剧
 
-v1.6.0 起，首页使用季度目录，而不是发布条目混合搜索：
+v1.6.1 起，首页使用季度目录，而不是发布条目混合搜索：
 
 1. 打开 **Mikan 番剧目录**。
 2. 选择年份。
@@ -87,13 +87,13 @@ MIKAN_BASE_URL: "https://mikanime.tv"
 MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
 ```
 
-若主域名在当前网络不可访问，会尝试备用域名。修改来源地址不会影响已有数据库和订阅。
+若主域名在当前网络不可访问，会尝试备用域名。修改来源地址不会影响已有数据库和订阅。v1.6.1 开始，封面通过 FeedDock 同源代理加载，并兼容 Mikan 当前的 `subgroup-text` 字幕组节点。升级后请执行一次 `Ctrl + F5` 强制刷新。
 
 ## 五、更新
 
 FeedDock 不会自动检查更新。需要时手动点击顶部“检查更新”。
 
-GitHub Actions 在镜像构建成功后，会根据 `VERSION` 创建对应 Git 标签和 Release。例如版本为 `1.6.0` 时发布 `v1.6.0`。
+GitHub Actions 在镜像构建成功后，会根据 `VERSION` 创建对应 Git 标签和 Release。例如版本为 `1.6.1` 时发布 `v1.6.1`。
 
 飞牛升级步骤：
 

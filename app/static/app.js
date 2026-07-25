@@ -328,16 +328,21 @@ function createMikanCard(item) {
 
   const cover = document.createElement('div');
   cover.className = 'mikan-cover';
-  if (item.cover_url) {
+  const coverSource = item.cover_proxy_url || item.cover_url;
+  if (coverSource) {
     const image = document.createElement('img');
-    image.src = item.cover_url;
+    image.src = coverSource;
     image.alt = item.title;
     image.loading = 'lazy';
     image.referrerPolicy = 'no-referrer';
     image.addEventListener('error', () => {
+      if (item.cover_proxy_url && item.cover_url && image.src !== item.cover_url) {
+        image.src = item.cover_url;
+        return;
+      }
       image.remove();
       cover.append(text('span', item.title.slice(0, 1) || '番'));
-    }, { once: true });
+    });
     cover.append(image);
   } else cover.append(text('span', item.title.slice(0, 1) || '番'));
 

@@ -41,6 +41,12 @@ _DAY_NUMBER_NAMES = {
 }
 
 
+def _safe_attrs(attrs: list[tuple[str | None, str | None]]) -> dict[str, str]:
+    """Normalize attributes while tolerating malformed upstream HTML."""
+
+    return {str(key).lower(): (value or "") for key, value in attrs if key is not None}
+
+
 @dataclass(slots=True)
 class _Anchor:
     href: str
@@ -65,7 +71,7 @@ class _DocumentParser(HTMLParser):
         self.subgroup_ids: set[int] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attrs_dict = {key.lower(): (value or "") for key, value in attrs}
+        attrs_dict = _safe_attrs(attrs)
         tag = tag.lower()
         for candidate in (attrs_dict.get("id", ""), attrs_dict.get("data-subgroupid", "")):
             match = re.search(r"(?:subgroup-)?(\d+)$", candidate)
@@ -85,7 +91,7 @@ class _DocumentParser(HTMLParser):
                 ]
             )
         elif tag == "meta":
-            prop = (attrs_dict.get("property") or attrs_dict.get("name")).lower()
+            prop = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
             if prop in {"og:title", "twitter:title"} and attrs_dict.get("content"):
                 self.page_title = _clean_text(attrs_dict["content"])
         elif tag == "title":
@@ -141,6 +147,7 @@ class _HtmlNode:
     attrs: dict[str, str] = field(default_factory=dict)
     children: list["_HtmlNode"] = field(default_factory=list)
     text_parts: list[str] = field(default_factory=list)
+    parent: "_HtmlNode | None" = field(default=None, repr=False)
 
     def text(self) -> str:
         parts = list(self.text_parts)
@@ -168,7 +175,7 @@ class _TreeParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
-        node = _HtmlNode(tag, {key.lower(): (value or "") for key, value in attrs})
+        node = _HtmlNode(tag=tag, attrs=_safe_attrs(attrs), parent=self._stack[-1])
         self._stack[-1].children.append(node)
         if tag not in self._VOID_TAGS:
             self._stack.append(node)
@@ -198,6 +205,7 @@ def _clean_text(value: str) -> str:
 
 def _clean_mikan_title(value: str) -> str:
     value = _clean_text(value)
+    value = re.sub(r"^(?:蜜柑计划|Mikan Project)\s*[|｜-]\s*", "", value, flags=re.IGNORECASE).strip()
     value = re.sub(r"\s*[|｜-]\s*(?:蜜柑计划|Mikan Project).*$", "", value, flags=re.IGNORECASE).strip()
     if value.casefold() in {"mikan project", "mikan", "蜜柑计划"}:
         return ""
@@ -279,6 +287,58 @@ def _first_descendant(node: _HtmlNode, *, tag: str | None = None, class_name: st
     return None
 
 
+_IMAGE_ATTRIBUTES = ("data-src", "data-original", "data-lazy-src", "data-url", "src", "poster")
+_CATALOG_CONTAINER_CLASSES = {"an-info-group", "an-info", "bangumi-item", "m-week-square"}
+
+
+def _extract_style_url(style: str) -> str:
+    match = re.search(r"(?:background-image|background)\s*:\s*url\(\s*['\"]?([^'\")]+)", style or "", re.IGNORECASE)
+    return _clean_text(match.group(1)) if match else ""
+
+
+def _usable_image_url(value: str) -> str:
+    value = _clean_text(value)
+    if not value or value.startswith(("data:", "blob:", "javascript:")):
+        return ""
+    return value
+
+
+def _extract_image_candidate(node: _HtmlNode) -> str:
+    for candidate in (node, *node.descendants()):
+        for attribute in _IMAGE_ATTRIBUTES:
+            value = _usable_image_url(candidate.attrs.get(attribute, ""))
+            if value:
+                return value
+        srcset = candidate.attrs.get("srcset", "")
+        if srcset:
+            value = _usable_image_url(srcset.split(",", 1)[0].strip().split(" ", 1)[0])
+            if value:
+                return value
+        value = _usable_image_url(_extract_style_url(candidate.attrs.get("style", "")))
+        if value:
+            return value
+    return ""
+
+
+def _catalog_container(node: _HtmlNode, boundary: _HtmlNode) -> _HtmlNode:
+    current: _HtmlNode | None = node
+    closest = node
+    while current is not None and current is not boundary:
+        closest = current
+        if current.tag == "li" or current.classes() & _CATALOG_CONTAINER_CLASSES:
+            return current
+        current = current.parent
+    return closest
+
+
+def _subgroup_id(node: _HtmlNode) -> int | None:
+    for raw in (node.attrs.get("data-subgroupid", ""), node.attrs.get("id", "")):
+        match = re.search(r"(?:subgroup[-_])?(\d+)$", raw.strip(), re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def parse_mikan_catalog_html(
     content: str,
     base_url: str,
@@ -309,23 +369,32 @@ def parse_mikan_catalog_html(
         weekday = _weekday_name(heading_text, day_number)
         items: list[dict[str, Any]] = []
 
-        for item_node in section.descendants("li"):
-            marker = _first_descendant(item_node, tag="span", attr="data-bangumiid")
-            if marker is None:
-                continue
-            try:
-                bangumi_id = int(marker.attrs["data-bangumiid"])
-            except (KeyError, ValueError):
-                continue
+        candidates: list[tuple[int, _HtmlNode, _HtmlNode]] = []
+        for anchor in section.descendants("a"):
+            match = _MIKAN_BANGUMI_RE.search(anchor.attrs.get("href", ""))
+            if match:
+                candidates.append((int(match.group(1)), anchor, _catalog_container(anchor, section)))
+
+        # Compatibility with older fragments where the ID only exists on data-bangumiid.
+        if not candidates:
+            for marker_node in section.descendants():
+                raw_id = marker_node.attrs.get("data-bangumiid", "")
+                if raw_id.isdigit():
+                    candidates.append((int(raw_id), marker_node, _catalog_container(marker_node, section)))
+
+        for bangumi_id, source_node, item_node in candidates:
             if bangumi_id in seen_ids:
                 continue
 
-            title_node = _first_descendant(item_node, class_name="an-text")
             title = ""
-            if title_node is not None:
-                title = _clean_mikan_title(title_node.attrs.get("title", "") or title_node.text())
+            if source_node.tag == "a":
+                title = _clean_mikan_title(source_node.attrs.get("title", "") or source_node.text())
             if not title:
-                title = _clean_mikan_title(marker.attrs.get("title", ""))
+                title_node = _first_descendant(item_node, class_name="an-text")
+                if title_node is not None:
+                    title = _clean_mikan_title(title_node.attrs.get("title", "") or title_node.text())
+            if not title:
+                title = _clean_mikan_title(source_node.attrs.get("title", ""))
             if not title:
                 image = _first_descendant(item_node, tag="img")
                 if image is not None:
@@ -336,17 +405,14 @@ def parse_mikan_catalog_html(
                 continue
 
             date_node = _first_descendant(item_node, class_name="date-text")
-            cover_raw = marker.attrs.get("data-src", "")
-            if not cover_raw:
-                image = _first_descendant(item_node, tag="img")
-                if image is not None:
-                    cover_raw = image.attrs.get("src", "") or image.attrs.get("data-src", "")
+            cover_raw = _extract_image_candidate(item_node)
             detail_url = f"{base_url}/Home/Bangumi/{bangumi_id}"
             items.append(
                 {
                     "bangumi_id": bangumi_id,
                     "title": title,
                     "cover_url": urljoin(base_url + "/", cover_raw) if cover_raw else "",
+                    "cover_proxy_url": "",
                     "update_at": date_node.text() if date_node is not None else "",
                     "detail_url": detail_url,
                     "base_url": base_url,
@@ -416,6 +482,37 @@ def parse_mikan_detail_html(
         title = f"Mikan 番剧 #{bangumi_id}"
 
     groups: dict[int, dict[str, Any]] = {}
+
+    # Current Mikan pages group resources under div.subgroup-text. Its id can be
+    # a bare number, subgroup-123, or data-subgroupid; a PublishGroup link is optional.
+    tree = _TreeParser()
+    tree.feed(content)
+    tree.close()
+    for node in tree.root.descendants():
+        if "subgroup-text" not in node.classes():
+            continue
+        subgroup_id = _subgroup_id(node)
+        if subgroup_id is None:
+            continue
+        anchor_node = _first_descendant(node, tag="a")
+        name = _clean_text(anchor_node.text() if anchor_node is not None else node.text())
+        if not name or name.casefold() in _GENERIC_LINK_LABELS:
+            name = f"字幕组 #{subgroup_id}"
+        rss_url = f"{base_url}/RSS/Bangumi?{urlencode({'bangumiId': bangumi_id, 'subgroupid': subgroup_id})}"
+        href = anchor_node.attrs.get("href", "") if anchor_node is not None else ""
+        groups[subgroup_id] = {
+            "subgroup_id": subgroup_id,
+            "name": name,
+            "rss_url": rss_url,
+            "detail_url": urljoin(base_url + "/", href) if href else "",
+            "preset": _subscription_preset(
+                name=title,
+                source_name=f"Mikan · {name}",
+                rss_url=rss_url,
+                sample_title=title,
+            ),
+        }
+
     for anchor in parser.anchors:
         match = _MIKAN_GROUP_RE.search(anchor.href)
         if not match:
@@ -529,6 +626,15 @@ class DiscoveryService:
                     query=query,
                 )
                 if rows:
+                    for row in rows:
+                        for item in row["items"]:
+                            if item.get("cover_url"):
+                                cover_parts = urlparse(item["cover_url"])
+                                base_parts = urlparse(base)
+                                if cover_parts.netloc.casefold() == base_parts.netloc.casefold():
+                                    item["cover_proxy_url"] = "/api/discovery/mikan/image?" + urlencode(
+                                        {"base_url": base, "url": item["cover_url"]}
+                                    )
                     return {
                         "provider": "mikan",
                         "year": year,
@@ -542,6 +648,36 @@ class DiscoveryService:
             except Exception as exc:
                 errors.append(f"{base}: {exc}")
         raise RuntimeError("；".join(errors) or "未找到番剧目录")
+
+    def fetch_image(self, base_url: str, image_url: str) -> tuple[bytes, str]:
+        base = _normalize_base(base_url)
+        if base not in self.mikan_bases:
+            raise ValueError("Mikan 地址不在允许列表中")
+        target = urljoin(base + "/", image_url.strip())
+        target_parts = urlparse(target)
+        base_parts = urlparse(base)
+        if target_parts.scheme not in {"http", "https"} or target_parts.netloc.casefold() != base_parts.netloc.casefold():
+            raise ValueError("封面地址不属于允许的 Mikan 站点")
+
+        headers = {
+            **self.headers,
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": base + "/",
+        }
+        if self.client is not None:
+            response = self.client.get(target, headers=headers, follow_redirects=True)
+        else:
+            response = httpx.get(target, headers=headers, timeout=self.timeout, follow_redirects=True)
+        response.raise_for_status()
+        final_parts = urlparse(str(response.url))
+        if final_parts.netloc.casefold() != base_parts.netloc.casefold():
+            raise ValueError("封面重定向到了不受信任的站点")
+        if len(response.content) > 6 * 1024 * 1024:
+            raise ValueError("封面超过 6 MiB 限制")
+        content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if not content_type.startswith("image/"):
+            raise ValueError("来源返回的内容不是图片")
+        return response.content, content_type
 
     def search(self, query: str, limit: int = 30) -> dict[str, Any]:
         query = _clean_text(query)

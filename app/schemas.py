@@ -258,6 +258,7 @@ class MikanCatalogItemOut(BaseModel):
     bangumi_id: int
     title: str
     cover_url: str = ""
+    cover_proxy_url: str = ""
     update_at: str = ""
     detail_url: str
     base_url: str

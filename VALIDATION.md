@@ -1,8 +1,8 @@
-# FeedDock v1.6.0 验证报告
+# FeedDock v1.6.1 验证报告
 
 ## 结论
 
-FeedDock v1.6.0 已通过 36 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Compose / GitHub Actions YAML 解析检查。
+FeedDock v1.6.1 已通过 40 项自动化测试，并完成 Python 编译、JavaScript 语法以及 Compose / GitHub Actions YAML 解析检查。
 
 ## Mikan 季度目录
 
@@ -11,6 +11,8 @@ FeedDock v1.6.0 已通过 36 项自动化测试，并完成 Python 编译、Java
 - 调用 `/Home/BangumiCoverFlowByDayOfWeek?year=...&seasonStr=...` 获取季度目录。
 - 解析 `data-dayofweek` 并按星期分组。
 - 解析番剧 ID、标题、封面、更新时间和详情地址。
+- 支持 `data-src`、`data-original`、`srcset` 与 CSS `background-image` 封面。
+- 同源封面代理校验来源主机、图片类型和 6 MiB 大小上限。
 - 同一番剧 ID 自动去重。
 - 支持在选定季度内按标题筛选。
 - 主地址失败时尝试备用 Mikan 地址。
@@ -22,6 +24,8 @@ FeedDock v1.6.0 已通过 36 项自动化测试，并完成 Python 编译、Java
 
 - 点击番剧后请求 `/Home/Bangumi/{id}`。
 - 从字幕组链接与页面节点提取 Subgroup ID。
+- 支持 `div.subgroup-text` 的纯数字 ID、`subgroup-*` ID 和 `data-subgroupid`。
+- 含无 `property/name` 的 `meta` 标签时不会再触发空值 `.lower()`。
 - 生成专用 RSS：
 
 ```text
@@ -37,6 +41,7 @@ FeedDock v1.6.0 已通过 36 项自动化测试，并完成 Python 编译、Java
 
 - 首页包含年份、季度、标题筛选和“加载番剧”。
 - 番剧按星期分区，以封面卡片显示。
+- 前端优先使用 FeedDock 同源封面代理，失败后回退原地址与文字占位。
 - 番剧详情使用弹窗显示字幕组 RSS。
 - 页面加载不会自动访问 Mikan。
 - 外部标题使用 DOM 文本节点渲染，不直接写入 `innerHTML`。

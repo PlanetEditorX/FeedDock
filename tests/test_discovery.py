@@ -58,6 +58,30 @@ MIKAN_DETAIL_HTML = """
 </body></html>
 """
 
+MIKAN_MODERN_CATALOG_HTML = """
+<div class="sk-bangumi" data-dayofweek="6">
+  <div class="week-title">星期六</div>
+  <div class="an-info-group">
+    <span class="cover" style="background-image: url('/images/Bangumi/202607/681.jpg?width=240')"></span>
+    <a href="/Home/Bangumi/681" title="摩绪"><span class="an-text">摩绪</span></a>
+    <span class="date-text">7/24/2026</span>
+  </div>
+</div>
+"""
+
+MIKAN_MODERN_DETAIL_HTML = """
+<!doctype html><html><head>
+<meta charset="utf-8">
+<meta content="noindex">
+<title>Mikan Project - 金牌得主 第二季</title>
+</head><body>
+<div class="subgroup-text" id="370"><a href="/Home/PublishGroup/370">LoliHouse</a></div>
+<table class="table"><tbody></tbody></table>
+<div class="subgroup-text" id="513"><a>ANi</a></div>
+<div class="subgroup-text" data-subgroupid="777">北宇治字幕组</div>
+</body></html>
+"""
+
 
 class DiscoveryParserTests(unittest.TestCase):
     def test_mikan_catalog_groups_by_weekday_and_extracts_cover(self) -> None:
@@ -87,6 +111,20 @@ class DiscoveryParserTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual([item["bangumi_id"] for item in rows[0]["items"]], [3981])
 
+    def test_mikan_catalog_supports_modern_container_and_css_cover(self) -> None:
+        rows = parse_mikan_catalog_html(
+            MIKAN_MODERN_CATALOG_HTML,
+            "https://mikan.test",
+            year=2026,
+            season="夏",
+        )
+        self.assertEqual(rows[0]["weekday"], "星期六")
+        self.assertEqual(rows[0]["items"][0]["title"], "摩绪")
+        self.assertEqual(
+            rows[0]["items"][0]["cover_url"],
+            "https://mikan.test/images/Bangumi/202607/681.jpg?width=240",
+        )
+
     def test_mikan_search_extracts_unique_bangumi(self) -> None:
         results = parse_mikan_search_html(MIKAN_SEARCH_HTML, "https://mikan.test")
         self.assertEqual([item["bangumi_id"] for item in results], [3822, 3981])
@@ -111,6 +149,19 @@ class DiscoveryParserTests(unittest.TestCase):
         )
         self.assertEqual(groups[370]["preset"]["primary_rss_name"], "Mikan · LoliHouse")
 
+    def test_mikan_detail_supports_subgroup_text_and_meta_without_name(self) -> None:
+        detail = parse_mikan_detail_html(
+            MIKAN_MODERN_DETAIL_HTML,
+            "https://mikan.test",
+            3822,
+            "备用标题",
+        )
+        groups = {group["subgroup_id"]: group for group in detail["groups"]}
+        self.assertEqual(detail["title"], "金牌得主 第二季")
+        self.assertEqual(groups[370]["name"], "LoliHouse")
+        self.assertEqual(groups[513]["name"], "ANi")
+        self.assertEqual(groups[777]["name"], "北宇治字幕组")
+
 
 class DiscoveryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -122,7 +173,14 @@ class DiscoveryServiceTests(unittest.TestCase):
             if request.url.host == "mikan.test" and request.url.path == "/Home/Search":
                 return httpx.Response(200, text=MIKAN_SEARCH_HTML, request=request)
             if request.url.host == "mikan.test" and request.url.path == "/Home/Bangumi/3822":
-                return httpx.Response(200, text=MIKAN_DETAIL_HTML, request=request)
+                return httpx.Response(200, text=MIKAN_MODERN_DETAIL_HTML, request=request)
+            if request.url.host == "mikan.test" and request.url.path == "/images/Bangumi/202601/abc.jpg":
+                return httpx.Response(
+                    200,
+                    content=b"\x89PNG\r\n\x1a\nmock",
+                    headers={"Content-Type": "image/png"},
+                    request=request,
+                )
             return httpx.Response(404, request=request)
 
         self.client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -141,6 +199,7 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertEqual(response["season"], "夏")
         result = response["rows"][0]["items"][0]
         self.assertEqual(result["bangumi_id"], 3822)
+        self.assertTrue(result["cover_proxy_url"].startswith("/api/discovery/mikan/image?"))
 
         detail = self.service.mikan_detail(
             result["bangumi_id"],
@@ -149,6 +208,18 @@ class DiscoveryServiceTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(detail["groups"]), 2)
         self.assertTrue(detail["groups"][0]["preset"]["rss_url"].startswith("https://mikan.test/RSS/Bangumi"))
+
+    def test_cover_proxy_fetches_same_host_image(self) -> None:
+        content, content_type = self.service.fetch_image(
+            "https://mikan.test",
+            "https://mikan.test/images/Bangumi/202601/abc.jpg?width=240",
+        )
+        self.assertTrue(content.startswith(b"\x89PNG"))
+        self.assertEqual(content_type, "image/png")
+
+    def test_cover_proxy_rejects_other_hosts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "不属于允许"):
+            self.service.fetch_image("https://mikan.test", "https://example.com/cover.jpg")
 
     def test_keyword_search_remains_available_as_fallback(self) -> None:
         response = self.service.search("金牌得主", limit=20)

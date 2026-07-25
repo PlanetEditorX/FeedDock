@@ -291,6 +291,28 @@ def search_sources(
 
 
 @app.get(
+    "/api/discovery/mikan/image",
+    dependencies=[Depends(require_admin)],
+    include_in_schema=False,
+)
+def mikan_cover_image(
+    base_url: str = Query(min_length=1, max_length=500),
+    url: str = Query(min_length=1, max_length=2000),
+) -> Response:
+    try:
+        content, content_type = DiscoveryService().fetch_image(base_url, url)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mikan 封面加载失败：{exc}") from exc
+
+
+@app.get(
     "/api/discovery/mikan/{bangumi_id}",
     response_model=MikanBangumiDetailOut,
     dependencies=[Depends(require_admin)],
