@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +14,6 @@ from unittest.mock import patch
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
 from app.naming import media_folder_name, remote_to_local_path, render_desired_name
-from app.scraper import ScrapeResult, scrape_subscription, trigger_tmm_scrape
 
 
 class _Response:
@@ -186,38 +184,14 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertEqual(record.title, "番剧")
 
 
-    def test_tmm_scrape_uses_path_scope_and_api_key(self):
-        sub = self.subscription(scrape_enabled=True, scrape_mode="tmm", save_path_template="{base}/{media_folder}/Season {season:02}")
-        metadata_config = SimpleNamespace(tmm_configured=True, tmm_url="http://tmm:7878", tmm_api_key="secret")
-        qbit_config = SimpleNamespace(download_path="/media")
-        captured = {}
-        class Client:
-            def __init__(self, *args, **kwargs): pass
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def post(self, url, headers=None, json=None):
-                captured.update(url=url, headers=headers, json=json)
-                return _Response(status_code=200, payload={})
-        with patch("app.scraper.load_metadata_config", return_value=metadata_config), \
-             patch("app.scraper.load_qbittorrent_config", return_value=qbit_config), \
-             patch("app.rss_service.load_qbittorrent_config", return_value=qbit_config), \
-             patch("app.scraper.httpx.Client", Client):
-            result = trigger_tmm_scrape(SimpleNamespace(), sub)
-        self.assertTrue(result.ok)
-        self.assertEqual(captured["headers"]["api-key"], "secret")
-        self.assertTrue(captured["url"].endswith("/api/tvshow"))
-        self.assertEqual(captured["json"][0]["scope"]["name"], "path")
-        self.assertTrue(captured["json"][0]["scope"]["args"][0].startswith("/media/"))
-
-    def test_download_completion_triggers_scrape_once(self):
+    def test_download_completion_updates_progress_and_timestamp(self):
         engine = create_engine("sqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine, expire_on_commit=False)
         with Session() as db:
             sub = Subscription(
-                name="自动刮削番剧 (2026)",
+                name="规范命名番剧 (2026)",
                 rss_url="https://example.com/rss",
-                scrape_enabled=True,
                 rename_enabled=True,
             )
             db.add(sub)
@@ -225,12 +199,11 @@ class MetadataNamingTests(unittest.TestCase):
             item = FeedItem(
                 subscription_id=sub.id,
                 fingerprint="a" * 64,
-                title="自动刮削番剧 - 01",
+                title="规范命名番剧 - 01",
                 status="queued",
                 qbit_tag="feeddock-item-1",
-                desired_name="自动刮削番剧 - S01E01",
+                desired_name="规范命名番剧 - S01E01",
                 rename_status="waiting_completion",
-                scrape_status="pending",
             )
             db.add(item)
             db.commit()
@@ -241,31 +214,14 @@ class MetadataNamingTests(unittest.TestCase):
                 )
             )
             from app.postprocess import normalize_pending_items
-            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit), \
-                 patch("app.scraper.scrape_subscription", return_value=ScrapeResult(True, "已刮削")), \
-                 patch("app.scraper.refresh_emby_library", return_value=ScrapeResult(True, "已刷新")):
+            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit):
                 result = normalize_pending_items(db)
 
             db.refresh(item)
             self.assertEqual(result["completed"], 1)
-            self.assertEqual(result["scraped"], 1)
+            self.assertNotIn("scraped", result)
             self.assertEqual(item.download_progress, 100)
-            self.assertEqual(item.scrape_status, "success")
             self.assertIsNotNone(item.completed_at)
-            self.assertIsNotNone(item.scraped_at)
-
-    def test_local_scraper_writes_nfo_without_downloading_images(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            sub = self.subscription(metadata_overview="简介", poster_url="", backdrop_url="", bgm_url="", total_episodes=12)
-            metadata_config = SimpleNamespace(media_local_root=tmp)
-            qbit_config = SimpleNamespace(download_path="/downloads/rss")
-            with patch("app.scraper.load_metadata_config", return_value=metadata_config), patch("app.scraper.load_qbittorrent_config", return_value=qbit_config), patch("app.rss_service.render_save_path", return_value="/downloads/rss/金牌得主 (2025) [tmdbid=123]/Season 02"):
-                result = scrape_subscription(SimpleNamespace(), sub)
-            self.assertTrue(result.ok)
-            root = Path(tmp) / "金牌得主 (2025) [tmdbid=123]"
-            self.assertTrue((root / "tvshow.nfo").exists())
-            self.assertTrue((root / "Season 02" / "season.nfo").exists())
-            self.assertIn("tmdb", (root / "tvshow.nfo").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

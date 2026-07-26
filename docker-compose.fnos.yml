@@ -38,17 +38,12 @@ services:
       QBIT_CATEGORY: "rss"
       DOWNLOAD_PATH: "/media"
 
-      # 元数据与 Emby 规范命名
+      # 元数据与规范命名
       METADATA_LANGUAGE: "zh-CN"
       METADATA_AUTO_SYNC_HOURS: "24"
       TMDB_READ_ACCESS_TOKEN: ""
       BANGUMI_ACCESS_TOKEN: ""
       ANILIST_API_URL: "https://graphql.anilist.co"
-      MEDIA_LOCAL_ROOT: "/media"
-      EMBY_URL: ""
-      EMBY_API_KEY: ""
-      TMM_URL: ""
-      TMM_API_KEY: ""
 
       # 可选统一执行时间和外部请求代理
       AUTOMATION_TIME: "02:00"
@@ -67,4 +62,3 @@ services:
 
     volumes:
       - "/vol1/1000/应用/feeddock/data:/data"
-      - "/vol2/1000/影视:/media"

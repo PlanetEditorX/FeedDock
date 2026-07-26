@@ -158,15 +158,15 @@ def _safe_segment(value: str) -> str:
 
 
 def _path_context(subscription: Subscription, episode: str, download_path: str) -> dict[str, Any]:
-    # naming_context preserves every legacy variable and adds Emby-friendly
+    # naming_context preserves legacy variables and adds media-server-friendly
     # variables such as {title}, {media_folder}, {tmdb_id} and padded season /
     # episode values. Existing custom templates continue to work unchanged.
     return naming_context(subscription, episode, download_path)
 
 
 def render_save_path(subscription: Subscription, episode: str, db: Session | None = None) -> str:
-    # A single container-visible root is used by qBittorrent and FeedDock's
-    # local scraper. Per-subscription customization belongs in the path
+    # The qBittorrent-visible root is used for every subscription.
+    # Per-subscription customization belongs in the path
     # template below, never in a second, potentially unmapped root.
     qbit_root = posixpath.normpath("/" + load_qbittorrent_config(db).download_path.lstrip("/"))
     base_root = qbit_root
@@ -341,10 +341,8 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     item.save_path = save_path
     item.desired_name = desired_name
     item.qbit_tag = item.qbit_tag or (
-        f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
+        f"feeddock-item-{item.id}" if desired_name else ""
     )
-    item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
-    item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用刮削"
     result = QBittorrentClient().add_url(
         item.download_url, save_path, rename=desired_name, tags=item.qbit_tag
     )
@@ -354,16 +352,13 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         item.rename_status = "pending" if item.qbit_tag else "skipped"
         item.rename_message = (
             "等待 qBittorrent 获取文件列表并完成下载"
-            if item.qbit_tag else "未启用规范命名或自动刮削"
+            if item.qbit_tag else "未启用规范命名"
         )
     else:
         item.status = "error"
         item.reason = result.message
         item.rename_status = "error" if item.qbit_tag else ""
         item.rename_message = result.message if item.qbit_tag else ""
-        if subscription.scrape_enabled:
-            item.scrape_status = "error"
-            item.scrape_message = result.message
     return result.ok, result.message
 
 
@@ -515,15 +510,13 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         desired_name = (render_desired_name(subscription, candidate["episode"])
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
-        item.qbit_tag = f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
-        item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
+        item.qbit_tag = f"feeddock-item-{item.id}" if desired_name else ""
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
             item.rename_status = "pending" if item.qbit_tag else "skipped"
             item.rename_message = "等待定时推送"
-            item.scrape_message = "等待定时下载完成后刮削" if subscription.scrape_enabled else "订阅未启用刮削"
         else:
             ok, _ = _push_feed_item(db, item, subscription)
             stats["queued" if ok else "errors"] += 1
@@ -558,7 +551,7 @@ def refresh_all() -> dict[str, int | bool | str]:
         try:
             from .postprocess import normalize_pending_items
 
-            normalize_pending_items(limit=50, allow_scrape=not load_automation_config().scrape_enabled)
+            normalize_pending_items(limit=50)
         except Exception:
             pass
         return {"ok": True, "message": "刷新完成", **totals}

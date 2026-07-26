@@ -66,8 +66,6 @@ class SubscriptionCreate(BaseModel):
 
     rename_enabled: bool = True
     file_name_template: str = "{title} - S{season:02}E{episode:02}"
-    scrape_enabled: bool = True
-    scrape_mode: str = Field(default="local", pattern="^(local|tmm|both|off)$")
     save_path_template: str = "{base}/{media_folder}/Season {season:02}"
     custom_download_path: str = ""
     missing_detection: bool = False
@@ -125,8 +123,6 @@ class SubscriptionUpdate(BaseModel):
 
     rename_enabled: bool | None = None
     file_name_template: str | None = None
-    scrape_enabled: bool | None = None
-    scrape_mode: str | None = Field(default=None, pattern="^(local|tmm|both|off)$")
     save_path_template: str | None = None
     custom_download_path: str | None = None
     missing_detection: bool | None = None
@@ -174,8 +170,6 @@ class SubscriptionOut(BaseModel):
     total_episodes_source: str
     rename_enabled: bool
     file_name_template: str
-    scrape_enabled: bool
-    scrape_mode: str
     save_path_template: str
     custom_download_path: str
     missing_detection: bool
@@ -235,9 +229,6 @@ class FeedItemOut(BaseModel):
     rename_message: str
     download_progress: int
     completed_at: datetime | None
-    scrape_status: str
-    scrape_message: str
-    scraped_at: datetime | None
     hidden: bool
     created_at: datetime
     updated_at: datetime
@@ -313,21 +304,10 @@ class MetadataSettingsUpdate(BaseModel):
     bangumi_access_token: str | None = Field(default=None, max_length=2000)
     clear_bangumi_token: bool = False
     metadata_language: str = Field(default="zh-CN", max_length=20)
-    media_local_root: str = Field(default="", max_length=2000)
-    emby_url: str = Field(default="", max_length=2000)
-    emby_api_key: str | None = Field(default=None, max_length=1000)
-    clear_emby_api_key: bool = False
-    tmm_url: str = Field(default="", max_length=2000)
-    tmm_api_key: str | None = Field(default=None, max_length=1000)
-    clear_tmm_api_key: bool = False
-    tmm_enabled: bool = False
-
-
 
 
 class AutomationSettingsUpdate(BaseModel):
     download_enabled: bool = False
-    scrape_enabled: bool = False
     daily_time: str = Field(default="02:00", max_length=5)
     timezone: str = Field(default="Asia/Shanghai", max_length=100)
 

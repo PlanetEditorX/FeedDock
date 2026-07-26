@@ -32,7 +32,6 @@ from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
-from .scraper import refresh_emby_library, scrape_subscription, test_tmm_connection
 from .rss_service import (
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
@@ -134,8 +133,7 @@ def _subscription_values(
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
     if db is not None:
-        # qBittorrent, FeedDock scraping, and subscription rendering must use
-        # one identical container path. Customize only the folder template.
+        # All subscriptions use the qBittorrent-visible download root.
         values["custom_download_path"] = load_qbittorrent_config(db).download_path
     return values
 
@@ -452,14 +450,6 @@ def update_metadata_settings(
             bangumi_access_token=payload.bangumi_access_token,
             clear_bangumi_token=payload.clear_bangumi_token,
             metadata_language=payload.metadata_language,
-            media_local_root=payload.media_local_root,
-            emby_url=payload.emby_url,
-            emby_api_key=payload.emby_api_key,
-            clear_emby_api_key=payload.clear_emby_api_key,
-            tmm_url=payload.tmm_url,
-            tmm_api_key=payload.tmm_api_key,
-            clear_tmm_api_key=payload.clear_tmm_api_key,
-            tmm_enabled=payload.tmm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -471,10 +461,6 @@ def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | 
     return reset_metadata_config(db).public_dict()
 
 
-@app.post("/api/metadata/test-tmm", dependencies=[Depends(require_admin)])
-def test_tmm(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return test_tmm_connection(db).as_dict()
-
 
 @app.get("/api/automation/settings", dependencies=[Depends(require_admin)])
 def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
@@ -484,7 +470,7 @@ def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bo
 @app.put("/api/automation/settings", dependencies=[Depends(require_admin)])
 def update_automation_settings(payload: AutomationSettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
     try:
-        return save_automation_config(db, download_enabled=payload.download_enabled, scrape_enabled=payload.scrape_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
+        return save_automation_config(db, download_enabled=payload.download_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -535,8 +521,6 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
         "qbit_password": qbit.password,
         "tmdb_read_access_token": metadata.tmdb_read_access_token,
         "bangumi_access_token": metadata.bangumi_access_token,
-        "emby_api_key": metadata.emby_api_key,
-        "tmm_api_key": metadata.tmm_api_key,
         "proxy_url": proxy.url,
     }
     if secret_name not in values:
@@ -918,25 +902,6 @@ def sync_subscription_metadata(
     return _subscription_out(db, subscription)
 
 
-@app.post(
-    "/api/subscriptions/{subscription_id}/scrape",
-    dependencies=[Depends(require_admin)],
-)
-def scrape_subscription_route(
-    subscription_id: int,
-    notify_emby: bool = Query(default=False),
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    subscription = db.get(Subscription, subscription_id)
-    if not subscription:
-        raise HTTPException(status_code=404, detail="订阅不存在")
-    result = scrape_subscription(db, subscription)
-    payload = result.as_dict()
-    if result.ok and notify_emby:
-        payload["emby"] = refresh_emby_library(db).as_dict()
-    return payload
-
-
 @app.delete("/api/subscriptions/{subscription_id}", dependencies=[Depends(require_admin)])
 def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
     subscription = db.get(Subscription, subscription_id)
@@ -1028,11 +993,6 @@ def manual_refresh(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
 @app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])
 def normalize_torrents_now() -> dict[str, Any]:
     return normalize_pending_items(limit=200)
-
-
-@app.post("/api/actions/emby-refresh", dependencies=[Depends(require_admin)])
-def refresh_emby_now(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return refresh_emby_library(db).as_dict()
 
 
 @app.post("/api/actions/test-downloader", dependencies=[Depends(require_admin)])

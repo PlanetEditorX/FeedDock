@@ -52,8 +52,6 @@ def main() -> None:
     umask = _number("UMASK", 0o002, base=8)
     os.umask(umask)
     data_dir = Path(os.getenv("DATA_DIR", "/data"))
-    media_value = os.getenv("MEDIA_LOCAL_ROOT", "").strip()
-    media_dir = Path(media_value) if media_value else None
 
     if os.geteuid() == 0:
         if _boolean("TAKE_OWNERSHIP", False):
@@ -72,8 +70,6 @@ def main() -> None:
             os.setuid(uid)
 
     _assert_writable(data_dir, "FeedDock 数据目录")
-    if media_dir is not None:
-        _assert_writable(media_dir, "媒体目录")
 
     os.execvp(sys.argv[1], sys.argv[1:])
 

@@ -44,11 +44,7 @@ class PollScheduler:
             result: dict[str, object] = {"ok": True, "ran": True, "date": local_date}
             if config.download_enabled:
                 result["downloads"] = dispatch_scheduled_downloads(db, limit=1000)
-            # Always update completion state. Scraping happens only in the daily
-            # window when scrape_enabled is selected.
-            result["completion"] = normalize_pending_items(
-                db, limit=500, allow_scrape=config.scrape_enabled
-            )
+            result["completion"] = normalize_pending_items(db, limit=500)
             mark_automation_run(db, local_date)
             return result
 
@@ -69,12 +65,7 @@ class PollScheduler:
             if now >= next_completion_check:
                 try:
                     with SessionLocal() as db:
-                        automation = load_automation_config(db)
-                        normalize_pending_items(
-                            db,
-                            limit=100,
-                            allow_scrape=not automation.scrape_enabled,
-                        )
+                        normalize_pending_items(db, limit=100)
                 except Exception as exc:
                     log_exception("后台下载完成检查异常", exc, stage="scheduler.normalize-pending")
                 next_completion_check = time.monotonic() + 120

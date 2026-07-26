@@ -199,7 +199,7 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .modal.hidden { display: none; }
 .cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }
 
-/* v1.9 metadata, Emby naming, and remembered panel state */
+/* Metadata, media-server naming, and remembered panel state */
 .panel { transition: padding .18s ease, background .18s ease; }
 .panel > .panel-head { position: relative; }
 .panel-toggle { margin-left: auto; flex: 0 0 auto; }

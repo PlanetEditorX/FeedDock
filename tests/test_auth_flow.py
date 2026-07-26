@@ -225,7 +225,7 @@ class AuthFlowTests(unittest.TestCase):
             )
             self.assertEqual(created_subscription.status_code, 200)
             self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
-            self.assertTrue(created_subscription.json()["scrape_enabled"])
+            self.assertNotIn("scrape_enabled", created_subscription.json())
             self.assertEqual(created_subscription.json()["custom_download_path"], "/media")
             subscriptions = client.get("/api/subscriptions")
             self.assertEqual(subscriptions.status_code, 200)
