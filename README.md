@@ -1,6 +1,14 @@
 # FeedDock
 
-当前版本：`1.10.0`
+当前版本：`1.10.1`
+
+## v1.10.1：Mikan 目录订阅状态优化
+
+- 已订阅番剧显示 `✓ 已订阅` 标识。
+- 主 RSS 和备用 RSS 均参与识别，`bangumiId` 参数大小写不敏感。
+- 新增、编辑或删除订阅后，当前目录即时同步，无需重新请求 Mikan。
+- 订阅状态解析拆分为独立的后端和前端模块，并增加专用边界测试。
+- 详细设计与验证见 [`MIKAN_SUBSCRIPTION_STATUS.md`](MIKAN_SUBSCRIPTION_STATUS.md)。
 
 ## v1.10.0：季度识别、规范命名、定时窗口与代理
 
@@ -54,7 +62,7 @@ FeedDock 不再写入本地 NFO/图片，也不再调用 tinyMediaManager。它�
 
 FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取你配置的 RSS，将匹配条目推送给 qBittorrent，并提供 Mikan 季度目录、持久过滤、封面缓存、TMDB/Bangumi 元数据匹配、规范目录和文件名、总集数同步。
 
-当前版本：`1.10.0`
+当前版本：`1.10.1`
 
 ## v1.10.0 修正与增强
 
@@ -304,7 +312,7 @@ TAKE_OWNERSHIP: "false"
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.10.0
+FEEDDOCK_BUILD_VERSION=1.10.1
 METADATA_LANGUAGE=zh-CN
 METADATA_AUTO_SYNC_HOURS=24
 TMDB_READ_ACCESS_TOKEN=

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
   <link rel="icon" type="image/png" href="/static/feeddock-icon.png">
-  <link rel="stylesheet" href="/static/styles.css?v=1.10.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.10.1">
 </head>
 <body>
   <header class="topbar">
@@ -137,6 +137,7 @@
 
   <div id="metadataReviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="metadataReviewTitle"><div class="modal-backdrop" data-close-metadata-review></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button id="closeMetadataReview" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"></label><button id="reviewSearch" type="button">搜索</button><button id="reviewSkip" type="button" class="secondary">完全跳过</button></div><div id="reviewResults" class="metadata-results muted">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
   <div id="mikanDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mikanDetailTitle"><div class="modal-backdrop" data-close-mikan-modal></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button id="closeMikanModal" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div id="mikanDetailBody" class="mikan-detail-body"></div></section></div>
-  <script src="/static/app.js?v=1.10.0" defer></script>
+  <script src="/static/mikan-subscription-state.js?v=1.10.1" defer></script>
+  <script src="/static/app.js?v=1.10.1" defer></script>
 </body>
 </html>

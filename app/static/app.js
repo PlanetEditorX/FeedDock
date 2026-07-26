@@ -1,6 +1,8 @@
 const notice = document.getElementById('notice');
 const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
+const mikanSubscriptionState = window.FeedDockMikanSubscriptionState;
+if (!mikanSubscriptionState) throw new Error('Mikan subscription state module is unavailable');
 let subscriptionsById = new Map();
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
@@ -449,42 +451,15 @@ function cacheStatusText(data) {
   return parts.join(' · ');
 }
 
-function extractMikanCatalogBangumiId(value) {
-  if (!value) return 0;
-  try {
-    const url = new URL(value, window.location.origin);
-    for (const [key, rawValue] of url.searchParams.entries()) {
-      if (key.toLowerCase() === 'bangumiid') {
-        return Number.parseInt(rawValue || '0', 10) || 0;
-      }
-    }
-    return 0;
-  } catch (_) {
-    return 0;
-  }
-}
-
 function syncMikanCatalogSubscriptionState(subscriptions) {
-  if (!currentMikanCatalogData) return;
-  const subscribedIds = new Set();
-  for (const subscription of subscriptions || []) {
-    for (const value of [subscription.rss_url, subscription.backup_rss_url]) {
-      const bangumiId = extractMikanCatalogBangumiId(value);
-      if (bangumiId > 0) subscribedIds.add(bangumiId);
-    }
-  }
-
-  let changed = false;
-  for (const row of currentMikanCatalogData.rows || []) {
-    for (const item of row.items || []) {
-      const subscribed = subscribedIds.has(Number(item.bangumi_id));
-      if (Boolean(item.subscribed) !== subscribed) {
-        item.subscribed = subscribed;
-        changed = true;
-      }
-    }
-  }
-  if (changed) renderMikanCatalog(currentMikanCatalogData);
+  if (!currentMikanCatalogData) return 0;
+  const subscribedIds = mikanSubscriptionState.collectSubscribedBangumiIds(subscriptions);
+  const changedCount = mikanSubscriptionState.updateCatalogSubscriptionState(
+    currentMikanCatalogData,
+    subscribedIds,
+  );
+  if (changedCount) renderMikanCatalog(currentMikanCatalogData);
+  return changedCount;
 }
 
 function renderMikanDetail(detail) {

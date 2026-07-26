@@ -40,6 +40,7 @@ class DeploymentFileTests(unittest.TestCase):
     def test_frontend_has_manual_mikan_catalog(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        subscription_state = (ROOT / "app/static/mikan-subscription-state.js").read_text(encoding="utf-8")
         self.assertIn('id="mikanCatalogForm"', index)
         self.assertIn('id="catalogYear"', index)
         self.assertIn('id="catalogSeason"', index)
@@ -52,7 +53,14 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("applyDiscoveryPreset", script)
         self.assertIn("mikan-subscribed-badge", script)
         self.assertIn("syncMikanCatalogSubscriptionState(data)", script)
-        self.assertIn("extractMikanCatalogBangumiId", script)
+        self.assertIn("FeedDockMikanSubscriptionState", script)
+        self.assertIn("collectSubscribedBangumiIds", subscription_state)
+        self.assertIn("updateCatalogSubscriptionState", subscription_state)
+        self.assertIn('/static/mikan-subscription-state.js?v=', index)
+        self.assertLess(
+            index.index('/static/mikan-subscription-state.js?v='),
+            index.index('/static/app.js?v='),
+        )
         self.assertIn("result.desired_name || result.save_path", script)
         self.assertNotIn("动漫花园", index)
         self.assertNotIn("dmhy", script.lower())
@@ -95,6 +103,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", workflow)
         self.assertIn("type=raw,value=${{ steps.app_version.outputs.value }}", workflow)
         self.assertIn("--latest", workflow)
+        self.assertIn("node --check app/static/mikan-subscription-state.js", workflow)
 
     def test_subscription_submit_keeps_form_reference_across_await(self) -> None:
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
@@ -114,6 +123,7 @@ class DeploymentFileTests(unittest.TestCase):
         change_password = (ROOT / "app/static/change-password.html").read_text(encoding="utf-8")
 
         self.assertIn(f"/static/app.js?v={version}", index)
+        self.assertIn(f"/static/mikan-subscription-state.js?v={version}", index)
         self.assertIn(f"/static/login.js?v={version}", login)
         self.assertIn(f"/static/change-password.js?v={version}", change_password)
         for page in (index, login, change_password):

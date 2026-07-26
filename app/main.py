@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
@@ -29,6 +28,7 @@ from .debug_logging import (
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
+from .mikan_subscription import collect_subscribed_mikan_bangumi_ids
 from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
@@ -160,18 +160,9 @@ def _apply_mikan_hidden_filters(
     """
 
     filters = load_mikan_hidden_filters(db, year=year, season=season)
-    subscribed_bangumi_ids: set[int] = set()
-    for rss_urls in db.execute(select(Subscription.rss_url, Subscription.backup_rss_url)):
-        for url in rss_urls:
-            if not url:
-                continue
-            try:
-                query = dict((key.casefold(), value) for key, value in parse_qsl(urlparse(url).query))
-                bangumi_id = int(query.get("bangumiid", "0"))
-            except (TypeError, ValueError):
-                bangumi_id = 0
-            if bangumi_id > 0:
-                subscribed_bangumi_ids.add(bangumi_id)
+    subscribed_bangumi_ids = collect_subscribed_mikan_bangumi_ids(
+        db.execute(select(Subscription.rss_url, Subscription.backup_rss_url))
+    )
     total_hidden = 0
     for row in payload.get("rows", []):
         weekday = str(row.get("weekday", "")).strip()

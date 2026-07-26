@@ -1,4 +1,4 @@
-# FeedDock v1.10.0 飞牛 OS 部署
+# FeedDock v1.10.1 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -142,7 +142,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-更新后浏览器执行一次强制刷新。v1.10.0 会把旧订阅的下载根目录同步到当前 qBittorrent 根目录，并关闭 FeedDock 刮削；不会删除历史指纹和订阅数据。
+v1.10.1 已更新静态资源版本参数，正常刷新页面即可加载拆分后的 Mikan 订阅状态模块；若反向代理缓存了 HTML，可执行一次强制刷新。此次更新不修改数据库结构。v1.10.0 的旧订阅路径升级逻辑仍会保留，不会删除历史指纹和订阅数据。
 
 ## 9. 故障排查
 
