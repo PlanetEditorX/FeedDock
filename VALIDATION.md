@@ -1,8 +1,10 @@
-# FeedDock v1.10.2 验证报告
+# FeedDock v1.10.3 验证报告
 
 已验证：
 
 - 73 项自动化测试通过；
+- 以 `ResourceWarning` 作为错误运行测试通过；
+- GitHub Actions 测试与构建阶段均会删除旧版 `app/scraper.py` 残留；
 - 新增订阅成功流程通过；
 - 新增订阅异常回滚通过；
 - 500 请求编号返回通过；

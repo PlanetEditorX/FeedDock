@@ -3,6 +3,8 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from sqlalchemy.orm import close_all_sessions
+
 from app.database import Base, SessionLocal, engine
 from app.downloader import QBittorrentClient
 from app.runtime_config import reset_qbittorrent_config, save_qbittorrent_config
@@ -80,6 +82,8 @@ class IntegrationTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=2)
+        close_all_sessions()
+        engine.dispose(close=True)
 
     def test_external_qbittorrent_connection_and_push(self):
         client = QBittorrentClient(

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import close_all_sessions, sessionmaker
 
 from app.database import Base
 import app.mikan_cache as mikan_cache_module
@@ -81,7 +81,8 @@ class MikanCacheTests(unittest.TestCase):
         self.service = MikanCacheService(self.discovery)  # type: ignore[arg-type]
 
     def tearDown(self) -> None:
-        self.engine.dispose()
+        close_all_sessions()
+        self.engine.dispose(close=True)
 
     def test_catalog_reads_cache_after_first_fetch_and_filters_locally(self) -> None:
         with self.Session() as db:

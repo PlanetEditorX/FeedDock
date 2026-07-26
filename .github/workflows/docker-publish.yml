@@ -67,6 +67,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Remove legacy scraper module
+        shell: bash
+        run: rm -f app/scraper.py
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -128,6 +132,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Remove legacy scraper module
+        shell: bash
+        run: rm -f app/scraper.py
 
       - name: Resolve application version
         id: app_version

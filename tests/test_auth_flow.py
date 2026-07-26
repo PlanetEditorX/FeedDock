@@ -1,3 +1,4 @@
+import atexit
 import os
 import tempfile
 import unittest
@@ -13,8 +14,19 @@ os.environ["APP_VERSION"] = "1.7.0"
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.database import SessionLocal
+from sqlalchemy.orm import close_all_sessions
+
+from app.database import SessionLocal, engine
 from app.models import FeedItem, SystemLog
+
+
+def _cleanup_test_database() -> None:
+    close_all_sessions()
+    engine.dispose(close=True)
+    _TEST_DATA.cleanup()
+
+
+atexit.register(_cleanup_test_database)
 
 
 class AuthFlowTests(unittest.TestCase):

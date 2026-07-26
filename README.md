@@ -1,10 +1,13 @@
 # FeedDock
 
-当前版本：`1.10.2`
+当前版本：`1.10.3`
 
 FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取 RSS、执行关键词和集数匹配、将下载链接推送到 qBittorrent，并可通过 qBittorrent API 将单视频任务规范命名为 `SxxExx` 格式。
 
-## v1.10.2 重点修复
+## v1.10.3 重点修复
+
+- 修复旧仓库覆盖升级时 `app/scraper.py` 残留导致 GitHub Actions 失败的问题；工作流在测试和构建前都会清理该旧文件。
+- 测试会显式关闭 SQLAlchemy Session、Engine 和临时数据库，消除 Python 3.13 的 SQLite `ResourceWarning`。
 
 - **媒体刮削功能已完全移除**：不生成 NFO、不调用 tinyMediaManager、不通知 Emby、不写入媒体目录。
 - 修复“新增任意订阅可能返回 500”时缺少诊断信息的问题。

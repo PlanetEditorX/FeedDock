@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import close_all_sessions, sessionmaker
 
 from app.database import Base
 from app.main import _apply_mikan_hidden_filters
@@ -20,7 +20,8 @@ class MikanWeekdayFilterTests(unittest.TestCase):
         self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     def tearDown(self) -> None:
-        self.engine.dispose()
+        close_all_sessions()
+        self.engine.dispose(close=True)
 
     def test_weekdays_are_saved_independently_and_can_be_restored(self) -> None:
         with self.Session() as db:

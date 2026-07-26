@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import close_all_sessions, sessionmaker
 
 from app.database import Base
 from app.models import FeedItem, Subscription
@@ -185,40 +185,44 @@ class MetadataNamingTests(unittest.TestCase):
 
     def test_download_completion_only_updates_name_and_progress(self):
         engine = create_engine("sqlite:///:memory:", future=True)
-        Base.metadata.create_all(engine)
-        Session = sessionmaker(bind=engine, expire_on_commit=False)
-        with Session() as db:
-            sub = Subscription(
-                name="规范命名番剧 (2026)",
-                rss_url="https://example.com/rss",
-                rename_enabled=True,
-            )
-            db.add(sub)
-            db.flush()
-            item = FeedItem(
-                subscription_id=sub.id,
-                fingerprint="a" * 64,
-                title="规范命名番剧 - 01",
-                status="queued",
-                qbit_tag="feeddock-item-1",
-                desired_name="规范命名番剧 - S01E01",
-                rename_status="waiting_completion",
-            )
-            db.add(item)
-            db.commit()
-            fake_qbit = SimpleNamespace(
-                normalize_single_video=lambda **_: TorrentNormalizeResult(
-                    True, "completed", "下载已完成", "abc", True, 100
+        try:
+            Base.metadata.create_all(engine)
+            Session = sessionmaker(bind=engine, expire_on_commit=False)
+            with Session() as db:
+                sub = Subscription(
+                    name="规范命名番剧 (2026)",
+                    rss_url="https://example.com/rss",
+                    rename_enabled=True,
                 )
-            )
-            from app.postprocess import normalize_pending_items
-            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit):
-                result = normalize_pending_items(db)
-            db.refresh(item)
-            self.assertEqual(result["completed"], 1)
-            self.assertNotIn("scraped", result)
-            self.assertEqual(item.download_progress, 100)
-            self.assertIsNotNone(item.completed_at)
+                db.add(sub)
+                db.flush()
+                item = FeedItem(
+                    subscription_id=sub.id,
+                    fingerprint="a" * 64,
+                    title="规范命名番剧 - 01",
+                    status="queued",
+                    qbit_tag="feeddock-item-1",
+                    desired_name="规范命名番剧 - S01E01",
+                    rename_status="waiting_completion",
+                )
+                db.add(item)
+                db.commit()
+                fake_qbit = SimpleNamespace(
+                    normalize_single_video=lambda **_: TorrentNormalizeResult(
+                        True, "completed", "下载已完成", "abc", True, 100
+                    )
+                )
+                from app.postprocess import normalize_pending_items
+                with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit):
+                    result = normalize_pending_items(db)
+                db.refresh(item)
+                self.assertEqual(result["completed"], 1)
+                self.assertNotIn("scraped", result)
+                self.assertEqual(item.download_progress, 100)
+                self.assertIsNotNone(item.completed_at)
+        finally:
+            close_all_sessions()
+            engine.dispose(close=True)
 
 
 if __name__ == "__main__":

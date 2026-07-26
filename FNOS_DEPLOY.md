@@ -1,4 +1,4 @@
-# FeedDock v1.10.2 飞牛 OS 部署
+# FeedDock v1.10.3 飞牛 OS 部署
 
 ## 1. 目录
 
@@ -88,7 +88,7 @@ docker logs -f feeddock
 
 ## 5. 刮削功能
 
-v1.10.2 不包含任何刮削功能，不需要配置或安装 tinyMediaManager、Emby API、NFO 写入目录，也不需要授予 FeedDock 对影视目录的写权限。
+v1.10.3 不包含任何刮削功能，不需要配置或安装 tinyMediaManager、Emby API、NFO 写入目录，也不需要授予 FeedDock 对影视目录的写权限。
 
 ## 6. 更新后仍出现 500
 
@@ -102,7 +102,7 @@ docker exec feeddock python -c "from app.config import settings; print(settings.
 应输出：
 
 ```text
-1.10.2
+1.10.3
 ```
 
 然后开启 DEBUG，重新保存订阅，并按请求编号查看日志。
