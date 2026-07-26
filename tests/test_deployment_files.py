@@ -209,6 +209,8 @@ class DeploymentFileTests(unittest.TestCase):
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertIn('placeholder="请输入订阅名称"', index)
+        self.assertIn('placeholder="番剧名称 第二季"', index)
+        self.assertNotIn('placeholder="金牌得主 第二季"', index)
         self.assertIn("className = 'subscription-details'", script)
         self.assertIn('syncMetadataSearchQuery({ force: true })', script)
         self.assertIn('searchMetadata({ automatic: true })', script)

@@ -64,8 +64,10 @@ def canonical_year(subscription: Subscription) -> int:
 
 
 def _without_duplicate_year(title: str, year: int) -> str:
-    if year and re.search(rf"\({year}\)\s*$", title):
-        return title[: -(len(str(year)) + 3)].rstrip()
+    if year:
+        # Metadata may correct a year embedded in an RSS/third-party title.
+        # Keep exactly one authoritative year in the media folder.
+        return re.sub(r"\s*\(\d{4}\)\s*$", "", title).rstrip()
     return title
 
 

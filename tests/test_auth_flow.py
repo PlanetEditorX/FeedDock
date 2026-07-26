@@ -243,6 +243,8 @@ class AuthFlowTests(unittest.TestCase):
                 "name": "金牌得主 第二季",
                 "reference_title": "金牌得主 (2025)",
                 "tmdb_title": "金牌得主 (2025)",
+                "metadata_year": 2026,
+                "tmdb_id": 123456,
                 "bgm_url": "https://bgm.tv/subject/548818",
                 "air_date": "2026-01-24",
                 "season": 2,
@@ -269,7 +271,7 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(preview.json()["adjusted_episode"], "1")
             self.assertEqual(
                 preview.json()["save_path"],
-                "/media/金牌得主 第二季/Season 2",
+                "/media/金牌得主 (2026) [tmdbid=123456]/Season 02",
             )
 
             advanced = client.post("/api/subscriptions", json=advanced_payload)
