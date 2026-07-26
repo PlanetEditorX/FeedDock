@@ -51,6 +51,8 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("cacheStatusText", script)
         self.assertIn("applyDiscoveryPreset", script)
         self.assertIn("mikan-subscribed-badge", script)
+        self.assertIn("syncMikanCatalogSubscriptionState(data)", script)
+        self.assertIn("extractMikanCatalogBangumiId", script)
         self.assertIn("result.desired_name || result.save_path", script)
         self.assertNotIn("动漫花园", index)
         self.assertNotIn("dmhy", script.lower())

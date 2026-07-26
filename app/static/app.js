@@ -449,6 +449,44 @@ function cacheStatusText(data) {
   return parts.join(' · ');
 }
 
+function extractMikanCatalogBangumiId(value) {
+  if (!value) return 0;
+  try {
+    const url = new URL(value, window.location.origin);
+    for (const [key, rawValue] of url.searchParams.entries()) {
+      if (key.toLowerCase() === 'bangumiid') {
+        return Number.parseInt(rawValue || '0', 10) || 0;
+      }
+    }
+    return 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function syncMikanCatalogSubscriptionState(subscriptions) {
+  if (!currentMikanCatalogData) return;
+  const subscribedIds = new Set();
+  for (const subscription of subscriptions || []) {
+    for (const value of [subscription.rss_url, subscription.backup_rss_url]) {
+      const bangumiId = extractMikanCatalogBangumiId(value);
+      if (bangumiId > 0) subscribedIds.add(bangumiId);
+    }
+  }
+
+  let changed = false;
+  for (const row of currentMikanCatalogData.rows || []) {
+    for (const item of row.items || []) {
+      const subscribed = subscribedIds.has(Number(item.bangumi_id));
+      if (Boolean(item.subscribed) !== subscribed) {
+        item.subscribed = subscribed;
+        changed = true;
+      }
+    }
+  }
+  if (changed) renderMikanCatalog(currentMikanCatalogData);
+}
+
 function renderMikanDetail(detail) {
   const container = document.getElementById('mikanDetailBody');
   container.replaceChildren();
@@ -588,7 +626,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   const titleRow = document.createElement('div');
   titleRow.className = 'mikan-anime-title-row';
   titleRow.append(text('strong', item.title));
-  if (item.subscribed) titleRow.append(text('span', '已订阅', 'mikan-subscribed-badge'));
+  if (item.subscribed) titleRow.append(text('span', '✓ 已订阅', 'mikan-subscribed-badge'));
   info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
@@ -866,6 +904,7 @@ async function loadSubscriptions() {
   const container = document.getElementById('subscriptions');
   const data = await api('/api/subscriptions');
   subscriptionsById = new Map(data.map((sub) => [String(sub.id), sub]));
+  syncMikanCatalogSubscriptionState(data);
   container.replaceChildren();
   if (!data.length) { container.append(text('p', '还没有订阅。', 'empty')); return; }
   for (const sub of data) {
