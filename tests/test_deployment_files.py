@@ -197,6 +197,17 @@ class DeploymentFileTests(unittest.TestCase):
             page = (ROOT / "app/static" / name).read_text(encoding="utf-8")
             self.assertIn('/static/feeddock-icon.svg', page)
 
+    def test_subscription_details_and_metadata_search_are_user_controlled(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn('placeholder="请输入订阅名称"', index)
+        self.assertIn("className = 'subscription-details'", script)
+        self.assertIn('syncMetadataSearchQuery({ force: true })', script)
+        self.assertIn('searchMetadata({ automatic: true })', script)
+        self.assertIn('applyMetadataCandidateToForm(results[0])', script)
+        self.assertIn('.subscription-details > summary', styles)
+
     def test_fnos_compose_has_optional_metadata_and_media_mount(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)

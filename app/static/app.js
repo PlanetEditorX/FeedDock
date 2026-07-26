@@ -84,6 +84,9 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'scrape_enabled', false);
   setFormValue(subscriptionForm, 'custom_download_path', currentDownloadRoot);
   setFormValue(subscriptionForm, 'enabled', true);
+  const metadataQuery = document.getElementById('metadataSearchQuery');
+  metadataQuery.value = '';
+  metadataQuery.dataset.subscriptionName = '';
   document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
   document.getElementById('metadataSearchResults').className = 'metadata-results muted';
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
@@ -91,6 +94,16 @@ function resetSubscriptionForm() {
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
   subscriptionPreviewBox.textContent = '尚未预览。';
   subscriptionPreviewBox.className = 'preview-box muted';
+}
+
+function syncMetadataSearchQuery({ force = false } = {}) {
+  const input = document.getElementById('metadataSearchQuery');
+  const subscriptionName = subscriptionForm.elements.name.value.trim();
+  const previousSubscriptionName = input.dataset.subscriptionName || '';
+  if (force || !input.value.trim() || input.value === previousSubscriptionName) {
+    input.value = subscriptionName;
+    input.dataset.subscriptionName = subscriptionName;
+  }
 }
 
 function subscriptionPayload({ forPreview = false, formData = null } = {}) {
@@ -372,6 +385,7 @@ function applyDiscoveryPreset(preset) {
     'missing_detection', 'only_latest', 'enabled', 'sample_title', 'bangumi_id',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
+  syncMetadataSearchQuery({ force: true });
   document.getElementById('subscriptionFormTitle').textContent = `添加订阅：${preset.name || '未命名番剧'}`;
   subscriptionPreviewBox.textContent = preset.sample_title
     ? `已带入样本标题：${preset.sample_title}\n请点击“预览规则和路径”确认集数与保存位置。`
@@ -379,7 +393,8 @@ function applyDiscoveryPreset(preset) {
   subscriptionPreviewBox.className = 'preview-box muted';
   closeMikanModal();
   document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  showNotice('已填入订阅表单，请确认规则和下载路径后保存');
+  searchMetadata({ automatic: true });
+  showNotice('已填入订阅表单，正在自动搜索元数据');
 }
 
 function externalLink(label, href) {
@@ -831,6 +846,7 @@ function populateSubscriptionForm(sub) {
     'custom_download_path', 'missing_detection', 'only_latest', 'enabled',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, sub[field]));
+  syncMetadataSearchQuery({ force: true });
   setFormValue(subscriptionForm, 'subscription_id', sub.id);
   setFormValue(subscriptionForm, 'sample_title', sub.reference_title || sub.name);
   document.getElementById('subscriptionFormTitle').textContent = `编辑订阅：${sub.name}`;
@@ -859,6 +875,8 @@ async function loadSubscriptions() {
     titleRow.append(text('h3', sub.canonical_title || sub.name));
     titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
     if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
+    const details = document.createElement('details'); details.className = 'subscription-details';
+    details.append(text('summary', '订阅详情'));
     const meta = document.createElement('div'); meta.className = 'subscription-meta';
     meta.append(text('span', `原订阅名：${sub.name}`));
     meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
@@ -867,8 +885,9 @@ async function loadSubscriptions() {
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
     meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 刮削：外部媒体库处理`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
-    content.append(meta);
-    content.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
+    details.append(meta);
+    details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
+    content.append(details);
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
@@ -1086,14 +1105,46 @@ document.getElementById('restoreMetadataSettings').addEventListener('click', asy
   try { await api('/api/metadata/settings', { method: 'DELETE' }); await loadMetadataSettings(); showNotice('已恢复 Compose 默认元数据配置'); } catch (error) { showNotice(error.message, false); }
 });
 
-document.getElementById('searchMetadata').addEventListener('click', async () => {
+async function searchMetadata({ automatic = false } = {}) {
   const provider = document.getElementById('metadataSearchProvider').value;
   const query = document.getElementById('metadataSearchQuery').value.trim() || subscriptionForm.elements.name.value.trim() || subscriptionForm.elements.reference_title.value.trim();
-  if (!query) { showNotice('请先输入订阅名称或元数据搜索词', false); return; }
+  if (!query) {
+    if (!automatic) showNotice('请先输入订阅名称或元数据搜索词', false);
+    return [];
+  }
   const mediaType = subscriptionForm.elements.media_type.value || 'tv';
   const year = Number.parseInt(subscriptionForm.elements.metadata_year.value || '0', 10) || 0;
   const container = document.getElementById('metadataSearchResults'); container.textContent = '正在搜索…'; container.className = 'metadata-results muted';
-  try { const params = new URLSearchParams({ provider, q: query, media_type: mediaType, year: String(year), limit: '10' }); renderMetadataResults(await api(`/api/metadata/search?${params}`)); } catch (error) { container.textContent = error.message; container.className = 'metadata-results error-text'; }
+  try {
+    const params = new URLSearchParams({ provider, q: query, media_type: mediaType, year: String(year), limit: '10' });
+    const results = await api(`/api/metadata/search?${params}`);
+    renderMetadataResults(results);
+    if (automatic && results.length) {
+      try {
+        await applyMetadataCandidateToForm(results[0]);
+        showNotice(`已自动匹配 ${results[0].provider.toUpperCase()} 元数据，请确认后保存订阅`);
+      } catch (error) {
+        showNotice(`已找到候选结果，但自动填充失败：${error.message}`, false);
+      }
+    } else if (automatic) {
+      showNotice('未找到元数据，请修改搜索词后手动搜索', false);
+    }
+    return results;
+  } catch (error) {
+    container.textContent = error.message;
+    container.className = 'metadata-results error-text';
+    if (automatic) showNotice('自动搜索失败，请修改搜索词后重试', false);
+    return [];
+  }
+}
+
+document.getElementById('searchMetadata').addEventListener('click', () => {
+  searchMetadata();
+});
+
+subscriptionForm.elements.name.addEventListener('input', () => syncMetadataSearchQuery());
+document.getElementById('metadataSearchQuery').addEventListener('input', (event) => {
+  event.currentTarget.dataset.subscriptionName = '';
 });
 
 document.getElementById('normalizeTorrents').addEventListener('click', async () => {

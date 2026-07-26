@@ -126,6 +126,11 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .preview-box.bad { color: var(--bad); border-color: var(--bad); }
 .subscription-meta { display: grid; gap: 4px; margin: 10px 0; padding: 10px; border-radius: 8px; background: var(--panel); }
 .subscription-meta span { color: var(--muted); }
+.subscription-details { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.subscription-details > summary { padding: 9px 11px; color: var(--muted); cursor: pointer; }
+.subscription-details > summary::marker { color: var(--accent); }
+.subscription-details .subscription-meta { margin: 0; border-radius: 0; }
+.subscription-details > .subscription-activity { margin: 0; padding: 0 10px 10px; }
 .discovery-results { display: grid; gap: 12px; margin-top: 16px; }
 .discovery-card { border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: var(--bg); overflow: hidden; }
 .discovery-title { display: flex; align-items: flex-start; gap: 10px; }
