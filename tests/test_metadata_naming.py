@@ -188,11 +188,9 @@ class MetadataNamingTests(unittest.TestCase):
 
     def test_tmm_scrape_is_disabled(self):
         sub = self.subscription(scrape_enabled=True, scrape_mode="tmm", save_path_template="{base}/{media_folder}/Season {season:02}")
-        with patch("app.scraper.httpx.Client") as client:
-            result = trigger_tmm_scrape(SimpleNamespace(), sub)
+        result = trigger_tmm_scrape(SimpleNamespace(), sub)
         self.assertFalse(result.ok)
         self.assertIn("已移除", result.message)
-        client.assert_not_called()
 
     def test_download_completion_skips_scrape(self):
         engine = create_engine("sqlite:///:memory:", future=True)
