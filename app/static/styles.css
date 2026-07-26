@@ -120,6 +120,9 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .preview-box.bad { color: var(--bad); border-color: var(--bad); }
 .subscription-meta { display: grid; gap: 4px; margin: 10px 0; padding: 10px; border-radius: 8px; background: var(--panel); }
 .subscription-meta span { color: var(--muted); }
+.subscription-details { margin-top: 10px; }
+.subscription-details > summary { color: var(--muted); cursor: pointer; user-select: none; }
+.subscription-details[open] > summary { margin-bottom: 2px; }
 .discovery-results { display: grid; gap: 12px; margin-top: 16px; }
 .discovery-card { border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: var(--bg); overflow: hidden; }
 .discovery-title { display: flex; align-items: flex-start; gap: 10px; }
@@ -158,6 +161,8 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .mikan-cover img { width: 100%; height: 100%; object-fit: cover; }
 .mikan-anime-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
 .mikan-anime-info strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-height: 1.42; }
+.mikan-anime-card.is-subscribed { box-shadow: inset 3px 0 0 var(--good); }
+.mikan-subscribed-badge { display: inline-block; margin-left: 7px; padding: 1px 6px; border: 1px solid var(--good); border-radius: 999px; color: var(--good); font-size: 11px; font-weight: 700; line-height: 1.35; vertical-align: 1px; }
 .catalog-card-action { margin-top: auto; color: var(--accent); font-size: 12px; }
 .mikan-anime-card.is-filter-editing { cursor: pointer; padding-top: 42px; }
 .mikan-anime-card.is-filter-hidden { opacity: .48; background: #111820; }

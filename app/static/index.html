@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.10.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.10.2">
 </head>
 <body>
   <header class="topbar">
@@ -102,7 +102,7 @@
 
         <fieldset><legend>搜索并选择元数据</legend><div class="metadata-search-row">
           <label>来源<select id="metadataSearchProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label>
-          <label class="metadata-query">搜索词<input id="metadataSearchQuery" placeholder="默认使用订阅名称"></label><button id="searchMetadata" type="button" class="secondary">搜索</button>
+          <label class="metadata-query">搜索词<input id="metadataSearchQuery"></label><button id="searchMetadata" type="button" class="secondary">搜索</button>
         </div><div id="metadataSearchResults" class="metadata-results muted">尚未搜索。</div></fieldset>
 
         <fieldset><legend>RSS 来源</legend><div class="form-grid"><label>主 RSS 名称<input name="primary_rss_name" placeholder="LoliHouse"></label><label class="wide">主 RSS 地址<input name="rss_url" type="url" required placeholder="https://mikanime.tv/RSS/Bangumi?..."></label><label>备用 RSS 名称<input name="backup_rss_name" placeholder="可选"></label><label class="wide">备用 RSS 地址<input name="backup_rss_url" type="url" placeholder="主 RSS 失败或无条目时使用"></label></div></fieldset>
@@ -128,12 +128,12 @@
 
     <section class="panel" data-panel-id="recent-items"><div class="panel-head"><div><h2>最近条目</h2><p>显示下载进度和规范重命名状态。</p></div><div class="actions"><select id="statusFilter"><option value="">全部状态</option><option value="scheduled">等待定时推送</option><option value="queued">已推送</option><option value="skipped">已跳过</option><option value="error">错误</option></select><button id="clearRecentItems" type="button" class="small danger">清理条目</button></div></div><div class="table-wrap panel-body"><table><thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>命名</th><th>说明</th><th></th></tr></thead><tbody id="items"><tr><td colspan="7">正在加载…</td></tr></tbody></table></div></section>
 
-    <section class="panel" data-panel-id="system-logs"><div class="panel-head"><div><h2>系统日志</h2><p>INFO 记录常规事件；DEBUG 会额外记录 API 请求、保存阶段、异常类型和完整 traceback。</p></div><div class="actions log-toolbar"><label>日志级别<select id="logLevelSetting"><option value="INFO">INFO</option><option value="DEBUG">DEBUG</option></select></label><button id="saveLogLevel" type="button" class="small secondary">保存级别</button><button id="refreshSystemLogs" type="button" class="small secondary">刷新日志</button><button id="clearSystemLogs" type="button" class="small danger">清理日志</button></div></div><p id="logFilePath" class="hint panel-body"></p><div id="logs" class="logs panel-body"></div></section>
+    <section class="panel" data-panel-id="system-logs"><div class="panel-head"><div><h2>系统日志</h2><p>INFO 记录常规事件；DEBUG 会额外记录 API 请求、保存阶段、异常类型和完整 traceback。</p></div><div class="actions log-toolbar"><label>日志级别<select id="logLevelSetting"><option value="INFO">INFO</option><option value="DEBUG">DEBUG</option></select></label><button id="saveLogLevel" type="button" class="small secondary">保存级别</button><button id="refreshSystemLogs" type="button" class="small secondary">刷新日志</button><button id="clearSystemLogs" type="button" class="small danger">清理日志</button></div></div><div id="logs" class="logs panel-body"></div></section>
     <section class="legal">本工具不提供、存储或分发任何媒体资源。请只处理你有权访问的 RSS；媒体刮削请交由外部媒体库。</section>
   </main>
 
   <div id="metadataReviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="metadataReviewTitle"><div class="modal-backdrop" data-close-metadata-review></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button id="closeMetadataReview" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"></label><button id="reviewSearch" type="button">搜索</button><button id="reviewSkip" type="button" class="secondary">完全跳过</button></div><div id="reviewResults" class="metadata-results muted">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
   <div id="mikanDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mikanDetailTitle"><div class="modal-backdrop" data-close-mikan-modal></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button id="closeMikanModal" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div id="mikanDetailBody" class="mikan-detail-body"></div></section></div>
-  <script src="/static/app.js?v=1.10.1" defer></script>
+  <script src="/static/app.js?v=1.10.2" defer></script>
 </body>
 </html>

@@ -2,6 +2,7 @@ const notice = document.getElementById('notice');
 const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 let subscriptionsById = new Map();
+let subscribedMikanBangumiIds = new Set();
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
 let currentDownloadRoot = '/media';
@@ -51,6 +52,18 @@ function fmtDate(value) {
 function titleWithYear(title, year) {
   const cleaned = String(title || '').trim().replace(/\s*\(\d{4}\)\s*$/, '');
   return year ? `${cleaned} (${year})` : cleaned;
+}
+
+function extractMikanBangumiId(url) {
+  if (!url) return null;
+  try {
+    const value = new URL(url).searchParams.get('bangumiId');
+    const id = Number.parseInt(value || '', 10);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  } catch (_) {
+    const match = String(url).match(/[?&]bangumiId=(\d+)/i);
+    return match ? Number.parseInt(match[1], 10) : null;
+  }
 }
 
 function setFormValue(form, name, value) {
@@ -358,6 +371,8 @@ function applyDiscoveryPreset(preset) {
     'missing_detection', 'only_latest', 'enabled', 'sample_title', 'bangumi_id',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
+  const metadataQuery = preset.name || preset.reference_title || '';
+  document.getElementById('metadataSearchQuery').value = metadataQuery;
   document.getElementById('subscriptionFormTitle').textContent = `添加订阅：${preset.name || '未命名番剧'}`;
   subscriptionPreviewBox.textContent = preset.sample_title
     ? `已带入样本标题：${preset.sample_title}\n请点击“预览规则和路径”确认集数与保存位置。`
@@ -366,6 +381,7 @@ function applyDiscoveryPreset(preset) {
   closeMikanModal();
   document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
   showNotice('已填入订阅表单，请确认规则和下载路径后保存');
+  if (metadataQuery) void searchMetadata(metadataQuery);
 }
 
 function externalLink(label, href) {
@@ -528,6 +544,8 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   const card = document.createElement(editing ? 'article' : 'button');
   if (!editing) card.type = 'button';
   card.className = 'mikan-anime-card';
+  const subscribed = subscribedMikanBangumiIds.has(Number(item.bangumi_id));
+  if (subscribed) card.classList.add('is-subscribed');
   if (editing) card.classList.add('is-filter-editing');
   if (hiddenDraft) card.classList.add('is-filter-hidden');
   if (!editing) card.addEventListener('click', () => openMikanDetail(item));
@@ -555,7 +573,9 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
 
   const info = document.createElement('div');
   info.className = 'mikan-anime-info';
-  info.append(text('strong', item.title));
+  const title = text('strong', item.title);
+  if (subscribed) title.append(text('span', '已订阅', 'mikan-subscribed-badge'));
+  info.append(title);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
     'span',
@@ -831,6 +851,9 @@ async function loadSubscriptions() {
   const container = document.getElementById('subscriptions');
   const data = await api('/api/subscriptions');
   subscriptionsById = new Map(data.map((sub) => [String(sub.id), sub]));
+  subscribedMikanBangumiIds = new Set(data.flatMap((sub) => [sub.rss_url, sub.backup_rss_url])
+    .map((url) => extractMikanBangumiId(url))
+    .filter((id) => id !== null));
   container.replaceChildren();
   if (!data.length) { container.append(text('p', '还没有订阅。', 'empty')); return; }
   for (const sub of data) {
@@ -845,6 +868,8 @@ async function loadSubscriptions() {
     titleRow.append(text('h3', sub.canonical_title || sub.name));
     titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
     if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
+    const details = document.createElement('details'); details.className = 'subscription-details';
+    details.append(text('summary', '订阅详情'));
     const meta = document.createElement('div'); meta.className = 'subscription-meta';
     meta.append(text('span', `原订阅名：${sub.name}`));
     meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
@@ -853,8 +878,9 @@ async function loadSubscriptions() {
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
     meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'}`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
-    content.append(meta);
-    content.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
+    details.append(meta);
+    details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
+    content.append(details);
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
@@ -888,8 +914,6 @@ async function loadLogSettings() {
   const settings = await api('/api/logs/settings');
   const select = document.getElementById('logLevelSetting');
   if (select) select.value = settings.level || 'INFO';
-  const path = document.getElementById('logFilePath');
-  if (path) path.textContent = `文件日志：${settings.file || '/data/logs/feeddock.log'}；500 错误可按提示中的请求编号在详细内容中定位。`;
 }
 
 async function loadLogs() {
@@ -1070,15 +1094,19 @@ document.getElementById('restoreMetadataSettings').addEventListener('click', asy
   try { await api('/api/metadata/settings', { method: 'DELETE' }); await loadMetadataSettings(); showNotice('已恢复 Compose 默认元数据配置'); } catch (error) { showNotice(error.message, false); }
 });
 
-document.getElementById('searchMetadata').addEventListener('click', async () => {
+async function searchMetadata(queryOverride = '') {
   const provider = document.getElementById('metadataSearchProvider').value;
-  const query = document.getElementById('metadataSearchQuery').value.trim() || subscriptionForm.elements.name.value.trim() || subscriptionForm.elements.reference_title.value.trim();
+  const input = document.getElementById('metadataSearchQuery');
+  const query = String(queryOverride || input.value || subscriptionForm.elements.name.value || subscriptionForm.elements.reference_title.value).trim();
   if (!query) { showNotice('请先输入订阅名称或元数据搜索词', false); return; }
+  input.value = query;
   const mediaType = subscriptionForm.elements.media_type.value || 'tv';
   const year = Number.parseInt(subscriptionForm.elements.metadata_year.value || '0', 10) || 0;
   const container = document.getElementById('metadataSearchResults'); container.textContent = '正在搜索…'; container.className = 'metadata-results muted';
   try { const params = new URLSearchParams({ provider, q: query, media_type: mediaType, year: String(year), limit: '10' }); renderMetadataResults(await api(`/api/metadata/search?${params}`)); } catch (error) { container.textContent = error.message; container.className = 'metadata-results error-text'; }
-});
+}
+
+document.getElementById('searchMetadata').addEventListener('click', () => { void searchMetadata(); });
 
 document.getElementById('normalizeTorrents').addEventListener('click', async () => {
   try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`检查完成：规范化 ${result.renamed || 0}，下载完成 ${result.completed || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
