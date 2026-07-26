@@ -438,6 +438,7 @@ class MikanCatalogItemOut(BaseModel):
     detail_url: str
     base_url: str
     hidden: bool = False
+    subscribed: bool = False
 
 
 class MikanCatalogRowOut(BaseModel):

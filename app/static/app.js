@@ -557,6 +557,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   const card = document.createElement(editing ? 'article' : 'button');
   if (!editing) card.type = 'button';
   card.className = 'mikan-anime-card';
+  if (item.subscribed) card.classList.add('is-subscribed');
   if (editing) card.classList.add('is-filter-editing');
   if (hiddenDraft) card.classList.add('is-filter-hidden');
   if (!editing) card.addEventListener('click', () => openMikanDetail(item));
@@ -584,7 +585,11 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
 
   const info = document.createElement('div');
   info.className = 'mikan-anime-info';
-  info.append(text('strong', item.title));
+  const titleRow = document.createElement('div');
+  titleRow.className = 'mikan-anime-title-row';
+  titleRow.append(text('strong', item.title));
+  if (item.subscribed) titleRow.append(text('span', '已订阅', 'mikan-subscribed-badge'));
+  info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
     'span',
@@ -1193,9 +1198,21 @@ document.getElementById('previewSubscription').addEventListener('click', async (
       `规范文件名：${result.desired_name || '未生成'}`,
     ].join('\n');
     subscriptionPreviewBox.className = `preview-box ${result.matched ? 'good' : 'bad'}`;
+    const namingDetails = subscriptionPreviewBox.closest('details');
+    if (namingDetails) namingDetails.open = true;
+    subscriptionPreviewBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showNotice(
+      result.matched
+        ? `预览完成：${result.desired_name || result.save_path}`
+        : `预览未通过：${result.match_reason}`,
+      result.matched,
+    );
   } catch (error) {
     subscriptionPreviewBox.textContent = error.message;
     subscriptionPreviewBox.className = 'preview-box bad';
+    const namingDetails = subscriptionPreviewBox.closest('details');
+    if (namingDetails) namingDetails.open = true;
+    showNotice(`预览失败：${error.message}`, false);
   }
 });
 

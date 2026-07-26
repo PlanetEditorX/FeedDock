@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
@@ -159,6 +160,18 @@ def _apply_mikan_hidden_filters(
     """
 
     filters = load_mikan_hidden_filters(db, year=year, season=season)
+    subscribed_bangumi_ids: set[int] = set()
+    for rss_urls in db.execute(select(Subscription.rss_url, Subscription.backup_rss_url)):
+        for url in rss_urls:
+            if not url:
+                continue
+            try:
+                query = dict((key.casefold(), value) for key, value in parse_qsl(urlparse(url).query))
+                bangumi_id = int(query.get("bangumiid", "0"))
+            except (TypeError, ValueError):
+                bangumi_id = 0
+            if bangumi_id > 0:
+                subscribed_bangumi_ids.add(bangumi_id)
     total_hidden = 0
     for row in payload.get("rows", []):
         weekday = str(row.get("weekday", "")).strip()
@@ -171,6 +184,7 @@ def _apply_mikan_hidden_filters(
                 bangumi_id = 0
             hidden = bangumi_id in hidden_ids
             item["hidden"] = hidden
+            item["subscribed"] = bangumi_id in subscribed_bangumi_ids
             if hidden:
                 row_hidden += 1
         row["hidden_count"] = row_hidden

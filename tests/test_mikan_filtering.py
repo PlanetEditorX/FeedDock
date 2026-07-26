@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.main import _apply_mikan_hidden_filters
+from app.models import Subscription
 from app.runtime_config import (
     load_mikan_hidden_filters,
     save_mikan_weekday_hidden_filter,
@@ -91,6 +92,19 @@ class MikanWeekdayFilterTests(unittest.TestCase):
         self.assertTrue(decorated["rows"][0]["items"][1]["hidden"])
         self.assertEqual(decorated["rows"][0]["hidden_count"], 1)
         self.assertEqual(decorated["hidden_count"], 1)
+
+    def test_catalog_items_are_marked_when_their_mikan_rss_is_subscribed(self) -> None:
+        payload = {
+            "year": 2026,
+            "season": "夏",
+            "rows": [{"weekday": "星期一", "items": [{"bangumi_id": 100, "title": "A"}]}],
+        }
+        with self.Session() as db:
+            db.add(Subscription(name="A", rss_url="https://mikanime.tv/RSS/Bangumi?bangumiId=100&subgroupid=1"))
+            db.commit()
+            decorated = _apply_mikan_hidden_filters(payload, db, year=2026, season="夏")
+
+        self.assertTrue(decorated["rows"][0]["items"][0]["subscribed"])
 
 
 if __name__ == "__main__":
