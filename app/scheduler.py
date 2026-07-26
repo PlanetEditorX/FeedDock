@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .config import settings
 from .database import SessionLocal
+from .logging_service import record_exception
 from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
@@ -37,17 +38,12 @@ class PollScheduler:
             local_now = datetime.now(timezone)
             local_date = local_now.date().isoformat()
             current_time = local_now.strftime("%H:%M")
-            if not force:
-                if not config.enabled or current_time < config.daily_time or config.last_run_date == local_date:
-                    return {"ok": True, "ran": False, "message": "尚未到统一执行时间或今日已执行"}
+            if not force and (not config.enabled or current_time < config.daily_time or config.last_run_date == local_date):
+                return {"ok": True, "ran": False, "message": "尚未到统一执行时间或今日已执行"}
             result: dict[str, object] = {"ok": True, "ran": True, "date": local_date}
             if config.download_enabled:
                 result["downloads"] = dispatch_scheduled_downloads(db, limit=1000)
-            # Always update completion state. Scraping happens only in the daily
-            # window when scrape_enabled is selected.
-            result["completion"] = normalize_pending_items(
-                db, limit=500, allow_scrape=config.scrape_enabled
-            )
+            result["completion"] = normalize_pending_items(db, limit=500)
             mark_automation_run(db, local_date)
             return result
 
@@ -61,33 +57,24 @@ class PollScheduler:
             if now >= next_rss_refresh:
                 try:
                     refresh_all()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    record_exception("后台 RSS 刷新异常", exc, source="scheduler")
                 next_rss_refresh = time.monotonic() + settings.poll_interval_minutes * 60
-
             if now >= next_completion_check:
                 try:
                     with SessionLocal() as db:
-                        automation = load_automation_config(db)
-                        normalize_pending_items(
-                            db,
-                            limit=100,
-                            allow_scrape=not automation.scrape_enabled,
-                        )
-                except Exception:
-                    pass
+                        normalize_pending_items(db, limit=100)
+                except Exception as exc:
+                    record_exception("后台下载完成检查异常", exc, source="scheduler")
                 next_completion_check = time.monotonic() + 120
-
             try:
                 self.run_daily_automation()
-            except Exception:
-                pass
-
+            except Exception as exc:
+                record_exception("统一执行时间任务异常", exc, source="scheduler")
             try:
                 refresh_due_mikan_catalogs()
-            except Exception:
-                pass
-
+            except Exception as exc:
+                record_exception("Mikan 缓存刷新异常", exc, source="scheduler")
             next_event = min(next_rss_refresh, next_completion_check)
             wait_seconds = max(1.0, next_event - time.monotonic())
             if self._stop_event.wait(min(60.0, wait_seconds)):

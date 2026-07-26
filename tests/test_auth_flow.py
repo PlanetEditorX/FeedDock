@@ -219,8 +219,50 @@ class AuthFlowTests(unittest.TestCase):
             )
             self.assertEqual(created_subscription.status_code, 200)
             self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
-            self.assertTrue(created_subscription.json()["scrape_enabled"])
+            self.assertNotIn("scrape_enabled", created_subscription.json())
+            self.assertNotIn("scrape_mode", created_subscription.json())
             self.assertEqual(created_subscription.json()["custom_download_path"], "/media")
+
+            debug_settings = client.put("/api/logging/settings", json={"level": "DEBUG"})
+            self.assertEqual(debug_settings.status_code, 200, debug_settings.text)
+            self.assertTrue(debug_settings.json()["debug"])
+            debug_request_id = "subscription-debug-ok"
+            debug_created = client.post(
+                "/api/subscriptions",
+                headers={"X-Request-ID": debug_request_id},
+                json={
+                    "name": "Debug logging feed",
+                    "rss_url": "https://example.test/debug-feed.xml",
+                },
+            )
+            self.assertEqual(debug_created.status_code, 200, debug_created.text)
+            debug_logs = client.get("/api/logs", params={"request_id": debug_request_id, "limit": 100})
+            self.assertEqual(debug_logs.status_code, 200, debug_logs.text)
+            self.assertTrue(any(row["message"] == "开始保存订阅" for row in debug_logs.json()))
+            self.assertTrue(any("订阅已创建" in row["message"] for row in debug_logs.json()))
+
+            failed_request_id = "subscription-debug-fail"
+            with patch("app.main._subscription_out", side_effect=RuntimeError("diagnostic failure")):
+                failed_create = client.post(
+                    "/api/subscriptions",
+                    headers={"X-Request-ID": failed_request_id},
+                    json={
+                        "name": "Failure diagnostics feed",
+                        "rss_url": "https://example.test/failure-feed.xml",
+                    },
+                )
+            self.assertEqual(failed_create.status_code, 500, failed_create.text)
+            self.assertIn(failed_request_id, failed_create.json()["detail"])
+            failure_logs = client.get("/api/logs", params={"request_id": failed_request_id, "limit": 100})
+            self.assertEqual(failure_logs.status_code, 200, failure_logs.text)
+            self.assertTrue(failure_logs.json())
+            failure_detail = "\n".join(row["details"] for row in failure_logs.json())
+            self.assertIn("RuntimeError", failure_detail)
+            self.assertIn("diagnostic failure", failure_detail)
+            self.assertIn("traceback", failure_detail)
+            exported_logs = client.get("/api/logs/export", params={"limit": 10000})
+            self.assertEqual(exported_logs.status_code, 200)
+            self.assertIn(failed_request_id, exported_logs.text)
             subscriptions = client.get("/api/subscriptions")
             self.assertEqual(subscriptions.status_code, 200)
             self.assertTrue(

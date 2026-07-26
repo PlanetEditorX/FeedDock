@@ -199,7 +199,7 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .modal.hidden { display: none; }
 .cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }
 
-/* v1.9 metadata, Emby naming, and remembered panel state */
+/* metadata, media-server naming, and remembered panel state */
 .panel { transition: padding .18s ease, background .18s ease; }
 .panel > .panel-head { position: relative; }
 .panel-toggle { margin-left: auto; flex: 0 0 auto; }
@@ -241,3 +241,18 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 #metadataReviewModal .modal-card { max-width: 900px; }
 #metadataReviewModal .metadata-search-row { padding: 1rem; }
 #metadataReviewModal #reviewResults { padding: 0 1rem 1rem; max-height: 60vh; overflow: auto; }
+
+/* Detailed diagnostics */
+.log-controls { flex-wrap: wrap; align-items: end; }
+.log-controls label { display: grid; gap: .25rem; font-size: .78rem; color: var(--muted); }
+.log-controls select { min-width: 86px; }
+.log-row { display: block; padding: .75rem 0; border-bottom: 1px solid var(--border); }
+.log-summary { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; }
+.log-summary strong { flex: 1 1 320px; }
+.log-source { font-size: .78rem; color: var(--muted); }
+.log-request-id { font-size: .75rem; user-select: all; }
+.log-row details { margin-top: .55rem; }
+.log-row details summary { cursor: pointer; color: var(--accent); }
+.log-row pre { margin: .55rem 0 0; padding: .75rem; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: .5rem; background: rgba(0,0,0,.18); font-size: .78rem; line-height: 1.45; }
+.log-error { border-left: 3px solid var(--danger); padding-left: .65rem; }
+.log-warning { border-left: 3px solid #d8a122; padding-left: .65rem; }

@@ -31,7 +31,7 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
-    try { message = (await response.json()).detail || message; } catch (_) {}
+    try { const payload = await response.json(); const detail = payload.detail; message = typeof detail === 'string' ? detail : (detail?.message || JSON.stringify(detail) || message); if (payload.request_id && !message.includes(payload.request_id)) message += ` [${payload.request_id}]`; } catch (_) {}
     throw new Error(message);
   }
   return response.json();
@@ -70,7 +70,6 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'bangumi_id', 0);
   setFormValue(subscriptionForm, 'anilist_id', 0);
   setFormValue(subscriptionForm, 'season_mode', 'title');
-  setFormValue(subscriptionForm, 'scrape_mode', 'local');
   setFormValue(subscriptionForm, 'metadata_confirmed', false);
   setFormValue(subscriptionForm, 'metadata_review_skipped', false);
   setFormValue(subscriptionForm, 'season', 1);
@@ -81,7 +80,6 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'save_path_template', '{base}/{media_folder}/Season {season:02}');
   setFormValue(subscriptionForm, 'file_name_template', '{title} - S{season:02}E{episode:02}');
   setFormValue(subscriptionForm, 'rename_enabled', true);
-  setFormValue(subscriptionForm, 'scrape_enabled', true);
   setFormValue(subscriptionForm, 'custom_download_path', currentDownloadRoot);
   setFormValue(subscriptionForm, 'enabled', true);
   document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
@@ -117,7 +115,6 @@ function subscriptionPayload({ forPreview = false, formData = null } = {}) {
     episode_offset: integer('episode_offset', 0), total_episodes: integer('total_episodes', 0),
     total_episodes_locked: checkbox('total_episodes_locked'), total_episodes_source: get('total_episodes_source'),
     rename_enabled: checkbox('rename_enabled'), file_name_template: get('file_name_template') || '{title} - S{season:02}E{episode:02}',
-    scrape_enabled: checkbox('scrape_enabled'), scrape_mode: get('scrape_mode') || 'local',
     save_path_template: get('save_path_template') || '{base}/{media_folder}/Season {season:02}',
     custom_download_path: get('custom_download_path'), missing_detection: checkbox('missing_detection'),
     only_latest: checkbox('only_latest'), enabled: checkbox('enabled'),
@@ -180,8 +177,6 @@ async function loadDownloaderSettings() {
   currentDownloadRoot = data.download_path || '/media';
   form.elements.download_path.value = currentDownloadRoot;
   if (!subscriptionForm.elements.custom_download_path.value) subscriptionForm.elements.custom_download_path.value = currentDownloadRoot;
-  const metadataForm = document.getElementById('metadataSettingsForm');
-  if (metadataForm && !metadataForm.elements.media_local_root.value) metadataForm.elements.media_local_root.value = currentDownloadRoot;
   form.elements.clear_password.checked = false;
 
   const source = data.source === 'web' ? '网页保存' : 'Compose 环境变量';
@@ -245,19 +240,9 @@ async function loadMetadataSettings() {
   form.elements.bangumi_access_token.value = '';
   form.elements.bangumi_access_token.placeholder = data.bangumi_token_configured ? '已保存；留空表示不修改' : '公开查询通常可留空';
   form.elements.metadata_language.value = data.metadata_language || data.language || 'zh-CN';
-  form.elements.media_local_root.value = data.media_local_root || currentDownloadRoot;
-  form.elements.emby_url.value = data.emby_url || '';
-  form.elements.emby_api_key.value = '';
-  form.elements.emby_api_key.placeholder = data.emby_api_key_configured ? '已保存；留空表示不修改' : '可选';
-  form.elements.tmm_url.value = data.tmm_url || '';
-  form.elements.tmm_api_key.value = '';
-  form.elements.tmm_api_key.placeholder = data.tmm_api_key_configured ? '已保存；留空表示不修改' : '可选';
-  form.elements.tmm_enabled.checked = Boolean(data.tmm_enabled);
   form.elements.clear_tmdb_token.checked = false;
   form.elements.clear_bangumi_token.checked = false;
-  form.elements.clear_emby_api_key.checked = false;
-  form.elements.clear_tmm_api_key.checked = false;
-  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi 公开 API · AniList 公开 API · TMM ${data.tmm_configured ? '已配置' : '未配置'} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi ${data.bangumi_token_configured ? '已配置' : '公开 API'} · AniList 公开 API · 仅用于命名与集数匹配`;
 }
 
 function metadataSettingsPayload() {
@@ -268,14 +253,6 @@ function metadataSettingsPayload() {
     bangumi_access_token: form.elements.bangumi_access_token.value.trim() || null,
     clear_bangumi_token: form.elements.clear_bangumi_token.checked,
     metadata_language: form.elements.metadata_language.value.trim() || 'zh-CN',
-    media_local_root: form.elements.media_local_root.value.trim(),
-    emby_url: form.elements.emby_url.value.trim(),
-    emby_api_key: form.elements.emby_api_key.value.trim() || null,
-    clear_emby_api_key: form.elements.clear_emby_api_key.checked,
-    tmm_url: form.elements.tmm_url.value.trim(),
-    tmm_api_key: form.elements.tmm_api_key.value.trim() || null,
-    clear_tmm_api_key: form.elements.clear_tmm_api_key.checked,
-    tmm_enabled: form.elements.tmm_enabled.checked,
   };
 }
 
@@ -836,7 +813,7 @@ function populateSubscriptionForm(sub) {
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'total_episodes_locked', 'total_episodes_source',
-    'rename_enabled', 'file_name_template', 'scrape_enabled', 'scrape_mode', 'save_path_template',
+    'rename_enabled', 'file_name_template', 'save_path_template',
     'custom_download_path', 'missing_detection', 'only_latest', 'enabled',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, sub[field]));
@@ -874,17 +851,16 @@ async function loadSubscriptions() {
     meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
     meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
-    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 刮削：${sub.scrape_enabled ? (sub.scrape_mode || 'local') : '关闭'}`));
+    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'}`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
     content.append(meta);
     content.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
-    const scrape = text('button', '立即刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape?notify_emby=true`, { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
     const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
-    controls.append(edit, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
+    controls.append(edit, sync, toggle, remove); content.append(controls); card.append(content); container.append(card);
   }
 }
 
@@ -900,29 +876,44 @@ async function loadItems() {
     row.append(titleCell); row.append(text('td', item.episode || '—'));
     const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', scheduled: '等待定时推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
     if (item.status === 'queued') statusCell.append(text('small', ` ${item.download_progress || 0}%`, 'muted')); row.append(statusCell);
-    const rename = [item.rename_status || (item.desired_name ? '等待处理' : '未启用'), item.desired_name || '', item.rename_message || '', item.scrape_status ? `刮削：${item.scrape_status}` : '', item.scrape_message || ''].filter(Boolean).join('\n');
-    row.append(text('td', rename, item.rename_status === 'error' || item.scrape_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
+    const rename = [item.rename_status || (item.desired_name ? '等待处理' : '未启用'), item.desired_name || '', item.rename_message || ''].filter(Boolean).join('\n');
+    row.append(text('td', rename, item.rename_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
     const actionCell = document.createElement('td');
-    if (item.status === 'error' || item.scrape_status === 'error') { const retry = text('button', '重试', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
+    if (item.status === 'error' || item.rename_status === 'error') { const retry = text('button', '重试', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
     row.append(actionCell); tbody.append(row);
   }
 }
 
+async function loadLoggingSettings() {
+  const data = await api('/api/logging/settings');
+  document.getElementById('logLevelSetting').value = data.level || 'INFO';
+  document.getElementById('logConfigState').textContent = `${data.level || 'INFO'} 模式 · 文件 ${data.file || '/data/logs/feeddock.log'}`;
+}
+
 async function loadLogs() {
-  const data = await api('/api/logs?limit=50');
+  const limit = document.getElementById('logLimit')?.value || '100';
+  const level = document.getElementById('logLevelFilter')?.value || '';
+  const requestId = document.getElementById('logRequestIdFilter')?.value.trim() || '';
+  const params = new URLSearchParams({ limit });
+  if (level) params.set('level', level);
+  if (requestId) params.set('request_id', requestId);
+  const data = await api(`/api/logs?${params}`);
   const container = document.getElementById('logs');
   container.replaceChildren();
-  if (!data.length) {
-    container.append(text('p', '暂无日志。', 'empty'));
-    return;
-  }
+  if (!data.length) { container.append(text('p', '暂无日志。开启 DEBUG 后重试操作，可看到每个 API 请求和完整异常。', 'empty')); return; }
   for (const log of data) {
-    const row = document.createElement('div');
-    row.className = 'log-row';
-    row.append(text('time', fmtDate(log.created_at)));
-    row.append(text('span', log.level, `badge ${log.level === 'ERROR' ? 'error' : 'queued'}`));
-    row.append(text('strong', log.message));
-    row.append(text('span', log.details, 'muted'));
+    const row = document.createElement('article'); row.className = `log-row log-${String(log.level || '').toLowerCase()}`;
+    const summary = document.createElement('div'); summary.className = 'log-summary';
+    summary.append(text('time', fmtDate(log.created_at)));
+    summary.append(text('span', log.level, `badge ${log.level === 'ERROR' ? 'error' : (log.level === 'WARNING' ? 'skipped' : 'queued')}`));
+    summary.append(text('span', log.source || 'app', 'log-source'));
+    if (log.request_id) summary.append(text('code', log.request_id, 'log-request-id'));
+    summary.append(text('strong', log.message)); row.append(summary);
+    if (log.details) {
+      const details = document.createElement('details');
+      const title = document.createElement('summary'); title.textContent = '详细内容 / traceback'; details.append(title);
+      const pre = document.createElement('pre'); pre.textContent = log.details; details.append(pre); row.append(details);
+    }
     container.append(row);
   }
 }
@@ -932,7 +923,7 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadAutomationSettings(), loadProxySettings(),
+      loadSubscriptions(), loadItems(), loadLoggingSettings(), loadLogs(), loadAutomationSettings(), loadProxySettings(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
@@ -952,8 +943,7 @@ async function revealSavedSecret(input, secretName) {
 function initializePasswordToggles() {
   const mappings = {
     qbit_password: 'qbit_password', tmdb_read_access_token: 'tmdb_read_access_token',
-    bangumi_access_token: 'bangumi_access_token', emby_api_key: 'emby_api_key',
-    tmm_api_key: 'tmm_api_key', proxy_url: 'proxy_url',
+    bangumi_access_token: 'bangumi_access_token', proxy_url: 'proxy_url',
   };
   Object.entries(mappings).forEach(([name, secret]) => {
     const input = document.querySelector(`[name="${name}"]`);
@@ -970,7 +960,6 @@ async function loadAutomationSettings() {
   const data = await api('/api/automation/settings');
   const form = document.getElementById('automationSettingsForm');
   form.elements.download_enabled.checked = Boolean(data.download_enabled);
-  form.elements.scrape_enabled.checked = Boolean(data.scrape_enabled);
   form.elements.daily_time.value = data.daily_time || '02:00';
   form.elements.timezone.value = data.timezone || 'Asia/Shanghai';
 }
@@ -985,39 +974,11 @@ async function loadProxySettings() {
   form.elements.clear_proxy_url.checked = false;
 }
 
-let reviewSubscription = null;
-function closeMetadataReview() { document.getElementById('metadataReviewModal').classList.add('hidden'); document.body.classList.remove('modal-open'); reviewSubscription = null; }
-function openMetadataReview(subscription) {
-  reviewSubscription = subscription;
-  document.getElementById('metadataReviewTitle').textContent = `确认：${subscription.name}`;
-  document.getElementById('reviewQuery').value = subscription.name || subscription.reference_title || '';
-  document.getElementById('reviewResults').textContent = '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
-  document.getElementById('metadataReviewModal').classList.remove('hidden'); document.body.classList.add('modal-open');
-}
-
-function renderReviewResults(results) {
-  const container = document.getElementById('reviewResults'); container.replaceChildren(); container.className = 'metadata-results';
-  if (!results.length) { container.append(text('p', '没有找到结果，可切换另一个来源或跳过。', 'empty')); return; }
-  results.forEach(candidate => {
-    const card = document.createElement('article'); card.className = 'metadata-card';
-    if (candidate.poster_url) { const img=document.createElement('img'); img.src=candidate.poster_url; img.loading='lazy'; card.append(img); }
-    const body=document.createElement('div'); body.className='metadata-card-body'; body.append(text('strong', titleWithYear(candidate.title,candidate.year)));
-    if (candidate.overview) body.append(text('p',candidate.overview.slice(0,220),'metadata-overview'));
-    const choose=text('button','确认此条目'); choose.type='button'; choose.addEventListener('click', async()=>{
-      if (!reviewSubscription) return;
-      const seasonMode=reviewSubscription.season_mode || 'title';
-      await api(`/api/subscriptions/${reviewSubscription.id}/metadata/apply`, {method:'POST', body:JSON.stringify({provider:candidate.provider, metadata_id:candidate.id, media_type:candidate.media_type || 'tv', season:reviewSubscription.season || 1, season_mode:seasonMode})});
-      closeMetadataReview(); await reloadAll(); showNotice(`已确认 ${candidate.provider.toUpperCase()} 元数据`);
-    });
-    body.append(choose); card.append(body); container.append(card);
-  });
-}
 
 document.getElementById('downloaderForm').elements.download_path.addEventListener('input', (event) => {
   const value = event.currentTarget.value.trim();
   if (!value) return;
   currentDownloadRoot = value;
-  document.getElementById('metadataSettingsForm').elements.media_local_root.value = value;
   if (!subscriptionForm.elements.subscription_id.value) subscriptionForm.elements.custom_download_path.value = value;
 });
 
@@ -1074,7 +1035,7 @@ document.addEventListener('keydown', (event) => {
 
 document.getElementById('metadataSettingsForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  try { await api('/api/metadata/settings', { method: 'PUT', body: JSON.stringify(metadataSettingsPayload()) }); await loadMetadataSettings(); showNotice('元数据与 Emby 配置已保存'); } catch (error) { showNotice(error.message, false); }
+  try { await api('/api/metadata/settings', { method: 'PUT', body: JSON.stringify(metadataSettingsPayload()) }); await loadMetadataSettings(); showNotice('元数据匹配配置已保存'); } catch (error) { showNotice(error.message, false); }
 });
 
 document.getElementById('restoreMetadataSettings').addEventListener('click', async () => {
@@ -1093,11 +1054,7 @@ document.getElementById('searchMetadata').addEventListener('click', async () => 
 });
 
 document.getElementById('normalizeTorrents').addEventListener('click', async () => {
-  try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`检查完成：规范化 ${result.renamed || 0}，下载完成 ${result.completed || 0}，自动刮削 ${result.scraped || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
-});
-
-document.getElementById('refreshEmby').addEventListener('click', async () => {
-  try { const result = await api('/api/actions/emby-refresh', { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); }
+  try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`检查完成：规范化 ${result.renamed || 0}，下载完成 ${result.completed || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
 });
 
 document.getElementById('globalRulesForm').addEventListener('submit', async (event) => {
@@ -1117,12 +1074,11 @@ subscriptionForm.addEventListener('submit', async (event) => {
   try {
     const path = id ? `/api/subscriptions/${id}` : '/api/subscriptions';
     const method = id ? 'PATCH' : 'POST';
-    const saved = await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
+    await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
     formElement.reset();
     resetSubscriptionForm();
     showNotice(id ? '订阅已更新' : '订阅已保存');
     await reloadAll();
-    if (!id && !saved.metadata_confirmed && !saved.metadata_review_skipped) openMetadataReview(saved);
   } catch (error) { showNotice(error.message, false); }
 });
 
@@ -1203,18 +1159,22 @@ document.getElementById('clearSystemLogs').addEventListener('click', async () =>
 
 document.getElementById('automationSettingsForm').addEventListener('submit', async (event) => {
   event.preventDefault(); const f=event.currentTarget;
-  try { await api('/api/automation/settings',{method:'PUT',body:JSON.stringify({download_enabled:f.elements.download_enabled.checked,scrape_enabled:f.elements.scrape_enabled.checked,daily_time:f.elements.daily_time.value,timezone:f.elements.timezone.value.trim()})}); await loadAutomationSettings(); showNotice('统一执行时间已保存'); } catch(error){showNotice(error.message,false);}
+  try { await api('/api/automation/settings',{method:'PUT',body:JSON.stringify({download_enabled:f.elements.download_enabled.checked,daily_time:f.elements.daily_time.value,timezone:f.elements.timezone.value.trim()})}); await loadAutomationSettings(); showNotice('统一执行时间已保存'); } catch(error){showNotice(error.message,false);}
 });
 document.getElementById('runAutomationNow').addEventListener('click', async()=>{try{const r=await api('/api/automation/run',{method:'POST'});showNotice(r.message||'统一任务已执行');await reloadAll();}catch(e){showNotice(e.message,false);}});
-document.getElementById('restoreAutomation').addEventListener('click', async()=>{await api('/api/automation/settings',{method:'DELETE'});await loadAutomationSettings();showNotice('已恢复即时下载和即时刮削');});
+document.getElementById('restoreAutomation').addEventListener('click', async()=>{await api('/api/automation/settings',{method:'DELETE'});await loadAutomationSettings();showNotice('已恢复即时下载');});
 document.getElementById('proxySettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();const f=event.currentTarget;try{await api('/api/proxy/settings',{method:'PUT',body:JSON.stringify({enabled:f.elements.enabled.checked,proxy_url:f.elements.proxy_url.value.trim()||null,clear_proxy_url:f.elements.clear_proxy_url.checked,no_proxy:f.elements.no_proxy.value.trim()})});await loadProxySettings();showNotice('代理设置已保存');}catch(e){showNotice(e.message,false);}});
 document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
-document.getElementById('testTmm').addEventListener('click',async()=>{try{await api('/api/metadata/settings',{method:'PUT',body:JSON.stringify(metadataSettingsPayload())});const r=await api('/api/metadata/test-tmm',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
-document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);
-document.querySelector('[data-close-metadata-review]').addEventListener('click', closeMetadataReview);
-document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在搜索…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
-document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称和本地 NFO');});
+
+document.getElementById('logLevelSetting').addEventListener('change', async (event) => {
+  try { await api('/api/logging/settings', { method: 'PUT', body: JSON.stringify({ level: event.currentTarget.value }) }); await Promise.all([loadLoggingSettings(), loadLogs()]); showNotice(`日志级别已切换为 ${event.currentTarget.value}`); } catch (error) { showNotice(error.message, false); }
+});
+document.getElementById('logLevelFilter').addEventListener('change', loadLogs);
+document.getElementById('logRequestIdFilter').addEventListener('input', debounce(loadLogs, 350));
+document.getElementById('logLimit').addEventListener('change', loadLogs);
+document.getElementById('refreshSystemLogs').addEventListener('click', loadLogs);
+document.getElementById('exportSystemLogs').addEventListener('click', () => { window.location.href = '/api/logs/export?limit=10000'; });
 
 document.getElementById('statusFilter').addEventListener('change', loadItems);
 initializeCollapsiblePanels();

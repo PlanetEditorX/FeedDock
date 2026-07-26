@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.10.0}
+        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.10.2}
     image: ${FEEDDOCK_IMAGE:-feeddock:local}
     container_name: feeddock
     restart: unless-stopped
@@ -15,7 +15,6 @@ services:
       - "${APP_PORT:-7789}:8000"
     volumes:
       - ./data:/data
-      - ./downloads:/media
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     networks:

@@ -3,11 +3,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+import time
+import uuid
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy import delete, desc, func, inspect as sa_inspect, select, update
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -19,7 +23,15 @@ from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
-from .scraper import refresh_emby_library, scrape_subscription, test_tmm_connection
+from .logging_service import (
+    debug_enabled,
+    get_log_level,
+    initialize_log_level,
+    log_file_path,
+    record_event,
+    record_exception,
+    set_log_level,
+)
 from .rss_service import (
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
@@ -66,6 +78,7 @@ from .schemas import (
     MikanWeekdayFilterOut,
     MikanWeekdayFilterUpdate,
     ProxySettingsUpdate,
+    LoggingSettingsUpdate,
     QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
@@ -119,9 +132,11 @@ def _subscription_values(
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
+    # Legacy post-processing columns stay disabled so old SQLite databases can
+    # upgrade without destructive table rebuilds.
+    values["scrape_enabled"] = False
+    values["scrape_mode"] = "off"
     if db is not None:
-        # qBittorrent, FeedDock scraping, and subscription rendering must use
-        # one identical container path. Customize only the folder template.
         values["custom_download_path"] = load_qbittorrent_config(db).download_path
     return values
 
@@ -176,11 +191,18 @@ async def lifespan(_app: FastAPI):
     ensure_schema()
     with SessionLocal() as db:
         initialize_admin(db)
+        initialize_log_level(db)
         # Upgrade old subscriptions to the one-root model. qBittorrent and
         # FeedDock must see the same container path (normally /media).
         qbit_root = load_qbittorrent_config(db).download_path
         db.execute(update(Subscription).values(custom_download_path=qbit_root))
         db.commit()
+    record_event(
+        "INFO",
+        f"FeedDock {settings.app_version} 启动完成",
+        f"database={settings.database_url}; log_level={settings.log_level}; scraping=removed",
+        source="startup",
+    )
     start_scheduler()
     yield
     stop_scheduler()
@@ -193,6 +215,44 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def request_diagnostics(request: Request, call_next):
+    request_id = (request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12])[:64]
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    if request.url.path.startswith("/api/") and request.url.path != "/api/logs":
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        record_event(
+            "DEBUG",
+            f"{request.method} {request.url.path}",
+            f"status={response.status_code}; duration_ms={duration_ms}; query={request.url.query}",
+            request_id=request_id,
+            source="http",
+        )
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
+    with SessionLocal() as db:
+        show_debug = debug_enabled(db)
+    record_exception(
+        f"未处理的服务器异常：{request.method} {request.url.path}",
+        exc,
+        request_id=request_id,
+        source="http",
+        context={"method": request.method, "path": request.url.path, "query": request.url.query},
+    )
+    detail = f"服务器内部错误 [{request_id}]：{type(exc).__name__}: {exc}"
+    payload: dict[str, Any] = {"detail": detail, "request_id": request_id, "error_type": type(exc).__name__}
+    if show_debug:
+        payload["debug"] = "已记录完整 traceback，请在系统日志中展开详情或下载日志文件。"
+    return JSONResponse(status_code=500, content=payload, headers={"X-Request-ID": request_id})
 
 
 @app.get("/", include_in_schema=False)
@@ -356,14 +416,6 @@ def update_metadata_settings(
             bangumi_access_token=payload.bangumi_access_token,
             clear_bangumi_token=payload.clear_bangumi_token,
             metadata_language=payload.metadata_language,
-            media_local_root=payload.media_local_root,
-            emby_url=payload.emby_url,
-            emby_api_key=payload.emby_api_key,
-            clear_emby_api_key=payload.clear_emby_api_key,
-            tmm_url=payload.tmm_url,
-            tmm_api_key=payload.tmm_api_key,
-            clear_tmm_api_key=payload.clear_tmm_api_key,
-            tmm_enabled=payload.tmm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -375,10 +427,6 @@ def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | 
     return reset_metadata_config(db).public_dict()
 
 
-@app.post("/api/metadata/test-tmm", dependencies=[Depends(require_admin)])
-def test_tmm(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return test_tmm_connection(db).as_dict()
-
 
 @app.get("/api/automation/settings", dependencies=[Depends(require_admin)])
 def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
@@ -388,7 +436,12 @@ def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bo
 @app.put("/api/automation/settings", dependencies=[Depends(require_admin)])
 def update_automation_settings(payload: AutomationSettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
     try:
-        return save_automation_config(db, download_enabled=payload.download_enabled, scrape_enabled=payload.scrape_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
+        return save_automation_config(
+            db,
+            download_enabled=payload.download_enabled,
+            daily_time=payload.daily_time,
+            timezone=payload.timezone,
+        ).public_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -439,8 +492,6 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
         "qbit_password": qbit.password,
         "tmdb_read_access_token": metadata.tmdb_read_access_token,
         "bangumi_access_token": metadata.bangumi_access_token,
-        "emby_api_key": metadata.emby_api_key,
-        "tmm_api_key": metadata.tmm_api_key,
         "proxy_url": proxy.url,
     }
     if secret_name not in values:
@@ -698,12 +749,97 @@ def preview_subscription_route(
 
 
 @app.post("/api/subscriptions", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
-def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db)) -> SubscriptionOut:
-    subscription = Subscription(**_subscription_values(payload, db))
-    db.add(subscription)
-    db.commit()
-    db.refresh(subscription)
-    return _subscription_out(db, subscription)
+def create_subscription(
+    payload: SubscriptionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
+    safe_context: dict[str, Any] = {
+        "name": payload.name,
+        "rss_url_host": getattr(payload.rss_url, "host", ""),
+        "season": payload.season,
+        "season_mode": payload.season_mode,
+        "rename_enabled": payload.rename_enabled,
+        "payload_fields": sorted(payload.model_fields_set),
+    }
+    record_event(
+        "DEBUG",
+        "开始保存订阅",
+        str(safe_context),
+        request_id=request_id,
+        source="subscription",
+    )
+
+    last_error: Exception | None = None
+    for attempt in (1, 2):
+        stage = "prepare"
+        try:
+            if attempt == 2:
+                stage = "schema-repair"
+                ensure_schema()
+            stage = "build-values"
+            values = _subscription_values(payload, db)
+            stage = "insert"
+            subscription = Subscription(**values)
+            db.add(subscription)
+            db.flush()
+            stage = "serialize"
+            output = _subscription_out(db, subscription)
+            stage = "commit"
+            db.commit()
+            db.refresh(subscription)
+            record_event(
+                "INFO",
+                f"订阅已创建：{subscription.name}",
+                f"subscription_id={subscription.id}; rss={safe_context['rss_url_host']}; attempt={attempt}",
+                request_id=request_id,
+                source="subscription",
+            )
+            return output
+        except Exception as exc:
+            last_error = exc
+            db.rollback()
+            try:
+                columns = [column["name"] for column in sa_inspect(engine).get_columns("subscriptions")]
+            except Exception:
+                columns = []
+            error_context = {
+                **safe_context,
+                "stage": stage,
+                "attempt": attempt,
+                "subscription_columns": columns,
+            }
+            record_exception(
+                "保存订阅失败",
+                exc,
+                request_id=request_id,
+                source="subscription",
+                context=error_context,
+            )
+            schema_error = isinstance(exc, OperationalError) and any(
+                marker in str(exc).lower()
+                for marker in ("no such column", "has no column named", "table subscriptions has no column")
+            )
+            if attempt == 1 and schema_error:
+                record_event(
+                    "WARNING",
+                    "检测到订阅表字段缺失，正在执行一次兼容修复并重试",
+                    f"request_id={request_id}; error={type(exc).__name__}: {exc}",
+                    request_id=request_id,
+                    source="subscription",
+                )
+                continue
+            break
+
+    assert last_error is not None
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            f"保存订阅失败 [{request_id}]：{type(last_error).__name__}: {last_error}。"
+            "已记录完整 traceback，请在系统日志按请求编号筛选。"
+        ),
+    ) from last_error
 
 
 @app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
@@ -790,25 +926,6 @@ def sync_subscription_metadata(
     return _subscription_out(db, subscription)
 
 
-@app.post(
-    "/api/subscriptions/{subscription_id}/scrape",
-    dependencies=[Depends(require_admin)],
-)
-def scrape_subscription_route(
-    subscription_id: int,
-    notify_emby: bool = Query(default=False),
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    subscription = db.get(Subscription, subscription_id)
-    if not subscription:
-        raise HTTPException(status_code=404, detail="订阅不存在")
-    result = scrape_subscription(db, subscription)
-    payload = result.as_dict()
-    if result.ok and notify_emby:
-        payload["emby"] = refresh_emby_library(db).as_dict()
-    return payload
-
-
 @app.delete("/api/subscriptions/{subscription_id}", dependencies=[Depends(require_admin)])
 def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
     subscription = db.get(Subscription, subscription_id)
@@ -858,10 +975,42 @@ def clear_recent_items(
 
 @app.get("/api/logs", response_model=list[LogOut], dependencies=[Depends(require_admin)])
 def list_logs(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=2000),
+    level: str = Query(default=""),
+    request_id: str = Query(default=""),
     db: Session = Depends(get_db),
 ) -> list[SystemLog]:
-    return list(db.scalars(select(SystemLog).order_by(desc(SystemLog.created_at)).limit(limit)))
+    query = select(SystemLog).order_by(desc(SystemLog.created_at)).limit(limit)
+    if level.strip():
+        query = query.where(SystemLog.level == level.strip().upper())
+    if request_id.strip():
+        query = query.where(SystemLog.request_id == request_id.strip())
+    return list(db.scalars(query))
+
+
+@app.get("/api/logging/settings", dependencies=[Depends(require_admin)])
+def logging_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    level = get_log_level(db)
+    return {"level": level, "debug": level == "DEBUG", "file": str(log_file_path())}
+
+
+@app.put("/api/logging/settings", dependencies=[Depends(require_admin)])
+def update_logging_settings(payload: LoggingSettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    level = set_log_level(db, payload.level)
+    record_event("INFO", f"日志级别已切换为 {level}", source="settings")
+    return {"level": level, "debug": level == "DEBUG", "file": str(log_file_path())}
+
+
+@app.get("/api/logs/export", dependencies=[Depends(require_admin)])
+def export_logs(limit: int = Query(default=2000, ge=1, le=10000), db: Session = Depends(get_db)) -> PlainTextResponse:
+    rows = list(db.scalars(select(SystemLog).order_by(SystemLog.created_at).limit(limit)))
+    lines = []
+    for row in rows:
+        lines.append(f"{row.created_at.isoformat()} {row.level} [{row.request_id or '-'}] {row.source}: {row.message}")
+        if row.details:
+            lines.append(row.details)
+            lines.append("-" * 80)
+    return PlainTextResponse("\n".join(lines), headers={"Content-Disposition": "attachment; filename=feeddock-logs.txt"})
 
 
 @app.delete("/api/logs", dependencies=[Depends(require_admin)])
@@ -881,11 +1030,6 @@ def manual_refresh(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
 @app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])
 def normalize_torrents_now() -> dict[str, Any]:
     return normalize_pending_items(limit=200)
-
-
-@app.post("/api/actions/emby-refresh", dependencies=[Depends(require_admin)])
-def refresh_emby_now(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return refresh_emby_library(db).as_dict()
 
 
 @app.post("/api/actions/test-downloader", dependencies=[Depends(require_admin)])

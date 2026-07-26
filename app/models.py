@@ -70,8 +70,8 @@ class Subscription(Base):
     total_episodes_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     total_episodes_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
 
-    # Metadata matching and Emby-friendly naming. Existing installations are
-    # migrated additively in database.ensure_schema().
+    # Metadata matching and media-server-friendly naming. Existing installations
+    # are migrated additively in database.ensure_schema().
     naming_mode: Mapped[str] = mapped_column(String(20), default="auto", nullable=False)
     media_type: Mapped[str] = mapped_column(String(20), default="tv", nullable=False)
     manual_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -92,8 +92,10 @@ class Subscription(Base):
     file_name_template: Mapped[str] = mapped_column(
         Text, default="{title} - S{season:02}E{episode:02}", nullable=False
     )
-    scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    scrape_mode: Mapped[str] = mapped_column(String(20), default="local", nullable=False)
+    # Legacy columns retained so existing databases can upgrade without data loss.
+    # Media scraping was removed in v1.10.1 and these values are always disabled.
+    scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    scrape_mode: Mapped[str] = mapped_column(String(20), default="off", nullable=False)
 
     save_path_template: Mapped[str] = mapped_column(
         Text,
@@ -167,6 +169,8 @@ class SystemLog(Base):
     level: Mapped[str] = mapped_column(String(16), default="INFO", nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     details: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    request_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(64), default="app", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 

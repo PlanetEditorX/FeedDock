@@ -17,10 +17,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
 
-    def test_workflow_validates_both_fnos_volume_mounts(self) -> None:
+    def test_workflow_validates_fnos_data_volume_mount(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
         self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', workflow)
-        self.assertIn('"/vol2/1000/影视:/media"', workflow)
+        self.assertNotIn('"/vol2/1000/影视:/media"', workflow)
         self.assertIn("missing_volumes = required_volumes - volumes", workflow)
         self.assertNotIn(
             'service["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]',
@@ -150,19 +150,23 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("def update_mikan_weekday_filter", main)
         self.assertIn("save_mikan_weekday_hidden_filter", runtime)
 
-    def test_metadata_naming_and_scraping_ui_is_wired(self) -> None:
+    def test_metadata_naming_and_debug_logging_ui_is_wired(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         for element_id in (
             'metadataSettingsForm', 'metadataSearchProvider', 'metadataSearchResults',
-            'normalizeTorrents', 'refreshEmby',
+            'normalizeTorrents', 'logLevelSetting', 'logLevelFilter', 'logRequestIdFilter', 'exportSystemLogs',
         ):
             self.assertIn(f'id="{element_id}"', index)
         self.assertIn('/api/metadata/search', script)
         self.assertIn('/api/metadata/detail', script)
         self.assertIn('/api/actions/normalize-torrents', script)
-        self.assertIn('/api/actions/emby-refresh', script)
+        self.assertIn('/api/logging/settings', script)
+        self.assertIn('/api/logs/export', script)
+        self.assertNotIn('/api/actions/emby-refresh', script)
+        self.assertNotIn('id="refreshEmby"', index)
+        self.assertNotIn('id="testTmm"', index)
         self.assertIn('def metadata_detail', main)
 
     def test_all_main_panels_remember_collapsed_state(self) -> None:
@@ -175,15 +179,14 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('localStorage.setItem', script)
         self.assertIn('.panel.is-collapsed > :not(.panel-head)', styles)
 
-    def test_fnos_compose_has_optional_metadata_and_media_mount(self) -> None:
+    def test_fnos_compose_keeps_metadata_matching_without_scraper_services(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)
         self.assertIn('BANGUMI_ACCESS_TOKEN: ""', compose)
-        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
-        self.assertIn('EMBY_URL: ""', compose)
-        self.assertIn('- "/vol2/1000/影视:/media"', compose)
+        self.assertNotIn('TMM_URL:', compose)
+        self.assertNotIn('EMBY_URL:', compose)
 
-    def test_fnos_permissions_and_media_root_are_consistent(self) -> None:
+    def test_fnos_download_root_and_data_permissions_are_consistent(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         entrypoint = (ROOT / "docker-entrypoint.py").read_text(encoding="utf-8")
@@ -192,10 +195,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('PUID: "0"', compose)
         self.assertIn('PGID: "0"', compose)
         self.assertIn('DOWNLOAD_PATH: "/media"', compose)
-        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
-        self.assertIn('chown -R 0:0 /app /data /media', dockerfile)
+        self.assertIn('LOG_LEVEL: "INFO"', compose)
+        self.assertIn('chown -R 0:0 /app /data', dockerfile)
         self.assertIn('_number("PUID", 0)', entrypoint)
-        self.assertIn('name="media_local_root" placeholder="/media" readonly', index)
+        self.assertNotIn('name="media_local_root"', index)
         self.assertIn('name="custom_download_path" placeholder="/media" readonly', index)
         self.assertIn("currentDownloadRoot = '/media'", script)
 
@@ -206,7 +209,9 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('id="clearSystemLogs"', index)
         self.assertIn("className = 'subscription-poster'", script)
         self.assertIn('sub.metadata_overview', script)
-        self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', true)", script)
+        self.assertNotIn("scrape_enabled", script)
+        self.assertNotIn("scrape_mode", script)
+        self.assertFalse((ROOT / "app/scraper.py").exists())
         self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 
 if __name__ == "__main__":

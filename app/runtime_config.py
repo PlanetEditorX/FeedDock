@@ -159,15 +159,7 @@ def save_qbittorrent_config(
         else:
             db.add(AppSetting(key=key, value=value))
 
-    # Keep the FeedDock scraper mount path aligned with the qBittorrent save
-    # root. This is the safest fnOS setup because both containers then use the
-    # same internal path, normally /media.
-    media_row = db.get(AppSetting, "media_local_root")
-    if media_row is None:
-        db.add(AppSetting(key="media_local_root", value=path))
-    else:
-        media_row.value = path
-    # Every subscription uses the same container-visible media root. Folder
+    # Every subscription uses the same qBittorrent-visible download root. Folder
     # customization belongs in save_path_template, not in a second root path.
     db.execute(update(Subscription).values(custom_download_path=path))
     db.commit()
@@ -297,6 +289,11 @@ METADATA_SETTING_KEYS = {
     "tmdb_read_access_token",
     "bangumi_access_token",
     "metadata_language",
+}
+
+# Removed media-scraper settings are deleted on reset but otherwise ignored so
+# old databases can be opened without a destructive migration.
+LEGACY_MEDIA_SETTING_KEYS = {
     "media_local_root",
     "emby_url",
     "emby_api_key",
@@ -311,33 +308,11 @@ class MetadataConfig:
     tmdb_read_access_token: str
     bangumi_access_token: str
     language: str
-    media_local_root: str
-    emby_url: str
-    emby_api_key: str
-    tmm_url: str
-    tmm_api_key: str
-    tmm_enabled: bool
     source: str
 
     @property
     def tmdb_configured(self) -> bool:
         return bool(self.tmdb_read_access_token)
-
-    @property
-    def bangumi_configured(self) -> bool:
-        return True
-
-    @property
-    def scraper_configured(self) -> bool:
-        return bool(self.media_local_root)
-
-    @property
-    def emby_configured(self) -> bool:
-        return bool(self.emby_url and self.emby_api_key)
-
-    @property
-    def tmm_configured(self) -> bool:
-        return bool(self.tmm_enabled and self.tmm_url and self.tmm_api_key)
 
     def public_dict(self) -> dict[str, str | bool]:
         return {
@@ -345,15 +320,6 @@ class MetadataConfig:
             "bangumi_token_configured": bool(self.bangumi_access_token),
             "anilist_configured": True,
             "metadata_language": self.language,
-            "media_local_root": self.media_local_root,
-            "emby_url": self.emby_url,
-            "emby_api_key_configured": bool(self.emby_api_key),
-            "tmm_url": self.tmm_url,
-            "tmm_api_key_configured": bool(self.tmm_api_key),
-            "tmm_enabled": self.tmm_enabled,
-            "tmm_configured": self.tmm_configured,
-            "scraper_configured": self.scraper_configured,
-            "emby_configured": self.emby_configured,
             "source": self.source,
         }
 
@@ -371,31 +337,12 @@ def _environment_metadata_config() -> MetadataConfig:
         tmdb_read_access_token=settings.tmdb_read_access_token,
         bangumi_access_token=settings.bangumi_access_token,
         language=settings.metadata_language,
-        media_local_root=str(settings.media_local_root or settings.download_path),
-        emby_url=settings.emby_url,
-        emby_api_key=settings.emby_api_key,
-        tmm_url=settings.tmm_url,
-        tmm_api_key=settings.tmm_api_key,
-        tmm_enabled=bool(settings.tmm_url and settings.tmm_api_key),
         source="compose",
     )
 
 
 def _load_metadata_with_session(db: Session) -> MetadataConfig:
     fallback = _environment_metadata_config()
-    qbit_root = load_qbittorrent_config(db).download_path
-    fallback = MetadataConfig(
-        tmdb_read_access_token=fallback.tmdb_read_access_token,
-        bangumi_access_token=fallback.bangumi_access_token,
-        language=fallback.language,
-        media_local_root=qbit_root,
-        emby_url=fallback.emby_url,
-        emby_api_key=fallback.emby_api_key,
-        tmm_url=fallback.tmm_url,
-        tmm_api_key=fallback.tmm_api_key,
-        tmm_enabled=fallback.tmm_enabled,
-        source=fallback.source,
-    )
     try:
         rows = {
             row.key: row.value
@@ -406,15 +353,13 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
     if not rows:
         return fallback
     return MetadataConfig(
-        tmdb_read_access_token=rows.get("tmdb_read_access_token", fallback.tmdb_read_access_token),
-        bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
+        tmdb_read_access_token=rows.get(
+            "tmdb_read_access_token", fallback.tmdb_read_access_token
+        ),
+        bangumi_access_token=rows.get(
+            "bangumi_access_token", fallback.bangumi_access_token
+        ),
         language=rows.get("metadata_language", fallback.language).strip() or "zh-CN",
-        media_local_root=qbit_root,
-        emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
-        emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
-        tmm_url=rows.get("tmm_url", fallback.tmm_url).strip().rstrip("/"),
-        tmm_api_key=rows.get("tmm_api_key", fallback.tmm_api_key),
-        tmm_enabled=_bool_value(rows.get("tmm_enabled"), fallback.tmm_enabled),
         source="web",
     )
 
@@ -426,18 +371,6 @@ def load_metadata_config(db: Session | None = None) -> MetadataConfig:
         return _load_metadata_with_session(session)
 
 
-def _validate_optional_http_url(value: str, label: str) -> str:
-    cleaned = value.strip().rstrip("/")
-    if not cleaned:
-        return ""
-    parsed = urlparse(cleaned)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(f"{label}必须是有效的 HTTP 或 HTTPS 地址")
-    if len(cleaned) > 2000:
-        raise ValueError(f"{label}过长")
-    return cleaned
-
-
 def save_metadata_config(
     db: Session,
     *,
@@ -446,64 +379,33 @@ def save_metadata_config(
     bangumi_access_token: str | None,
     clear_bangumi_token: bool,
     metadata_language: str,
-    media_local_root: str,
-    emby_url: str,
-    emby_api_key: str | None,
-    clear_emby_api_key: bool,
-    tmm_url: str = "",
-    tmm_api_key: str | None = None,
-    clear_tmm_api_key: bool = False,
-    tmm_enabled: bool = False,
 ) -> MetadataConfig:
     current = load_metadata_config(db)
     language = metadata_language.strip() or "zh-CN"
     if len(language) > 20:
         raise ValueError("元数据语言代码过长")
 
-    qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
-    local_root = media_local_root.strip().rstrip("/") or qbit_root
-    if not local_root.startswith("/"):
-        raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
-    if len(local_root) > 2000:
-        raise ValueError("本地媒体挂载目录过长")
-    if local_root != qbit_root:
-        raise ValueError(f"本地媒体挂载目录必须与 qBittorrent 下载保存根目录一致：{qbit_root}")
-
-    clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
-    clean_tmm_url = _validate_optional_http_url(tmm_url, "tinyMediaManager 地址")
     tmdb_token = "" if clear_tmdb_token else (
-        current.tmdb_read_access_token if tmdb_read_access_token is None else tmdb_read_access_token.strip()
+        current.tmdb_read_access_token
+        if tmdb_read_access_token is None
+        else tmdb_read_access_token.strip()
     )
     bangumi_token = "" if clear_bangumi_token else (
-        current.bangumi_access_token if bangumi_access_token is None else bangumi_access_token.strip()
+        current.bangumi_access_token
+        if bangumi_access_token is None
+        else bangumi_access_token.strip()
     )
-    emby_key = "" if clear_emby_api_key else (
-        current.emby_api_key if emby_api_key is None else emby_api_key.strip()
-    )
-    tmm_key = "" if clear_tmm_api_key else (
-        current.tmm_api_key if tmm_api_key is None else tmm_api_key.strip()
-    )
-    for value, label, limit in (
-        (tmdb_token, "TMDB Token", 2000),
-        (bangumi_token, "Bangumi Token", 2000),
-        (emby_key, "Emby API Key", 1000),
-        (tmm_key, "tinyMediaManager API Key", 1000),
+    for value, label in (
+        (tmdb_token, "TMDB Token"),
+        (bangumi_token, "Bangumi Token"),
     ):
-        if len(value) > limit:
+        if len(value) > 2000:
             raise ValueError(f"{label}过长")
-    if tmm_enabled and (not clean_tmm_url or not tmm_key):
-        raise ValueError("启用 tinyMediaManager 时必须填写地址和 API Key")
 
     values = {
         "tmdb_read_access_token": tmdb_token,
         "bangumi_access_token": bangumi_token,
         "metadata_language": language,
-        "media_local_root": local_root,
-        "emby_url": clean_emby_url,
-        "emby_api_key": emby_key,
-        "tmm_url": clean_tmm_url,
-        "tmm_api_key": tmm_key,
-        "tmm_enabled": "1" if tmm_enabled else "0",
     }
     existing = {
         row.key: row
@@ -515,29 +417,34 @@ def save_metadata_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
+    # Remove credentials for features that no longer exist.
+    db.execute(delete(AppSetting).where(AppSetting.key.in_(LEGACY_MEDIA_SETTING_KEYS)))
     db.commit()
     return load_metadata_config(db)
 
 
 def reset_metadata_config(db: Session) -> MetadataConfig:
-    db.execute(delete(AppSetting).where(AppSetting.key.in_(METADATA_SETTING_KEYS)))
+    db.execute(
+        delete(AppSetting).where(
+            AppSetting.key.in_(METADATA_SETTING_KEYS | LEGACY_MEDIA_SETTING_KEYS)
+        )
+    )
     db.commit()
     return load_metadata_config(db)
 
 
 AUTOMATION_SETTING_KEYS = {
     "automation_download_enabled",
-    "automation_scrape_enabled",
     "automation_time",
     "automation_timezone",
     "automation_last_run_date",
 }
+LEGACY_AUTOMATION_SETTING_KEYS = {"automation_scrape_enabled"}
 
 
 @dataclass(frozen=True, slots=True)
 class AutomationConfig:
     download_enabled: bool
-    scrape_enabled: bool
     daily_time: str
     timezone: str
     last_run_date: str
@@ -545,12 +452,11 @@ class AutomationConfig:
 
     @property
     def enabled(self) -> bool:
-        return self.download_enabled or self.scrape_enabled
+        return self.download_enabled
 
     def public_dict(self) -> dict[str, str | bool]:
         return {
             "download_enabled": self.download_enabled,
-            "scrape_enabled": self.scrape_enabled,
             "daily_time": self.daily_time,
             "timezone": self.timezone,
             "last_run_date": self.last_run_date,
@@ -574,7 +480,6 @@ def load_automation_config(db: Session | None = None) -> AutomationConfig:
     def _load(session: Session) -> AutomationConfig:
         fallback = AutomationConfig(
             download_enabled=False,
-            scrape_enabled=False,
             daily_time=_valid_daily_time(settings.automation_time),
             timezone=settings.automation_timezone,
             last_run_date="",
@@ -583,7 +488,9 @@ def load_automation_config(db: Session | None = None) -> AutomationConfig:
         try:
             rows = {
                 row.key: row.value
-                for row in session.scalars(select(AppSetting).where(AppSetting.key.in_(AUTOMATION_SETTING_KEYS)))
+                for row in session.scalars(
+                    select(AppSetting).where(AppSetting.key.in_(AUTOMATION_SETTING_KEYS))
+                )
             }
         except (OperationalError, ProgrammingError):
             return fallback
@@ -594,13 +501,16 @@ def load_automation_config(db: Session | None = None) -> AutomationConfig:
         except ValueError:
             daily_time = fallback.daily_time
         return AutomationConfig(
-            download_enabled=_bool_value(rows.get("automation_download_enabled"), fallback.download_enabled),
-            scrape_enabled=_bool_value(rows.get("automation_scrape_enabled"), fallback.scrape_enabled),
+            download_enabled=_bool_value(
+                rows.get("automation_download_enabled"), fallback.download_enabled
+            ),
             daily_time=daily_time,
-            timezone=rows.get("automation_timezone", fallback.timezone).strip() or fallback.timezone,
+            timezone=rows.get("automation_timezone", fallback.timezone).strip()
+            or fallback.timezone,
             last_run_date=rows.get("automation_last_run_date", "").strip(),
             source="web",
         )
+
     if db is not None:
         return _load(db)
     with SessionLocal() as session:
@@ -611,7 +521,6 @@ def save_automation_config(
     db: Session,
     *,
     download_enabled: bool,
-    scrape_enabled: bool,
     daily_time: str,
     timezone: str,
 ) -> AutomationConfig:
@@ -625,7 +534,6 @@ def save_automation_config(
         raise ValueError("无效的 IANA 时区，例如 Asia/Shanghai") from exc
     values = {
         "automation_download_enabled": "1" if download_enabled else "0",
-        "automation_scrape_enabled": "1" if scrape_enabled else "0",
         "automation_time": valid_time,
         "automation_timezone": timezone,
     }
@@ -635,6 +543,7 @@ def save_automation_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
+    db.execute(delete(AppSetting).where(AppSetting.key.in_(LEGACY_AUTOMATION_SETTING_KEYS)))
     db.commit()
     return load_automation_config(db)
 
@@ -644,7 +553,11 @@ def mark_automation_run(db: Session, local_date: str) -> None:
 
 
 def reset_automation_config(db: Session) -> AutomationConfig:
-    db.execute(delete(AppSetting).where(AppSetting.key.in_(AUTOMATION_SETTING_KEYS)))
+    db.execute(
+        delete(AppSetting).where(
+            AppSetting.key.in_(AUTOMATION_SETTING_KEYS | LEGACY_AUTOMATION_SETTING_KEYS)
+        )
+    )
     db.commit()
     return load_automation_config(db)
 

@@ -60,8 +60,8 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     # default from the request body.
     "rename_enabled": "BOOLEAN NOT NULL DEFAULT 0",
     "file_name_template": "TEXT NOT NULL DEFAULT '{title} - S{season:02}E{episode:02}'",
-    "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 1",
-    "scrape_mode": "VARCHAR(20) NOT NULL DEFAULT 'local'",
+    "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "scrape_mode": "VARCHAR(20) NOT NULL DEFAULT 'off'",
     "custom_download_path": "TEXT NOT NULL DEFAULT ''",
     "missing_detection": "BOOLEAN NOT NULL DEFAULT 0",
     "only_latest": "BOOLEAN NOT NULL DEFAULT 0",
@@ -79,6 +79,12 @@ _FEED_ITEM_COLUMNS: dict[str, str] = {
     "scrape_message": "TEXT NOT NULL DEFAULT ''",
     "scraped_at": "DATETIME NULL",
     "hidden": "BOOLEAN NOT NULL DEFAULT 0",
+}
+
+_SYSTEM_LOG_COLUMNS: dict[str, str] = {
+    "details": "TEXT NOT NULL DEFAULT ''",
+    "request_id": "VARCHAR(64) NOT NULL DEFAULT ''",
+    "source": "VARCHAR(64) NOT NULL DEFAULT 'app'",
 }
 
 
@@ -102,23 +108,46 @@ def ensure_schema() -> None:
         return
     _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
     _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
+    _add_missing_columns("system_logs", _SYSTEM_LOG_COLUMNS)
 
-    # v1.9.1 changes local scraping from opt-in to opt-out. Apply this once to
-    # installations upgraded from v1.9.0, while preserving later user choices.
-    marker = "migration:1.9.1:scrape-default-enabled"
+    # Scraping was removed in v1.10.1. Disable all legacy scrape flags once.
+    marker = "migration:1.10.1:scraping-removed"
     with engine.begin() as connection:
         existing = connection.execute(
             text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
         ).scalar_one_or_none()
         if existing is None:
-            connection.execute(text("UPDATE subscriptions SET scrape_enabled = 1"))
+            connection.execute(text("UPDATE subscriptions SET scrape_enabled = 0, scrape_mode = 'off'"))
+            connection.execute(text("UPDATE feed_items SET scrape_status = '', scrape_message = '', scraped_at = NULL"))
             connection.execute(
-                text(
-                    "INSERT INTO app_settings (key, value, updated_at) "
-                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
-                ),
+                text("INSERT INTO app_settings (key, value, updated_at) VALUES (:key, '1', CURRENT_TIMESTAMP)"),
                 {"key": marker},
             )
+
+    # Remove obsolete media-integration credentials and disable every legacy
+    # post-processing flag. The columns stay in place only for old SQLite files.
+    cleanup_marker = "migration:1.10.2:remove-media-integrations"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": cleanup_marker},
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(text("UPDATE subscriptions SET scrape_enabled = 0, scrape_mode = 'off'"))
+            connection.execute(text("UPDATE feed_items SET scrape_status = '', scrape_message = '', scraped_at = NULL"))
+            connection.execute(
+                text(
+                    "DELETE FROM app_settings WHERE key IN "
+                    "('media_local_root','emby_url','emby_api_key','tmm_url','tmm_api_key',"
+                    "'tmm_enabled','automation_scrape_enabled')"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO app_settings (key, value, updated_at) VALUES (:key, '1', CURRENT_TIMESTAMP)"),
+                {"key": cleanup_marker},
+            )
+
+    # Legacy scrape columns are retained only for backward-compatible database reads.
 
 
 def get_db() -> Generator[Session, None, None]:
