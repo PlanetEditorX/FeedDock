@@ -109,12 +109,14 @@ jobs:
           volumes = set(service.get("volumes") or [])
           required_volumes = {
               "/vol1/1000/应用/feeddock/data:/data",
+              "/vol2/1000/影视:/media",
           }
           missing_volumes = required_volumes - volumes
           assert not missing_volumes, f"Missing fnOS volume mounts: {sorted(missing_volumes)}"
 
           environment = service.get("environment") or {}
           assert environment.get("DOWNLOAD_PATH") == "/media", "DOWNLOAD_PATH must be /media"
+          assert environment.get("MEDIA_LOCAL_ROOT") == "/media", "MEDIA_LOCAL_ROOT must be /media"
           PY
 
   build-and-push:

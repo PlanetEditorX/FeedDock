@@ -158,15 +158,15 @@ def _safe_segment(value: str) -> str:
 
 
 def _path_context(subscription: Subscription, episode: str, download_path: str) -> dict[str, Any]:
-    # naming_context preserves legacy variables and adds media-server-friendly
+    # naming_context preserves every legacy variable and adds Emby-friendly
     # variables such as {title}, {media_folder}, {tmdb_id} and padded season /
     # episode values. Existing custom templates continue to work unchanged.
     return naming_context(subscription, episode, download_path)
 
 
 def render_save_path(subscription: Subscription, episode: str, db: Session | None = None) -> str:
-    # The qBittorrent-visible root is used for every subscription.
-    # Per-subscription customization belongs in the path
+    # A single container-visible root is used by qBittorrent and FeedDock's
+    # local scraper. Per-subscription customization belongs in the path
     # template below, never in a second, potentially unmapped root.
     qbit_root = posixpath.normpath("/" + load_qbittorrent_config(db).download_path.lstrip("/"))
     base_root = qbit_root
@@ -340,9 +340,9 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     )
     item.save_path = save_path
     item.desired_name = desired_name
-    item.qbit_tag = item.qbit_tag or (
-        f"feeddock-item-{item.id}" if desired_name else ""
-    )
+    item.qbit_tag = item.qbit_tag or (f"feeddock-item-{item.id}" if desired_name else "")
+    item.scrape_status = "skipped"
+    item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
     result = QBittorrentClient().add_url(
         item.download_url, save_path, rename=desired_name, tags=item.qbit_tag
     )
@@ -511,12 +511,15 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
         item.qbit_tag = f"feeddock-item-{item.id}" if desired_name else ""
+        item.scrape_status = "skipped"
+        item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
             item.rename_status = "pending" if item.qbit_tag else "skipped"
             item.rename_message = "等待定时推送"
+            item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
         else:
             ok, _ = _push_feed_item(db, item, subscription)
             stats["queued" if ok else "errors"] += 1

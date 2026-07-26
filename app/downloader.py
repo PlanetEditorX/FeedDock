@@ -155,8 +155,9 @@ class QBittorrentClient:
         """Inspect one tagged torrent, normalize a single video, and report completion.
 
         Renaming may happen as soon as magnet metadata is available, but local
-        completion is tracked so the UI can report progress accurately.
-        Multi-video packs are never guessed and remain marked for manual handling.
+        scraping is intentionally deferred until qBittorrent reports 100%.
+        Multi-video packs are never guessed; they may still be scraped after
+        completion because series-level NFO files do not require file renaming.
         """
 
         error = self._configuration_error()

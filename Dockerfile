@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-ARG APP_VERSION=1.10.2
+ARG APP_VERSION=1.10.0
 
 ENV APP_VERSION=${APP_VERSION} \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -14,12 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY docker-entrypoint.py /usr/local/bin/feeddock-entrypoint
-RUN mkdir -p /data \
-    && chown -R 0:0 /app /data \
+RUN mkdir -p /data /media \
+    && chown -R 0:0 /app /data /media \
     && chmod +x /usr/local/bin/feeddock-entrypoint
 
 EXPOSE 8000
-VOLUME ["/data"]
+VOLUME ["/data", "/media"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"

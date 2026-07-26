@@ -22,6 +22,8 @@ button.small { padding: 6px 9px; font-size: 12px; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 18px max(24px, calc((100vw - 1200px) / 2)); background: rgba(13,17,23,.94); border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); }
+.app-brand { display: flex; align-items: center; gap: 11px; }
+.app-brand img { width: 38px; height: 38px; flex: 0 0 auto; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 2px; font-size: 24px; }
 .topbar p, .panel-head p { margin-bottom: 0; color: var(--muted); }
@@ -91,7 +93,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .auth-shell { width: min(430px, calc(100% - 32px)); margin: 40px auto; }
 .auth-card { padding: 30px; border: 1px solid var(--line); border-radius: 16px; background: rgba(22, 27, 34, .96); box-shadow: 0 24px 80px #0008; }
 .auth-card h1 { margin: 14px 0 8px; font-size: 25px; }
-.brand-mark { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 14px; background: var(--accent); color: #08111c; font-size: 20px; font-weight: 900; }
+.brand-mark { display: block; width: 50px; height: 50px; border-radius: 14px; }
 .auth-form { display: grid; gap: 15px; margin-top: 22px; }
 .auth-form label { display: grid; gap: 7px; color: var(--muted); }
 .auth-form button { margin-top: 4px; }
@@ -115,14 +117,15 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #58a6ff22; }
 .advanced-form { display: grid; gap: 16px; }
 fieldset { min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(13, 17, 23, .35); }
 legend { padding: 0 8px; color: var(--text); font-weight: 750; }
+.subscription-advanced { min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: rgba(13, 17, 23, .35); }
+.subscription-advanced > summary { padding: 14px 16px; color: var(--text); font-weight: 750; cursor: pointer; }
+.subscription-advanced > summary::marker { color: var(--accent); }
+.advanced-section-body { padding: 0 16px 16px; }
 .preview-box { margin-top: 14px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .preview-box.good { color: var(--good); border-color: var(--good); }
 .preview-box.bad { color: var(--bad); border-color: var(--bad); }
 .subscription-meta { display: grid; gap: 4px; margin: 10px 0; padding: 10px; border-radius: 8px; background: var(--panel); }
 .subscription-meta span { color: var(--muted); }
-.subscription-details { margin-top: 10px; }
-.subscription-details > summary { color: var(--muted); cursor: pointer; user-select: none; }
-.subscription-details[open] > summary { margin-bottom: 2px; }
 .discovery-results { display: grid; gap: 12px; margin-top: 16px; }
 .discovery-card { border: 1px solid var(--line); border-radius: 10px; padding: 15px; background: var(--bg); overflow: hidden; }
 .discovery-title { display: flex; align-items: flex-start; gap: 10px; }
@@ -161,8 +164,6 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .mikan-cover img { width: 100%; height: 100%; object-fit: cover; }
 .mikan-anime-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
 .mikan-anime-info strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-height: 1.42; }
-.mikan-anime-card.is-subscribed { box-shadow: inset 3px 0 0 var(--good); }
-.mikan-subscribed-badge { display: inline-block; margin-left: 7px; padding: 1px 6px; border: 1px solid var(--good); border-radius: 999px; color: var(--good); font-size: 11px; font-weight: 700; line-height: 1.35; vertical-align: 1px; }
 .catalog-card-action { margin-top: auto; color: var(--accent); font-size: 12px; }
 .mikan-anime-card.is-filter-editing { cursor: pointer; padding-top: 42px; }
 .mikan-anime-card.is-filter-hidden { opacity: .48; background: #111820; }
@@ -204,7 +205,7 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 .modal.hidden { display: none; }
 .cache-meta { display: block; margin-top: 5px; font-size: 0.86rem; line-height: 1.45; }
 
-/* Metadata, media-server naming, and remembered panel state */
+/* v1.9 metadata, Emby naming, and remembered panel state */
 .panel { transition: padding .18s ease, background .18s ease; }
 .panel > .panel-head { position: relative; }
 .panel-toggle { margin-left: auto; flex: 0 0 auto; }

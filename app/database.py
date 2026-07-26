@@ -60,7 +60,6 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     # default from the request body.
     "rename_enabled": "BOOLEAN NOT NULL DEFAULT 0",
     "file_name_template": "TEXT NOT NULL DEFAULT '{title} - S{season:02}E{episode:02}'",
-    # Legacy columns retained for upgrade compatibility; runtime no longer uses them.
     "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 0",
     "scrape_mode": "VARCHAR(20) NOT NULL DEFAULT 'off'",
     "custom_download_path": "TEXT NOT NULL DEFAULT ''",
@@ -104,19 +103,28 @@ def ensure_schema() -> None:
     _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
     _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
 
-    # Built-in scraping was removed in v1.10.1. Keep the legacy columns so old
-    # SQLite files remain readable, but disable their values and erase stored
-    # integration credentials that are no longer used.
+    # Scraping is no longer handled by FeedDock. Existing installs keep the
+    # columns for compatibility, but all subscriptions are migrated to skip it.
+    marker = "migration:1.11.0:scrape-disabled"
     with engine.begin() as connection:
-        connection.execute(text("UPDATE subscriptions SET scrape_enabled = 0, scrape_mode = 'off'"))
-        connection.execute(text("UPDATE feed_items SET scrape_status = '', scrape_message = '', scraped_at = NULL"))
-        connection.execute(text(
-            "DELETE FROM app_settings WHERE key IN ("
-            "'media_local_root','emby_url','emby_api_key',"
-            "'tmm_url','tmm_api_key','tmm_enabled','automation_scrape_enabled'"
-            ")"
-        ))
-
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(text("UPDATE subscriptions SET scrape_enabled = 0, scrape_mode = 'off'"))
+            connection.execute(
+                text(
+                    "UPDATE feed_items SET scrape_status = 'skipped', scrape_message = 'FeedDock 已移除刮削功能' "
+                    "WHERE scrape_status IN ('', 'pending', 'retry', 'error', 'waiting_completion')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
 
 
 def get_db() -> Generator[Session, None, None]:

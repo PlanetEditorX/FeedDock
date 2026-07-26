@@ -70,7 +70,7 @@ class Subscription(Base):
     total_episodes_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     total_episodes_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
 
-    # Metadata matching and media-server-friendly naming. Existing installations are
+    # Metadata matching and Emby-friendly naming. Existing installations are
     # migrated additively in database.ensure_schema().
     naming_mode: Mapped[str] = mapped_column(String(20), default="auto", nullable=False)
     media_type: Mapped[str] = mapped_column(String(20), default="tv", nullable=False)
@@ -92,7 +92,6 @@ class Subscription(Base):
     file_name_template: Mapped[str] = mapped_column(
         Text, default="{title} - S{season:02}E{episode:02}", nullable=False
     )
-    # Legacy columns retained only so existing databases remain compatible.
     scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     scrape_mode: Mapped[str] = mapped_column(String(20), default="off", nullable=False)
 

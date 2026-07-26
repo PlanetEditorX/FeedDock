@@ -5,13 +5,12 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .config import settings
 from .database import SessionLocal
 from .debug_logging import log_exception
 from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
-from .runtime_config import load_automation_config, mark_automation_run
+from .runtime_config import load_automation_config, load_rss_poll_config, mark_automation_run
 
 
 class PollScheduler:
@@ -51,16 +50,19 @@ class PollScheduler:
     def _run(self) -> None:
         if self._stop_event.wait(10):
             return
-        next_rss_refresh = 0.0
+        last_rss_refresh: float | None = None
         next_completion_check = 0.0
         while not self._stop_event.is_set():
             now = time.monotonic()
-            if now >= next_rss_refresh:
+            with SessionLocal() as db:
+                poll_interval = load_rss_poll_config(db).minutes
+            rss_due = last_rss_refresh is None or now - last_rss_refresh >= poll_interval * 60
+            if rss_due:
                 try:
                     refresh_all()
                 except Exception as exc:
                     log_exception("后台 RSS 刷新异常", exc, stage="scheduler.refresh-all")
-                next_rss_refresh = time.monotonic() + settings.poll_interval_minutes * 60
+                last_rss_refresh = time.monotonic()
 
             if now >= next_completion_check:
                 try:
@@ -80,6 +82,7 @@ class PollScheduler:
             except Exception as exc:
                 log_exception("Mikan 后台缓存刷新异常", exc, stage="scheduler.mikan-refresh")
 
+            next_rss_refresh = (last_rss_refresh or time.monotonic()) + poll_interval * 60
             next_event = min(next_rss_refresh, next_completion_check)
             wait_seconds = max(1.0, next_event - time.monotonic())
             if self._stop_event.wait(min(60.0, wait_seconds)):

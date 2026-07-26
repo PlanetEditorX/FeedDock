@@ -17,10 +17,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
 
-    def test_workflow_validates_fnos_data_mount_only(self) -> None:
+    def test_workflow_validates_both_fnos_volume_mounts(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
         self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', workflow)
-        self.assertNotIn('"/vol2/1000/影视:/media"', workflow)
+        self.assertIn('"/vol2/1000/影视:/media"', workflow)
         self.assertIn("missing_volumes = required_volumes - volumes", workflow)
         self.assertNotIn(
             'service["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]',
@@ -150,7 +150,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("def update_mikan_weekday_filter", main)
         self.assertIn("save_mikan_weekday_hidden_filter", runtime)
 
-    def test_metadata_naming_ui_is_wired_without_scraping(self) -> None:
+    def test_metadata_naming_ui_remains_and_scraping_ui_is_removed(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
@@ -162,10 +162,12 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('/api/metadata/search', script)
         self.assertIn('/api/metadata/detail', script)
         self.assertIn('/api/actions/normalize-torrents', script)
+        self.assertIn('def metadata_detail', main)
+        self.assertNotIn('id="refreshEmby"', index)
+        self.assertNotIn('id="testTmm"', index)
+        self.assertNotIn('tinyMediaManager HTTP API 地址', index)
         self.assertNotIn('/api/actions/emby-refresh', script)
         self.assertNotIn('/api/metadata/test-tmm', script)
-        self.assertFalse((ROOT / 'app/scraper.py').exists())
-        self.assertIn('def metadata_detail', main)
 
     def test_all_main_panels_remember_collapsed_state(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
@@ -177,16 +179,33 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('localStorage.setItem', script)
         self.assertIn('.panel.is-collapsed > :not(.panel-head)', styles)
 
-    def test_fnos_compose_has_metadata_without_media_mount(self) -> None:
+    def test_rss_polling_is_configurable_and_advanced_subscription_fields_start_collapsed(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        runtime = (ROOT / "app/runtime_config.py").read_text(encoding="utf-8")
+        scheduler = (ROOT / "app/scheduler.py").read_text(encoding="utf-8")
+        self.assertIn('name="rss_poll_interval_minutes"', index)
+        self.assertEqual(index.count('<details class="subscription-advanced">'), 4)
+        self.assertIn('/api/rss-poll/settings', script)
+        self.assertIn('RSS_POLL_INTERVAL_SETTING_KEY', runtime)
+        self.assertIn('load_rss_poll_config', scheduler)
+
+    def test_feeddock_icon_is_used_on_main_and_auth_pages(self) -> None:
+        icon = (ROOT / "app/static/feeddock-icon.svg").read_text(encoding="utf-8")
+        self.assertIn('<svg', icon)
+        for name in ("index.html", "login.html", "change-password.html"):
+            page = (ROOT / "app/static" / name).read_text(encoding="utf-8")
+            self.assertIn('/static/feeddock-icon.svg', page)
+
+    def test_fnos_compose_has_optional_metadata_and_media_mount(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)
         self.assertIn('BANGUMI_ACCESS_TOKEN: ""', compose)
-        self.assertNotIn('MEDIA_LOCAL_ROOT', compose)
-        self.assertNotIn('EMBY_URL', compose)
-        self.assertNotIn('TMM_URL', compose)
-        self.assertNotIn('- "/vol2/1000/影视:/media"', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
+        self.assertIn('EMBY_URL: ""', compose)
+        self.assertIn('- "/vol2/1000/影视:/media"', compose)
 
-    def test_fnos_permissions_and_qbit_root_are_consistent(self) -> None:
+    def test_fnos_permissions_and_media_root_are_consistent(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         entrypoint = (ROOT / "docker-entrypoint.py").read_text(encoding="utf-8")
@@ -195,11 +214,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('PUID: "0"', compose)
         self.assertIn('PGID: "0"', compose)
         self.assertIn('DOWNLOAD_PATH: "/media"', compose)
-        self.assertNotIn('MEDIA_LOCAL_ROOT', compose)
-        self.assertIn('chown -R 0:0 /app /data', dockerfile)
-        self.assertNotIn('VOLUME ["/data", "/media"]', dockerfile)
+        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
+        self.assertIn('chown -R 0:0 /app /data /media', dockerfile)
         self.assertIn('_number("PUID", 0)', entrypoint)
-        self.assertNotIn('name="media_local_root"', index)
+        self.assertIn('name="media_local_root" placeholder="/media" readonly', index)
         self.assertIn('name="custom_download_path" placeholder="/media" readonly', index)
         self.assertIn("currentDownloadRoot = '/media'", script)
 
@@ -210,8 +228,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('id="clearSystemLogs"', index)
         self.assertIn("className = 'subscription-poster'", script)
         self.assertIn('sub.metadata_overview', script)
-        self.assertNotIn("scrape_enabled", script)
-        self.assertNotIn("立即刮削", script)
+        self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', false)", script)
         self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 
 if __name__ == "__main__":

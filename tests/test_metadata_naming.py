@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from unittest.mock import patch
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
 from app.naming import media_folder_name, remote_to_local_path, render_desired_name
+from app.scraper import ScrapeResult, scrape_subscription, trigger_tmm_scrape
 
 
 class _Response:
@@ -184,14 +186,23 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertEqual(record.title, "番剧")
 
 
-    def test_download_completion_updates_progress_and_timestamp(self):
+    def test_tmm_scrape_is_disabled(self):
+        sub = self.subscription(scrape_enabled=True, scrape_mode="tmm", save_path_template="{base}/{media_folder}/Season {season:02}")
+        with patch("app.scraper.httpx.Client") as client:
+            result = trigger_tmm_scrape(SimpleNamespace(), sub)
+        self.assertFalse(result.ok)
+        self.assertIn("已移除", result.message)
+        client.assert_not_called()
+
+    def test_download_completion_skips_scrape(self):
         engine = create_engine("sqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine, expire_on_commit=False)
         with Session() as db:
             sub = Subscription(
-                name="规范命名番剧 (2026)",
+                name="自动刮削番剧 (2026)",
                 rss_url="https://example.com/rss",
+                scrape_enabled=True,
                 rename_enabled=True,
             )
             db.add(sub)
@@ -199,11 +210,12 @@ class MetadataNamingTests(unittest.TestCase):
             item = FeedItem(
                 subscription_id=sub.id,
                 fingerprint="a" * 64,
-                title="规范命名番剧 - 01",
+                title="自动刮削番剧 - 01",
                 status="queued",
                 qbit_tag="feeddock-item-1",
-                desired_name="规范命名番剧 - S01E01",
+                desired_name="自动刮削番剧 - S01E01",
                 rename_status="waiting_completion",
+                scrape_status="pending",
             )
             db.add(item)
             db.commit()
@@ -219,9 +231,22 @@ class MetadataNamingTests(unittest.TestCase):
 
             db.refresh(item)
             self.assertEqual(result["completed"], 1)
-            self.assertNotIn("scraped", result)
+            self.assertEqual(result["scraped"], 0)
             self.assertEqual(item.download_progress, 100)
+            self.assertEqual(item.scrape_status, "skipped")
+            self.assertIn("已移除", item.scrape_message)
             self.assertIsNotNone(item.completed_at)
+            self.assertIsNone(item.scraped_at)
+
+    def test_local_scraper_is_disabled_without_writing_nfo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sub = self.subscription(metadata_overview="简介", poster_url="", backdrop_url="", bgm_url="", total_episodes=12)
+            result = scrape_subscription(SimpleNamespace(), sub)
+            self.assertTrue(result.ok)
+            self.assertIn("已移除", result.message)
+            root = Path(tmp) / "金牌得主 (2025) [tmdbid=123]"
+            self.assertFalse((root / "tvshow.nfo").exists())
+            self.assertFalse((root / "Season 02" / "season.nfo").exists())
 
 
 if __name__ == "__main__":

@@ -44,15 +44,18 @@ from .runtime_config import (
     load_metadata_config,
     load_automation_config,
     load_proxy_config,
+    load_rss_poll_config,
     load_mikan_hidden_filters,
     load_qbittorrent_config,
     reset_metadata_config,
     reset_automation_config,
     reset_proxy_config,
+    reset_rss_poll_config,
     reset_qbittorrent_config,
     save_metadata_config,
     save_automation_config,
     save_proxy_config,
+    save_rss_poll_config,
     save_mikan_weekday_hidden_filter,
     save_qbittorrent_config,
     set_app_setting,
@@ -80,6 +83,7 @@ from .schemas import (
     MikanWeekdayFilterUpdate,
     ProxySettingsUpdate,
     QBittorrentSettingsUpdate,
+    RssPollSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
     SubscriptionPreviewOut,
@@ -133,7 +137,8 @@ def _subscription_values(
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
     if db is not None:
-        # All subscriptions use the qBittorrent-visible download root.
+        # qBittorrent, FeedDock scraping, and subscription rendering must use
+        # one identical container path. Customize only the folder template.
         values["custom_download_path"] = load_qbittorrent_config(db).download_path
     return values
 
@@ -388,7 +393,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, Any]:
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
-        "poll_interval_minutes": settings.poll_interval_minutes,
+        "poll_interval_minutes": load_rss_poll_config(db).minutes,
         **qbit.public_dict(),
         "timezone": settings.timezone,
         "update_repository": settings.update_repository,
@@ -450,6 +455,14 @@ def update_metadata_settings(
             bangumi_access_token=payload.bangumi_access_token,
             clear_bangumi_token=payload.clear_bangumi_token,
             metadata_language=payload.metadata_language,
+            media_local_root=payload.media_local_root,
+            emby_url=payload.emby_url,
+            emby_api_key=payload.emby_api_key,
+            clear_emby_api_key=payload.clear_emby_api_key,
+            tmm_url=payload.tmm_url,
+            tmm_api_key=payload.tmm_api_key,
+            clear_tmm_api_key=payload.clear_tmm_api_key,
+            tmm_enabled=payload.tmm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -461,7 +474,6 @@ def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | 
     return reset_metadata_config(db).public_dict()
 
 
-
 @app.get("/api/automation/settings", dependencies=[Depends(require_admin)])
 def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
     return load_automation_config(db).public_dict()
@@ -470,7 +482,7 @@ def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bo
 @app.put("/api/automation/settings", dependencies=[Depends(require_admin)])
 def update_automation_settings(payload: AutomationSettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
     try:
-        return save_automation_config(db, download_enabled=payload.download_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
+        return save_automation_config(db, download_enabled=payload.download_enabled, scrape_enabled=payload.scrape_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -478,6 +490,27 @@ def update_automation_settings(payload: AutomationSettingsUpdate, db: Session = 
 @app.delete("/api/automation/settings", dependencies=[Depends(require_admin)])
 def restore_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
     return reset_automation_config(db).public_dict()
+
+
+@app.get("/api/rss-poll/settings", dependencies=[Depends(require_admin)])
+def get_rss_poll_settings(db: Session = Depends(get_db)) -> dict[str, int | str]:
+    return load_rss_poll_config(db).public_dict()
+
+
+@app.put("/api/rss-poll/settings", dependencies=[Depends(require_admin)])
+def update_rss_poll_settings(
+    payload: RssPollSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, int | str]:
+    try:
+        return save_rss_poll_config(db, minutes=payload.minutes).public_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/rss-poll/settings", dependencies=[Depends(require_admin)])
+def restore_rss_poll_settings(db: Session = Depends(get_db)) -> dict[str, int | str]:
+    return reset_rss_poll_config(db).public_dict()
 
 
 @app.post("/api/automation/run", dependencies=[Depends(require_admin)])
@@ -521,6 +554,8 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
         "qbit_password": qbit.password,
         "tmdb_read_access_token": metadata.tmdb_read_access_token,
         "bangumi_access_token": metadata.bangumi_access_token,
+        "emby_api_key": metadata.emby_api_key,
+        "tmm_api_key": metadata.tmm_api_key,
         "proxy_url": proxy.url,
     }
     if secret_name not in values:
