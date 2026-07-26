@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.9.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.10.0">
 </head>
 <body>
   <header class="topbar">
@@ -57,9 +57,33 @@
         <label class="wide">Emby 地址<input name="emby_url" type="url" placeholder="例如 http://host.docker.internal:8096"></label>
         <label>Emby API Key<input name="emby_api_key" type="password" autocomplete="new-password" placeholder="留空保留已保存 Key"></label>
         <label class="checkbox-label"><input name="clear_emby_api_key" type="checkbox">清除 Emby API Key</label>
-        <div class="form-actions wide"><button type="submit">保存元数据配置</button><button id="restoreMetadataSettings" type="button" class="secondary">恢复 Compose 默认</button><button id="refreshEmby" type="button" class="secondary">通知 Emby 刷新</button></div>
+        <label class="wide">tinyMediaManager HTTP API 地址<input name="tmm_url" type="url" placeholder="例如 http://host.docker.internal:7878"></label>
+        <label>tinyMediaManager API Key<input name="tmm_api_key" type="password" autocomplete="new-password" placeholder="留空保留已保存 Key"></label>
+        <label class="checkbox-label"><input name="clear_tmm_api_key" type="checkbox">清除 TMM API Key</label>
+        <label class="checkbox-label"><input name="tmm_enabled" type="checkbox">启用 tinyMediaManager 真正刮削</label>
+        <div class="form-actions wide"><button type="submit">保存元数据配置</button><button id="testTmm" type="button" class="secondary">测试 TMM</button><button id="restoreMetadataSettings" type="button" class="secondary">恢复 Compose 默认</button><button id="refreshEmby" type="button" class="secondary">通知 Emby 刷新</button></div>
       </form>
       <p class="hint panel-body">本地媒体挂载目录必须与 qBittorrent 的“统一媒体根目录”完全一致；飞牛推荐两边都使用 <code>/media</code>。</p>
+    </section>
+
+    <section class="panel" data-panel-id="automation-proxy">
+      <div class="panel-head"><div><h2>统一执行时间与网络代理</h2><p>可把下载推送和完成后的刮削集中到每天固定时间，并为外部元数据/RSS请求设置代理。</p></div></div>
+      <div class="panel-body split-settings">
+        <form id="automationSettingsForm" class="form-grid">
+          <label class="checkbox-label"><input name="download_enabled" type="checkbox">下载任务等待统一时间再推送</label>
+          <label class="checkbox-label"><input name="scrape_enabled" type="checkbox">下载完成后等待统一时间再刮削</label>
+          <label>每日执行时间<input name="daily_time" type="time" value="02:00" required></label>
+          <label>时区<input name="timezone" value="Asia/Shanghai" placeholder="Asia/Shanghai"></label>
+          <div class="form-actions wide"><button type="submit">保存定时设置</button><button id="runAutomationNow" type="button" class="secondary">立即执行一次</button><button id="restoreAutomation" type="button" class="secondary">恢复默认</button></div>
+        </form>
+        <form id="proxySettingsForm" class="form-grid">
+          <label class="checkbox-label"><input name="enabled" type="checkbox">启用全局外部请求代理</label>
+          <label class="wide">代理地址<input name="proxy_url" type="password" autocomplete="new-password" placeholder="http://用户:密码@主机:端口 或 socks5://主机:端口"></label>
+          <label class="checkbox-label"><input name="clear_proxy_url" type="checkbox">清除已保存代理</label>
+          <label class="wide">不使用代理<input name="no_proxy" value="localhost,127.0.0.1,host.docker.internal"></label>
+          <div class="form-actions wide"><button type="submit">保存代理</button><button id="testProxy" type="button" class="secondary">测试代理</button><button id="restoreProxy" type="button" class="secondary">恢复默认</button></div>
+        </form>
+      </div>
     </section>
 
     <section class="panel" id="sourceDiscovery" data-panel-id="mikan-catalog">
@@ -73,20 +97,20 @@
 
     <section class="panel" id="subscriptionEditor" data-panel-id="subscription-editor">
       <div class="panel-head"><div><h2 id="subscriptionFormTitle">添加订阅</h2><p>先匹配元数据，再预览最终目录与 Emby 规范文件名。</p></div></div>
-      <form id="subscriptionForm" class="advanced-form panel-body"><input type="hidden" name="subscription_id"><input type="hidden" name="metadata_source"><input type="hidden" name="metadata_overview"><input type="hidden" name="poster_url"><input type="hidden" name="backdrop_url">
+      <form id="subscriptionForm" class="advanced-form panel-body"><input type="hidden" name="subscription_id"><input type="hidden" name="metadata_source"><input type="hidden" name="metadata_overview"><input type="hidden" name="poster_url"><input type="hidden" name="backdrop_url"><input type="hidden" name="metadata_confirmed"><input type="hidden" name="metadata_review_skipped">
         <fieldset><legend>基础信息</legend><div class="form-grid">
           <label>订阅名称<input name="name" required maxlength="200" placeholder="金牌得主 第二季"></label><label>参考/Bangumi 标题<input name="reference_title" placeholder="金牌得主"></label>
           <label>TMDB 标题<input name="tmdb_title" placeholder="Medalist"></label><label>手动规范标题<input name="manual_title" placeholder="手动模式优先使用"></label>
-          <label>命名来源<select name="naming_mode"><option value="auto">自动：手动→TMDB→Bangumi→原名</option><option value="manual">手动</option><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option></select></label>
+          <label>命名来源<select name="naming_mode"><option value="auto">自动：手动→TMDB→Bangumi→原名</option><option value="manual">手动</option><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label>
           <label>媒体类型<select name="media_type"><option value="tv">电视番剧</option><option value="movie">剧场版/电影</option></select></label>
           <label>首播日期<input name="air_date" type="date"></label><label>年份<input name="metadata_year" type="number" min="0" max="9999" value="0"></label>
-          <label>季编号<input name="season" type="number" min="0" max="999" value="1"></label><label>Bangumi ID<input name="bangumi_id" type="number" min="0" value="0"></label>
-          <label>TMDB ID<input name="tmdb_id" type="number" min="0" value="0"></label><label>BgmUrl<input name="bgm_url" type="url" placeholder="https://bangumi.tv/subject/..."></label>
+          <label>季编号<input name="season" type="number" min="0" max="999" value="1"></label><label>季度识别<select name="season_mode"><option value="title">从订阅标题识别第几季</option><option value="latest">自动选择 TMDB 最新已播季</option><option value="manual">手动季编号</option></select></label><label>Bangumi ID<input name="bangumi_id" type="number" min="0" value="0"></label>
+          <label>TMDB ID<input name="tmdb_id" type="number" min="0" value="0"></label><label>AniList ID<input name="anilist_id" type="number" min="0" value="0"></label><label>BgmUrl<input name="bgm_url" type="url" placeholder="https://bangumi.tv/subject/..."></label>
           <label class="checkbox-label"><input name="auto_metadata" type="checkbox">定期自动同步元数据</label>
         </div></fieldset>
 
         <fieldset><legend>搜索并选择元数据</legend><div class="metadata-search-row">
-          <label>来源<select id="metadataSearchProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option></select></label>
+          <label>来源<select id="metadataSearchProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label>
           <label class="metadata-query">搜索词<input id="metadataSearchQuery" placeholder="默认使用订阅名称"></label><button id="searchMetadata" type="button" class="secondary">搜索</button>
         </div><div id="metadataSearchResults" class="metadata-results muted">尚未搜索。</div></fieldset>
 
@@ -101,7 +125,7 @@
           <label class="wide">统一下载根目录（与 qBittorrent 自动同步）<input name="custom_download_path" placeholder="/media" readonly></label>
           <label class="wide">文件名模板<input name="file_name_template" value="{title} - S{season:02}E{episode:02}" required></label>
           <label class="checkbox-label"><input name="rename_enabled" type="checkbox" checked>下载后通过 qBittorrent 规范化文件名</label>
-          <label class="checkbox-label"><input name="scrape_enabled" type="checkbox" checked>下载完成后自动生成本地 NFO 与图片</label>
+          <label>刮削方式<select name="scrape_mode"><option value="local">FeedDock 本地 NFO/图片</option><option value="tmm">tinyMediaManager</option><option value="both">本地 NFO + tinyMediaManager</option><option value="off">完全跳过</option></select></label><label class="checkbox-label"><input name="scrape_enabled" type="checkbox" checked>下载完成后自动执行所选刮削方式</label>
           <label class="checkbox-label"><input name="missing_detection" type="checkbox">遗漏检测</label><label class="checkbox-label"><input name="only_latest" type="checkbox">只下载最新集</label><label class="checkbox-label"><input name="enabled" type="checkbox" checked>启用订阅</label>
         </div><div id="subscriptionPreview" class="preview-box muted">尚未预览。</div></fieldset>
 
@@ -112,13 +136,14 @@
 
     <section class="panel" data-panel-id="subscriptions"><div class="panel-head"><div><h2>订阅列表</h2><p id="configSummary">正在读取配置…</p></div></div><div id="subscriptions" class="cards panel-body"></div></section>
 
-    <section class="panel" data-panel-id="recent-items"><div class="panel-head"><div><h2>最近条目</h2><p>显示下载进度、规范命名及自动刮削状态。</p></div><div class="actions"><select id="statusFilter"><option value="">全部状态</option><option value="queued">已推送</option><option value="skipped">已跳过</option><option value="error">错误</option></select><button id="clearRecentItems" type="button" class="small danger">清理条目</button></div></div><div class="table-wrap panel-body"><table><thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>命名</th><th>说明</th><th></th></tr></thead><tbody id="items"><tr><td colspan="7">正在加载…</td></tr></tbody></table></div></section>
+    <section class="panel" data-panel-id="recent-items"><div class="panel-head"><div><h2>最近条目</h2><p>显示下载进度、规范命名及自动刮削状态。</p></div><div class="actions"><select id="statusFilter"><option value="">全部状态</option><option value="scheduled">等待定时推送</option><option value="queued">已推送</option><option value="skipped">已跳过</option><option value="error">错误</option></select><button id="clearRecentItems" type="button" class="small danger">清理条目</button></div></div><div class="table-wrap panel-body"><table><thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>命名</th><th>说明</th><th></th></tr></thead><tbody id="items"><tr><td colspan="7">正在加载…</td></tr></tbody></table></div></section>
 
     <section class="panel" data-panel-id="system-logs"><div class="panel-head"><div><h2>系统日志</h2><p>最近 50 条轮询和后处理日志。</p></div><button id="clearSystemLogs" type="button" class="small danger">清理日志</button></div><div id="logs" class="logs panel-body"></div></section>
     <section class="legal">本工具不提供、存储或分发任何媒体资源。请只处理你有权访问的 RSS 与媒体文件。</section>
   </main>
 
+  <div id="metadataReviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="metadataReviewTitle"><div class="modal-backdrop" data-close-metadata-review></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button id="closeMetadataReview" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"></label><button id="reviewSearch" type="button">搜索</button><button id="reviewSkip" type="button" class="secondary">完全跳过</button></div><div id="reviewResults" class="metadata-results muted">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
   <div id="mikanDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mikanDetailTitle"><div class="modal-backdrop" data-close-mikan-modal></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button id="closeMikanModal" type="button" class="icon-button secondary" aria-label="关闭">×</button></div><div id="mikanDetailBody" class="mikan-detail-body"></div></section></div>
-  <script src="/static/app.js?v=1.9.1" defer></script>
+  <script src="/static/app.js?v=1.10.0" defer></script>
 </body>
 </html>

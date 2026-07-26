@@ -1,3 +1,20 @@
+# FeedDock v1.10.0 飞牛 OS 部署
+
+## 新增可选配置
+
+```yaml
+environment:
+  ANILIST_API_URL: "https://graphql.anilist.co"
+  TMM_URL: "http://host.docker.internal:7878"
+  TMM_API_KEY: ""
+  AUTOMATION_TIME: "02:00"
+  AUTOMATION_TIMEZONE: "Asia/Shanghai"
+  OUTBOUND_PROXY_URL: ""
+  OUTBOUND_NO_PROXY: "localhost,127.0.0.1,host.docker.internal"
+```
+
+网页保存的设置优先于 Compose。tinyMediaManager 需要启用 HTTP API，并与 FeedDock、qBittorrent 使用相同的 `/media` 路径。代理只用于外部请求，本地服务应放入不使用代理列表。
+
 # FeedDock 飞牛 OS 部署说明
 
 ## 1. 宿主机目录
@@ -129,7 +146,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-更新后浏览器执行一次强制刷新。v1.9.1 会把旧订阅的下载根目录同步到当前 qBittorrent 根目录，并默认开启本地刮削；不会删除历史指纹和订阅数据。
+更新后浏览器执行一次强制刷新。v1.10.0 会把旧订阅的下载根目录同步到当前 qBittorrent 根目录，并默认开启本地刮削；不会删除历史指纹和订阅数据。
 
 ## 9. 故障排查
 

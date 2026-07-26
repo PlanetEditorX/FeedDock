@@ -9,7 +9,6 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,7 +18,8 @@ from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .naming import media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
-from .runtime_config import get_app_setting, load_qbittorrent_config
+from .outbound import external_get
+from .runtime_config import get_app_setting, load_automation_config, load_qbittorrent_config
 
 
 _refresh_lock = threading.Lock()
@@ -207,25 +207,25 @@ def add_log(db: Session, level: str, message: str, details: str = "") -> None:
     db.add(SystemLog(level=level.upper(), message=message, details=details[:4000]))
 
 
-def _fetch_entries(url: str) -> list[dict[str, Any]]:
+def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
     headers = {
         "User-Agent": settings.rss_user_agent,
         "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
     }
-    response = httpx.get(
+    response = external_get(
         url,
+        db=db,
         headers=headers,
         timeout=settings.request_timeout_seconds,
-        follow_redirects=True,
     )
     response.raise_for_status()
     return parse_feed(response.content)
 
 
-def _load_subscription_entries(subscription: Subscription) -> tuple[list[dict[str, Any]], str]:
+def _load_subscription_entries(subscription: Subscription, db: Session | None = None) -> tuple[list[dict[str, Any]], str]:
     primary_error: Exception | None = None
     try:
-        entries = _fetch_entries(subscription.rss_url)
+        entries = _fetch_entries(subscription.rss_url, db)
         if entries:
             return entries, subscription.primary_rss_name or "主 RSS"
         primary_error = ValueError("主 RSS 没有条目")
@@ -234,7 +234,7 @@ def _load_subscription_entries(subscription: Subscription) -> tuple[list[dict[st
 
     if subscription.backup_rss_url:
         try:
-            entries = _fetch_entries(subscription.backup_rss_url)
+            entries = _fetch_entries(subscription.backup_rss_url, db)
             return entries, subscription.backup_rss_name or "备用 RSS"
         except Exception as backup_error:
             raise RuntimeError(f"主 RSS 失败：{primary_error}；备用 RSS 失败：{backup_error}") from backup_error
@@ -321,11 +321,73 @@ def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
         db.commit()
 
 
+def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> tuple[bool, str]:
+    save_path = item.save_path or render_save_path(subscription, item.episode, db)
+    desired_name = (
+        render_desired_name(subscription, item.episode)
+        if subscription.rename_enabled and item.episode
+        else ""
+    )
+    item.save_path = save_path
+    item.desired_name = desired_name
+    item.qbit_tag = item.qbit_tag or (
+        f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
+    )
+    item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
+    item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用刮削"
+    result = QBittorrentClient().add_url(
+        item.download_url, save_path, rename=desired_name, tags=item.qbit_tag
+    )
+    if result.ok:
+        item.status = "queued"
+        item.reason = result.message
+        item.rename_status = "pending" if item.qbit_tag else "skipped"
+        item.rename_message = (
+            "等待 qBittorrent 获取文件列表并完成下载"
+            if item.qbit_tag else "未启用规范命名或自动刮削"
+        )
+    else:
+        item.status = "error"
+        item.reason = result.message
+        item.rename_status = "error" if item.qbit_tag else ""
+        item.rename_message = result.message if item.qbit_tag else ""
+        if subscription.scrape_enabled:
+            item.scrape_status = "error"
+            item.scrape_message = result.message
+    return result.ok, result.message
+
+
+def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500) -> dict[str, int | bool | str]:
+    owns = db is None
+    session = db or SessionLocal()
+    stats = {"checked": 0, "queued": 0, "errors": 0}
+    try:
+        items = list(session.scalars(
+            select(FeedItem).where(FeedItem.status == "scheduled").order_by(FeedItem.id).limit(limit)
+        ))
+        for item in items:
+            stats["checked"] += 1
+            subscription = session.get(Subscription, item.subscription_id)
+            if not subscription or not subscription.enabled:
+                item.status = "skipped"
+                item.reason = "订阅已删除或停用"
+                continue
+            ok, _ = _push_feed_item(session, item, subscription)
+            stats["queued" if ok else "errors"] += 1
+        if items:
+            add_log(session, "INFO" if not stats["errors"] else "WARNING", "定时下载任务执行完成", f"检查 {stats['checked']}，推送 {stats['queued']}，错误 {stats['errors']}")
+            session.commit()
+        return {"ok": True, "message": "定时下载任务执行完成", **stats}
+    finally:
+        if owns:
+            session.close()
+
+
 def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
     stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
     _sync_metadata_if_due(db, subscription)
     try:
-        entries, source_name = _load_subscription_entries(subscription)
+        entries, source_name = _load_subscription_entries(subscription, db)
     except Exception as exc:
         subscription.last_checked_at = datetime.now(timezone.utc)
         subscription.last_error = str(exc)[:1000]
@@ -393,7 +455,6 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         elif eligible:
             latest_candidate = max(eligible, key=lambda candidate: candidate["order"])
 
-    downloader = QBittorrentClient()
     for candidate in candidates:
         item = FeedItem(
             subscription_id=subscription.id,
@@ -426,43 +487,22 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             stats["errors"] += 1
             continue
 
-        save_path = render_save_path(subscription, candidate["episode"], db)
-        item.save_path = save_path
-        desired_name = (
-            render_desired_name(subscription, candidate["episode"])
-            if subscription.rename_enabled and candidate["episode"]
-            else ""
-        )
-        qbit_tag = f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
+        item.save_path = render_save_path(subscription, candidate["episode"], db)
+        desired_name = (render_desired_name(subscription, candidate["episode"])
+                        if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
-        item.qbit_tag = qbit_tag
+        item.qbit_tag = f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
         item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
-        item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用本地刮削"
-        result = downloader.add_url(
-            candidate["download_url"],
-            save_path,
-            rename=desired_name,
-            tags=qbit_tag,
-        )
-        if result.ok:
-            item.status = "queued"
-            item.reason = result.message
-            item.rename_status = "pending" if qbit_tag else "skipped"
-            item.rename_message = (
-                "等待 qBittorrent 获取文件列表并完成下载"
-                if qbit_tag
-                else "未启用规范命名或自动刮削"
-            )
-            stats["queued"] += 1
+        automation = load_automation_config(db)
+        if automation.download_enabled:
+            item.status = "scheduled"
+            item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
+            item.rename_status = "pending" if item.qbit_tag else "skipped"
+            item.rename_message = "等待定时推送"
+            item.scrape_message = "等待定时下载完成后刮削" if subscription.scrape_enabled else "订阅未启用刮削"
         else:
-            item.status = "error"
-            item.reason = result.message
-            item.rename_status = "error" if qbit_tag else ""
-            item.rename_message = result.message if qbit_tag else ""
-            if subscription.scrape_enabled:
-                item.scrape_status = "error"
-                item.scrape_message = result.message
-            stats["errors"] += 1
+            ok, _ = _push_feed_item(db, item, subscription)
+            stats["queued" if ok else "errors"] += 1
 
     subscription.last_checked_at = datetime.now(timezone.utc)
     subscription.last_error = ""
@@ -494,7 +534,7 @@ def refresh_all() -> dict[str, int | bool | str]:
         try:
             from .postprocess import normalize_pending_items
 
-            normalize_pending_items(limit=50)
+            normalize_pending_items(limit=50, allow_scrape=not load_automation_config().scrape_enabled)
         except Exception:
             pass
         return {"ok": True, "message": "刷新完成", **totals}
@@ -509,31 +549,6 @@ def retry_item(db: Session, item: FeedItem) -> tuple[bool, str]:
     if not item.download_url:
         return False, "该条目没有可下载链接"
 
-    save_path = item.save_path or render_save_path(subscription, item.episode, db)
-    desired_name = (
-        render_desired_name(subscription, item.episode)
-        if subscription.rename_enabled and item.episode
-        else ""
-    )
-    item.qbit_tag = item.qbit_tag or (
-        f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
-    )
-    item.desired_name = desired_name
-    item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
-    item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用本地刮削"
-    result = QBittorrentClient().add_url(
-        item.download_url,
-        save_path,
-        rename=desired_name,
-        tags=item.qbit_tag,
-    )
-    item.save_path = save_path
-    item.status = "queued" if result.ok else "error"
-    item.reason = result.message
-    item.rename_status = "pending" if result.ok and item.qbit_tag else ("error" if item.qbit_tag else "skipped")
-    item.rename_message = "等待 qBittorrent 获取文件列表并完成下载" if result.ok and item.qbit_tag else result.message
-    if not result.ok and subscription.scrape_enabled:
-        item.scrape_status = "error"
-        item.scrape_message = result.message
+    ok, message = _push_feed_item(db, item, subscription)
     db.commit()
-    return result.ok, result.message
+    return ok, message

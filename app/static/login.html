@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>登录 · FeedDock</title>
-  <link rel="stylesheet" href="/static/styles.css?v=1.9.1">
+  <link rel="stylesheet" href="/static/styles.css?v=1.10.0">
 </head>
 <body class="auth-body">
   <main class="auth-shell">
@@ -15,12 +15,12 @@
       <div id="authError" class="auth-error hidden"></div>
       <form id="loginForm" class="auth-form">
         <label>用户名<input name="username" autocomplete="username" required autofocus></label>
-        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <label>密码<span class="password-field"><input name="password" type="password" autocomplete="current-password" required><button type="button" class="password-toggle" aria-label="显示密码">👁</button></span></label>
         <button type="submit">登录</button>
       </form>
-      <p class="auth-note">首次成功登录后，系统会强制进入密码修改页面。</p>
+      <p id="initialPasswordNote" class="auth-note hidden">首次成功登录后，系统会强制进入密码修改页面。</p>
     </section>
   </main>
-  <script src="/static/login.js?v=1.9.1" defer></script>
+  <script src="/static/login.js?v=1.10.0" defer></script>
 </body>
 </html>

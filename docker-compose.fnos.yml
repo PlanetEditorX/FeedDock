@@ -41,9 +41,18 @@ services:
       METADATA_AUTO_SYNC_HOURS: "24"
       TMDB_READ_ACCESS_TOKEN: ""
       BANGUMI_ACCESS_TOKEN: ""
+      ANILIST_API_URL: "https://graphql.anilist.co"
       MEDIA_LOCAL_ROOT: "/media"
       EMBY_URL: ""
       EMBY_API_KEY: ""
+      TMM_URL: ""
+      TMM_API_KEY: ""
+
+      # 可选统一执行时间和外部请求代理
+      AUTOMATION_TIME: "02:00"
+      AUTOMATION_TIMEZONE: "Asia/Shanghai"
+      OUTBOUND_PROXY_URL: ""
+      OUTBOUND_NO_PROXY: "localhost,127.0.0.1,host.docker.internal"
 
       UPDATE_REPOSITORY: "planeteditorx/feeddock"
       UPDATE_API_URL: "https://api.github.com"

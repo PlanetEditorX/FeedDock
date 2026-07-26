@@ -18,6 +18,7 @@ from .naming import (
     remote_to_local_path,
     safe_segment,
 )
+from .outbound import external_client
 from .runtime_config import load_metadata_config, load_qbittorrent_config
 
 
@@ -73,9 +74,10 @@ def _download_image(url: str, destination: Path) -> bool:
     except OSError:
         pass
     try:
-        with httpx.Client(
+        with external_client(
+            url,
+            db=None,
             timeout=settings.request_timeout_seconds,
-            follow_redirects=True,
             headers={"User-Agent": settings.rss_user_agent},
         ) as client:
             response = client.get(url)
@@ -131,7 +133,7 @@ def _movie_nfo(subscription: Subscription) -> ET.Element:
     return root
 
 
-def scrape_subscription(db: Session, subscription: Subscription) -> ScrapeResult:
+def scrape_local_metadata(db: Session, subscription: Subscription) -> ScrapeResult:
     config = load_metadata_config(db)
     qbit = load_qbittorrent_config(db)
     if not config.media_local_root:
@@ -201,12 +203,82 @@ def scrape_subscription(db: Session, subscription: Subscription) -> ScrapeResult
     )
 
 
+def trigger_tmm_scrape(db: Session, subscription: Subscription) -> ScrapeResult:
+    """Ask tinyMediaManager to scan and scrape the completed media path."""
+    config = load_metadata_config(db)
+    if not config.tmm_configured:
+        return ScrapeResult(False, "尚未启用 tinyMediaManager 或地址/API Key 未配置")
+    qbit = load_qbittorrent_config(db)
+    from .rss_service import render_save_path
+
+    season_path = render_save_path(subscription, "1", db)
+    target_path = season_path if (subscription.media_type or "tv") == "movie" else str(Path(season_path).parent)
+    endpoint = "movie" if (subscription.media_type or "tv") == "movie" else "tvshow"
+    # TMM must mount the same media directory at the same container path, for
+    # example /media in qBittorrent, FeedDock and tinyMediaManager.
+    if not target_path.startswith(qbit.download_path.rstrip("/") + "/") and target_path != qbit.download_path:
+        return ScrapeResult(False, "tinyMediaManager 路径不在统一下载根目录中", target_path)
+    commands = [
+        {"action": "update", "scope": {"name": "path", "args": [target_path]}},
+        {"action": "scrape", "scope": {"name": "path", "args": [target_path]}},
+        {"action": "downloadMissingArtwork", "scope": {"name": "path", "args": [target_path]}},
+    ]
+    try:
+        with httpx.Client(timeout=max(60, settings.request_timeout_seconds), follow_redirects=True, trust_env=False) as client:
+            response = client.post(
+                f"{config.tmm_url}/api/{endpoint}",
+                headers={"api-key": config.tmm_api_key, "Content-Type": "application/json"},
+                json=commands,
+            )
+            if response.status_code not in {200, 201, 202, 204}:
+                detail = response.text.strip()[:500]
+                return ScrapeResult(False, f"tinyMediaManager 调用失败：HTTP {response.status_code} {detail}", target_path)
+        return ScrapeResult(True, "已提交 tinyMediaManager 扫描、刮削与补图任务", target_path)
+    except httpx.HTTPError as exc:
+        return ScrapeResult(False, f"连接 tinyMediaManager 失败：{exc}", target_path)
+
+
+def scrape_subscription(db: Session, subscription: Subscription) -> ScrapeResult:
+    mode = (getattr(subscription, "scrape_mode", "local") or "local").strip().lower()
+    if mode == "off" or not getattr(subscription, "scrape_enabled", True):
+        return ScrapeResult(True, "该订阅已跳过刮削")
+    results: list[ScrapeResult] = []
+    if mode in {"local", "both"}:
+        results.append(scrape_local_metadata(db, subscription))
+    if mode in {"tmm", "both"}:
+        results.append(trigger_tmm_scrape(db, subscription))
+    if not results:
+        return ScrapeResult(False, f"未知刮削模式：{mode}")
+    ok = all(result.ok for result in results)
+    files = [item for result in results for item in (result.files or [])]
+    local_path = next((result.local_path for result in results if result.local_path), "")
+    return ScrapeResult(ok, "；".join(result.message for result in results), local_path, files)
+
+
+def test_tmm_connection(db: Session) -> ScrapeResult:
+    config = load_metadata_config(db)
+    if not config.tmm_url or not config.tmm_api_key:
+        return ScrapeResult(False, "请先填写 tinyMediaManager 地址和 API Key")
+    try:
+        with httpx.Client(timeout=settings.request_timeout_seconds, follow_redirects=True, trust_env=False) as client:
+            response = client.post(
+                f"{config.tmm_url}/api/tvshow",
+                headers={"api-key": config.tmm_api_key, "Content-Type": "application/json"},
+                json={"action": "update", "scope": {"name": "path", "args": ["/__feeddock_connection_test__"]}},
+            )
+        if response.status_code in {200, 201, 202, 204, 400, 404, 422}:
+            return ScrapeResult(True, f"tinyMediaManager API 可访问（HTTP {response.status_code}）")
+        return ScrapeResult(False, f"tinyMediaManager API 返回 HTTP {response.status_code}")
+    except httpx.HTTPError as exc:
+        return ScrapeResult(False, f"连接 tinyMediaManager 失败：{exc}")
+
+
 def refresh_emby_library(db: Session) -> ScrapeResult:
     config = load_metadata_config(db)
     if not config.emby_url or not config.emby_api_key:
         return ScrapeResult(False, "尚未配置 Emby 地址和 API Key")
     try:
-        with httpx.Client(timeout=settings.request_timeout_seconds, follow_redirects=True) as client:
+        with external_client(config.emby_url, db=db, timeout=settings.request_timeout_seconds) as client:
             response = client.post(
                 f"{config.emby_url}/Library/Refresh",
                 headers={"X-Emby-Token": config.emby_api_key},

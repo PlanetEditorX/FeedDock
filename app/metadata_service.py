@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import html
 import re
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .models import Subscription
 from .naming import canonical_title, title_with_year
+from .outbound import external_client
 from .runtime_config import MetadataConfig, load_metadata_config
 
 
@@ -38,6 +40,40 @@ class MetadataRecord(MetadataCandidate):
     backdrop_url: str = ""
     season: int = 1
     air_date: str = ""
+    available_seasons: list[dict[str, Any]] = field(default_factory=list)
+    recommended_season: int = 1
+
+
+_CHINESE_NUMBERS = {
+    "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+    "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
+}
+
+
+def infer_season_from_title(value: str) -> int:
+    text = value or ""
+    patterns = (
+        r"第\s*(\d{1,3})\s*[季期部]",
+        r"(?:season|series)\s*(\d{1,3})",
+        r"\bS(\d{1,3})\b",
+        r"\b(\d{1,2})(?:st|nd|rd|th)\s+season\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return max(0, int(match.group(1)))
+    match = re.search(r"第\s*([一二两三四五六七八九十]{1,3})\s*[季期部]", text)
+    if match:
+        return _CHINESE_NUMBERS.get(match.group(1), 0)
+    return 0
+
+
+def _strip_markup(value: str) -> str:
+    text = html.unescape(value or "")
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class MetadataService:
@@ -64,10 +100,7 @@ class MetadataService:
 
     @staticmethod
     def _headers(token: str = "") -> dict[str, str]:
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": settings.rss_user_agent,
-        }
+        headers = {"Accept": "application/json", "User-Agent": settings.rss_user_agent}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers
@@ -88,15 +121,15 @@ class MetadataService:
             raise ValueError("元数据搜索关键词不能为空")
         config = load_metadata_config(db)
         if provider == "tmdb":
-            candidates = self._search_tmdb(config, query, media_type, year, limit)
+            candidates = self._search_tmdb(db, config, query, media_type, year, limit)
         elif provider == "bangumi":
-            candidates = self._search_bangumi(config, query, year, limit)
+            candidates = self._search_bangumi(db, config, query, year, limit)
+        elif provider == "anilist":
+            candidates = self._search_anilist(db, query, year, limit)
         else:
-            raise ValueError("元数据来源必须是 tmdb 或 bangumi")
+            raise ValueError("元数据来源必须是 tmdb、bangumi 或 anilist")
         for candidate in candidates:
-            candidate.score = self._score(
-                query, candidate.title, candidate.original_title, candidate.year, year
-            )
+            candidate.score = self._score(query, candidate.title, candidate.original_title, candidate.year, year)
         candidates.sort(key=lambda item: item.score, reverse=True)
         return [candidate.as_dict() for candidate in candidates[:limit]]
 
@@ -108,16 +141,20 @@ class MetadataService:
         metadata_id: int,
         media_type: str = "tv",
         season: int = 1,
+        season_mode: str = "title",
+        query_title: str = "",
     ) -> MetadataRecord:
         if metadata_id <= 0:
             raise ValueError("元数据 ID 必须大于 0")
         config = load_metadata_config(db)
         provider = provider.strip().lower()
         if provider == "tmdb":
-            return self._get_tmdb(config, metadata_id, media_type, season)
+            return self._get_tmdb(db, config, metadata_id, media_type, season, season_mode, query_title)
         if provider == "bangumi":
-            return self._get_bangumi(config, metadata_id, season)
-        raise ValueError("元数据来源必须是 tmdb 或 bangumi")
+            return self._get_bangumi(db, config, metadata_id, season)
+        if provider == "anilist":
+            return self._get_anilist(db, metadata_id, season)
+        raise ValueError("元数据来源必须是 tmdb、bangumi 或 anilist")
 
     def apply(
         self,
@@ -128,37 +165,52 @@ class MetadataService:
         metadata_id: int,
         media_type: str | None = None,
         season: int | None = None,
+        season_mode: str | None = None,
     ) -> MetadataRecord:
+        selected_mode = (season_mode or getattr(subscription, "season_mode", "title") or "title").strip().lower()
+        requested_season = getattr(subscription, "season", 1) if season is None else season
         record = self.get(
             db,
             provider=provider,
             metadata_id=metadata_id,
             media_type=media_type or subscription.media_type,
-            season=subscription.season if season is None else season,
+            season=requested_season,
+            season_mode=selected_mode,
+            query_title=getattr(subscription, "name", "") or getattr(subscription, "reference_title", ""),
         )
         provider = record.provider
         subscription.media_type = record.media_type
+        subscription.season = record.season
+        subscription.season_mode = selected_mode
         subscription.metadata_year = record.year
         subscription.metadata_source = provider
         subscription.metadata_overview = record.overview
         subscription.poster_url = record.poster_url
         subscription.backdrop_url = record.backdrop_url
         subscription.metadata_last_synced_at = datetime.now(timezone.utc)
+        subscription.metadata_confirmed = True
+        subscription.metadata_review_skipped = False
         if record.air_date:
             subscription.air_date = record.air_date
 
         display_title = title_with_year(record.title, record.year)
-        # Selecting a metadata record is an explicit request to use its
-        # canonical display name. Keep the subscription label aligned as well
-        # so cards, search results, and edit forms all show the year suffix.
         subscription.name = display_title or subscription.name
         if provider == "tmdb":
             subscription.tmdb_id = record.id
             subscription.tmdb_title = display_title
-        else:
+            if subscription.naming_mode == "auto":
+                subscription.naming_mode = "tmdb"
+        elif provider == "bangumi":
             subscription.bangumi_id = record.id
             subscription.reference_title = display_title
             subscription.bgm_url = record.detail_url
+            if subscription.naming_mode == "auto" and not subscription.tmdb_id:
+                subscription.naming_mode = "bangumi"
+        else:
+            subscription.anilist_id = record.id
+            subscription.reference_title = display_title
+            if subscription.naming_mode == "auto" and not subscription.tmdb_id and not subscription.bangumi_id:
+                subscription.naming_mode = "anilist"
 
         if record.total_episodes > 0 and not subscription.total_episodes_locked:
             subscription.total_episodes = record.total_episodes
@@ -169,25 +221,21 @@ class MetadataService:
 
     def sync(self, db: Session, subscription: Subscription, provider: str = "auto") -> MetadataRecord:
         requested = provider.strip().lower()
-        if requested not in {"auto", "tmdb", "bangumi"}:
-            raise ValueError("同步来源必须是 auto、tmdb 或 bangumi")
+        if requested not in {"auto", "tmdb", "bangumi", "anilist"}:
+            raise ValueError("同步来源必须是 auto、tmdb、bangumi 或 anilist")
+        ids = {
+            "tmdb": int(subscription.tmdb_id or 0),
+            "bangumi": int(subscription.bangumi_id or 0),
+            "anilist": int(subscription.anilist_id or 0),
+        }
+        if requested != "auto" and ids[requested]:
+            return self.apply(db, subscription, provider=requested, metadata_id=ids[requested])
+        if requested == "auto":
+            for source in ("tmdb", "bangumi", "anilist"):
+                if ids[source]:
+                    return self.apply(db, subscription, provider=source, metadata_id=ids[source])
 
-        if requested in {"auto", "tmdb"} and subscription.tmdb_id:
-            return self.apply(
-                db,
-                subscription,
-                provider="tmdb",
-                metadata_id=subscription.tmdb_id,
-            )
-        if requested in {"auto", "bangumi"} and subscription.bangumi_id:
-            return self.apply(
-                db,
-                subscription,
-                provider="bangumi",
-                metadata_id=subscription.bangumi_id,
-            )
-
-        providers = [requested] if requested != "auto" else ["tmdb", "bangumi"]
+        providers = [requested] if requested != "auto" else ["tmdb", "bangumi", "anilist"]
         query = canonical_title(subscription)
         year = subscription.metadata_year or (
             int(subscription.air_date[:4]) if subscription.air_date[:4].isdigit() else 0
@@ -222,30 +270,19 @@ class MetadataService:
         raise ValueError("自动匹配失败；请手动搜索并选择条目。" + ("；".join(errors) if errors else ""))
 
     def _search_tmdb(
-        self,
-        config: MetadataConfig,
-        query: str,
-        media_type: str,
-        year: int,
-        limit: int,
+        self, db: Session, config: MetadataConfig, query: str, media_type: str, year: int, limit: int
     ) -> list[MetadataCandidate]:
         if not config.tmdb_read_access_token:
             raise ValueError("尚未配置 TMDB Read Access Token")
         kind = "movie" if media_type == "movie" else "tv"
         params: dict[str, Any] = {
-            "query": query,
-            "language": config.language,
-            "include_adult": "false",
-            "page": 1,
+            "query": query, "language": config.language, "include_adult": "false", "page": 1,
         }
         if year:
-            params["primary_release_year" if kind == "movie" else "first_air_date_year"] = year
-        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
-            response = client.get(
-                f"{settings.tmdb_api_base}/search/{kind}",
-                params=params,
-                headers=self._headers(config.tmdb_read_access_token),
-            )
+            params["primary_release_year" if kind == "movie" else "year"] = year
+        url = f"{settings.tmdb_api_base}/search/{kind}"
+        with external_client(url, db=db, timeout=self.timeout) as client:
+            response = client.get(url, params=params, headers=self._headers(config.tmdb_read_access_token))
             response.raise_for_status()
             payload = response.json()
         candidates: list[MetadataCandidate] = []
@@ -255,51 +292,79 @@ class MetadataService:
             date_value = str(item.get("release_date") or item.get("first_air_date") or "")
             item_year = int(date_value[:4]) if len(date_value) >= 4 and date_value[:4].isdigit() else 0
             poster_path = str(item.get("poster_path") or "")
-            candidates.append(
-                MetadataCandidate(
-                    provider="tmdb",
-                    id=int(item.get("id") or 0),
-                    media_type=kind,
-                    title=title_with_year(title or original, item_year),
-                    original_title=original,
-                    year=item_year,
-                    overview=str(item.get("overview") or "").strip(),
-                    poster_url=(f"{settings.tmdb_image_base}/w342{poster_path}" if poster_path else ""),
-                    detail_url=f"https://www.themoviedb.org/{kind}/{int(item.get('id') or 0)}",
-                )
-            )
+            candidates.append(MetadataCandidate(
+                provider="tmdb", id=int(item.get("id") or 0), media_type=kind,
+                title=title_with_year(title or original, item_year), original_title=original,
+                year=item_year, overview=str(item.get("overview") or "").strip(),
+                poster_url=(f"{settings.tmdb_image_base}/w342{poster_path}" if poster_path else ""),
+                detail_url=f"https://www.themoviedb.org/{kind}/{int(item.get('id') or 0)}",
+            ))
         return candidates
 
+    @staticmethod
+    def _available_tmdb_seasons(detail: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in detail.get("seasons") or []:
+            try:
+                number = int(item.get("season_number"))
+            except (TypeError, ValueError):
+                continue
+            rows.append({
+                "season_number": number,
+                "name": str(item.get("name") or ("Specials" if number == 0 else f"Season {number}")),
+                "episode_count": int(item.get("episode_count") or 0),
+                "air_date": str(item.get("air_date") or ""),
+                "poster_path": str(item.get("poster_path") or ""),
+            })
+        return sorted(rows, key=lambda row: row["season_number"])
+
+    @staticmethod
+    def _latest_tmdb_season(rows: list[dict[str, Any]]) -> int:
+        regular = [row for row in rows if row["season_number"] > 0 and row["episode_count"] > 0]
+        if not regular:
+            return 1
+        today = date.today().isoformat()
+        aired = [row for row in regular if not row["air_date"] or row["air_date"] <= today]
+        source = aired or regular
+        return max(int(row["season_number"]) for row in source)
+
+    def _resolve_tmdb_season(
+        self, rows: list[dict[str, Any]], requested: int, mode: str, query_title: str
+    ) -> int:
+        valid = {int(row["season_number"]) for row in rows}
+        if mode == "latest":
+            return self._latest_tmdb_season(rows)
+        if mode == "title":
+            inferred = infer_season_from_title(query_title)
+            if inferred in valid:
+                return inferred
+        if requested in valid or not valid:
+            return max(0, requested)
+        return self._latest_tmdb_season(rows)
+
     def _get_tmdb(
-        self,
-        config: MetadataConfig,
-        metadata_id: int,
-        media_type: str,
-        season: int,
+        self, db: Session, config: MetadataConfig, metadata_id: int, media_type: str,
+        season: int, season_mode: str, query_title: str,
     ) -> MetadataRecord:
         if not config.tmdb_read_access_token:
             raise ValueError("尚未配置 TMDB Read Access Token")
         kind = "movie" if media_type == "movie" else "tv"
         headers = self._headers(config.tmdb_read_access_token)
-        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
-            detail_response = client.get(
-                f"{settings.tmdb_api_base}/{kind}/{metadata_id}",
-                params={"language": config.language},
-                headers=headers,
-            )
+        detail_url = f"{settings.tmdb_api_base}/{kind}/{metadata_id}"
+        with external_client(detail_url, db=db, timeout=self.timeout) as client:
+            detail_response = client.get(detail_url, params={"language": config.language}, headers=headers)
             detail_response.raise_for_status()
             detail = detail_response.json()
+            rows = self._available_tmdb_seasons(detail) if kind == "tv" else []
+            resolved_season = self._resolve_tmdb_season(rows, season, season_mode, query_title) if kind == "tv" else 1
             season_detail: dict[str, Any] = {}
             if kind == "tv":
-                season_response = client.get(
-                    f"{settings.tmdb_api_base}/tv/{metadata_id}/season/{season}",
-                    params={"language": config.language},
-                    headers=headers,
-                )
-                if season_response.status_code == 200:
-                    season_detail = season_response.json()
-                elif season_response.status_code not in {404}:
-                    season_response.raise_for_status()
+                season_url = f"{settings.tmdb_api_base}/tv/{metadata_id}/season/{resolved_season}"
+                response = client.get(season_url, params={"language": config.language}, headers=headers)
+                if response.status_code == 200:
+                    season_detail = response.json()
+                elif response.status_code != 404:
+                    response.raise_for_status()
 
         title = str(detail.get("title") or detail.get("name") or "").strip()
         original = str(detail.get("original_title") or detail.get("original_name") or "").strip()
@@ -312,98 +377,62 @@ class MetadataService:
         else:
             total = len(season_detail.get("episodes") or [])
             if total <= 0:
-                for season_row in detail.get("seasons") or []:
-                    try:
-                        season_number = int(season_row.get("season_number") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    if season_number == int(season):
-                        total = int(season_row.get("episode_count") or 0)
-                        break
-            if total <= 0 and int(season) == 1:
-                total = int(detail.get("number_of_episodes") or 0)
+                match = next((row for row in rows if row["season_number"] == resolved_season), None)
+                total = int(match["episode_count"]) if match else 0
         return MetadataRecord(
-            provider="tmdb",
-            id=metadata_id,
-            media_type=kind,
-            title=title or original,
-            original_title=original,
-            year=year,
-            overview=str(detail.get("overview") or "").strip(),
+            provider="tmdb", id=metadata_id, media_type=kind, title=title or original,
+            original_title=original, year=year, overview=str(detail.get("overview") or "").strip(),
             poster_url=(f"{settings.tmdb_image_base}/original{poster_path}" if poster_path else ""),
             backdrop_url=(f"{settings.tmdb_image_base}/original{backdrop_path}" if backdrop_path else ""),
-            detail_url=f"https://www.themoviedb.org/{kind}/{metadata_id}",
-            total_episodes=total,
-            season=season,
-            air_date=date_value[:10],
+            detail_url=f"https://www.themoviedb.org/{kind}/{metadata_id}", total_episodes=total,
+            season=resolved_season, air_date=date_value[:10], available_seasons=rows,
+            recommended_season=resolved_season,
         )
 
     def _search_bangumi(
-        self,
-        config: MetadataConfig,
-        query: str,
-        year: int,
-        limit: int,
+        self, db: Session, config: MetadataConfig, query: str, year: int, limit: int
     ) -> list[MetadataCandidate]:
-        body = {
-            "keyword": query,
-            "sort": "match",
-            "filter": {"type": [2], "nsfw": False},
-        }
+        body = {"keyword": query, "sort": "match", "filter": {"type": [2], "nsfw": False}}
         headers = self._headers(config.bangumi_access_token)
         headers["Content-Type"] = "application/json"
-        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
-            response = client.post(
-                f"{settings.bangumi_api_base}/v0/search/subjects",
-                params={"limit": min(limit, 20), "offset": 0},
-                json=body,
-                headers=headers,
-            )
+        url = f"{settings.bangumi_api_base}/v0/search/subjects"
+        with external_client(url, db=db, timeout=self.timeout) as client:
+            response = client.post(url, params={"limit": min(limit, 20), "offset": 0}, json=body, headers=headers)
             response.raise_for_status()
             payload = response.json()
         candidates: list[MetadataCandidate] = []
         for item in (payload.get("data") or [])[:limit]:
             date_value = str(item.get("date") or "")
             item_year = int(date_value[:4]) if len(date_value) >= 4 and date_value[:4].isdigit() else 0
+            if year and item_year and abs(item_year - year) > 2:
+                continue
             images = item.get("images") or {}
             title = str(item.get("name_cn") or item.get("name") or "").strip()
             original = str(item.get("name") or "").strip()
             subject_id = int(item.get("id") or 0)
-            candidates.append(
-                MetadataCandidate(
-                    provider="bangumi",
-                    id=subject_id,
-                    media_type="tv",
-                    title=title_with_year(title or original, item_year),
-                    original_title=original,
-                    year=item_year,
-                    overview=str(item.get("summary") or "").strip(),
-                    poster_url=str(images.get("large") or images.get("common") or ""),
-                    detail_url=f"https://bangumi.tv/subject/{subject_id}",
-                )
-            )
+            candidates.append(MetadataCandidate(
+                provider="bangumi", id=subject_id, media_type="tv",
+                title=title_with_year(title or original, item_year), original_title=original,
+                year=item_year, overview=str(item.get("summary") or "").strip(),
+                poster_url=str(images.get("large") or images.get("common") or ""),
+                detail_url=f"https://bangumi.tv/subject/{subject_id}",
+            ))
         return candidates
 
     def _get_bangumi(
-        self,
-        config: MetadataConfig,
-        metadata_id: int,
-        season: int,
+        self, db: Session, config: MetadataConfig, metadata_id: int, season: int
     ) -> MetadataRecord:
         headers = self._headers(config.bangumi_access_token)
-        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
-            response = client.get(
-                f"{settings.bangumi_api_base}/v0/subjects/{metadata_id}",
-                headers=headers,
-            )
+        url = f"{settings.bangumi_api_base}/v0/subjects/{metadata_id}"
+        with external_client(url, db=db, timeout=self.timeout) as client:
+            response = client.get(url, headers=headers)
             response.raise_for_status()
             detail = response.json()
             total = int(detail.get("total_episodes") or detail.get("eps") or 0)
             if total <= 0:
                 episodes = client.get(
                     f"{settings.bangumi_api_base}/v0/episodes",
-                    params={"subject_id": metadata_id, "limit": 1, "offset": 0},
-                    headers=headers,
+                    params={"subject_id": metadata_id, "limit": 1, "offset": 0}, headers=headers,
                 )
                 if episodes.status_code == 200:
                     total = int((episodes.json() or {}).get("total") or 0)
@@ -413,17 +442,88 @@ class MetadataService:
         title = str(detail.get("name_cn") or detail.get("name") or "").strip()
         original = str(detail.get("name") or "").strip()
         return MetadataRecord(
-            provider="bangumi",
-            id=metadata_id,
-            media_type="tv",
-            title=title or original,
-            original_title=original,
-            year=year,
-            overview=str(detail.get("summary") or "").strip(),
-            poster_url=str(images.get("large") or images.get("common") or ""),
-            backdrop_url="",
-            detail_url=f"https://bangumi.tv/subject/{metadata_id}",
-            total_episodes=total,
-            season=season,
-            air_date=date_value[:10],
+            provider="bangumi", id=metadata_id, media_type="tv", title=title or original,
+            original_title=original, year=year, overview=str(detail.get("summary") or "").strip(),
+            poster_url=str(images.get("large") or images.get("common") or ""), backdrop_url="",
+            detail_url=f"https://bangumi.tv/subject/{metadata_id}", total_episodes=total,
+            season=max(0, season), air_date=date_value[:10], recommended_season=max(0, season),
+        )
+
+    def _anilist_request(self, db: Session, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        url = settings.anilist_api_url
+        with external_client(url, db=db, timeout=self.timeout) as client:
+            response = client.post(
+                url,
+                json={"query": query, "variables": variables},
+                headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": settings.rss_user_agent},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        if payload.get("errors"):
+            raise ValueError(str(payload["errors"][0].get("message") or "AniList 查询失败"))
+        return payload.get("data") or {}
+
+    def _search_anilist(self, db: Session, query_text: str, year: int, limit: int) -> list[MetadataCandidate]:
+        query = """
+        query ($search: String!, $perPage: Int!) {
+          Page(page: 1, perPage: $perPage) {
+            media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+              id title { romaji english native } description(asHtml: false)
+              episodes startDate { year month day } coverImage { extraLarge large }
+              bannerImage siteUrl format
+            }
+          }
+        }
+        """
+        data = self._anilist_request(db, query, {"search": query_text, "perPage": min(limit, 20)})
+        candidates: list[MetadataCandidate] = []
+        for item in ((data.get("Page") or {}).get("media") or []):
+            start = item.get("startDate") or {}
+            item_year = int(start.get("year") or 0)
+            if year and item_year and abs(item_year - year) > 2:
+                continue
+            titles = item.get("title") or {}
+            title = str(titles.get("english") or titles.get("romaji") or titles.get("native") or "").strip()
+            original = str(titles.get("native") or titles.get("romaji") or "").strip()
+            cover = item.get("coverImage") or {}
+            media_id = int(item.get("id") or 0)
+            candidates.append(MetadataCandidate(
+                provider="anilist", id=media_id, media_type="movie" if item.get("format") == "MOVIE" else "tv",
+                title=title_with_year(title or original, item_year), original_title=original, year=item_year,
+                overview=_strip_markup(str(item.get("description") or "")),
+                poster_url=str(cover.get("extraLarge") or cover.get("large") or ""),
+                detail_url=str(item.get("siteUrl") or f"https://anilist.co/anime/{media_id}"),
+            ))
+        return candidates
+
+    def _get_anilist(self, db: Session, metadata_id: int, season: int) -> MetadataRecord:
+        query = """
+        query ($id: Int!) {
+          Media(id: $id, type: ANIME) {
+            id title { romaji english native } description(asHtml: false)
+            episodes startDate { year month day } coverImage { extraLarge large }
+            bannerImage siteUrl format
+          }
+        }
+        """
+        data = self._anilist_request(db, query, {"id": metadata_id})
+        item = data.get("Media") or {}
+        titles = item.get("title") or {}
+        title = str(titles.get("english") or titles.get("romaji") or titles.get("native") or "").strip()
+        original = str(titles.get("native") or titles.get("romaji") or "").strip()
+        start = item.get("startDate") or {}
+        year = int(start.get("year") or 0)
+        parts = [int(start.get(key) or 0) for key in ("year", "month", "day")]
+        air_date = f"{parts[0]:04d}-{parts[1]:02d}-{parts[2]:02d}" if all(parts) else (str(year) if year else "")
+        cover = item.get("coverImage") or {}
+        return MetadataRecord(
+            provider="anilist", id=metadata_id,
+            media_type="movie" if item.get("format") == "MOVIE" else "tv",
+            title=title or original, original_title=original, year=year,
+            overview=_strip_markup(str(item.get("description") or "")),
+            poster_url=str(cover.get("extraLarge") or cover.get("large") or ""),
+            backdrop_url=str(item.get("bannerImage") or ""),
+            detail_url=str(item.get("siteUrl") or f"https://anilist.co/anime/{metadata_id}"),
+            total_episodes=int(item.get("episodes") or (1 if item.get("format") == "MOVIE" else 0)),
+            season=max(0, season), air_date=air_date[:10], recommended_season=max(0, season),
         )

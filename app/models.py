@@ -49,6 +49,7 @@ class Subscription(Base):
     bgm_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
     air_date: Mapped[str] = mapped_column(String(10), default="", nullable=False)
     season: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    season_mode: Mapped[str] = mapped_column(String(20), default="title", nullable=False)
 
     # rss_url remains the primary URL for backward compatibility.
     primary_rss_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
@@ -76,6 +77,7 @@ class Subscription(Base):
     manual_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
     tmdb_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     bangumi_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    anilist_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metadata_year: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metadata_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     metadata_overview: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -83,12 +85,15 @@ class Subscription(Base):
     backdrop_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     auto_metadata: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    metadata_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    metadata_review_skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     rename_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_name_template: Mapped[str] = mapped_column(
         Text, default="{title} - S{season:02}E{episode:02}", nullable=False
     )
     scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    scrape_mode: Mapped[str] = mapped_column(String(20), default="local", nullable=False)
 
     save_path_template: Mapped[str] = mapped_column(
         Text,

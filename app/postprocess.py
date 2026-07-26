@@ -24,7 +24,7 @@ _ACTIVE_RENAME_STATES = {
 _ACTIVE_SCRAPE_STATES = {"", "pending", "retry", "error"}
 
 
-def normalize_pending_items(db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow_scrape: bool = True) -> dict[str, Any]:
     """Normalize tagged torrents and scrape only after qBittorrent reaches 100%."""
 
     if not _normalize_lock.acquire(blocking=False):
@@ -80,23 +80,27 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50) -> di
                 subscription = item.subscription
                 if subscription and subscription.scrape_enabled:
                     if item.scrape_status != "success":
-                        try:
-                            from .scraper import scrape_subscription
+                        if not allow_scrape:
+                            item.scrape_status = "pending"
+                            item.scrape_message = "下载已完成，等待统一刮削时间"
+                        else:
+                            try:
+                                from .scraper import scrape_subscription
 
-                            scrape_result = scrape_subscription(session, subscription)
-                            item.scrape_message = scrape_result.message[:2000]
-                            if scrape_result.ok:
-                                item.scrape_status = "success"
-                                item.scraped_at = datetime.now(timezone.utc)
-                                stats["scraped"] += 1
-                                emby_refresh_needed = True
-                            else:
+                                scrape_result = scrape_subscription(session, subscription)
+                                item.scrape_message = scrape_result.message[:2000]
+                                if scrape_result.ok:
+                                    item.scrape_status = "success"
+                                    item.scraped_at = datetime.now(timezone.utc)
+                                    stats["scraped"] += 1
+                                    emby_refresh_needed = True
+                                else:
+                                    item.scrape_status = "error"
+                                    stats["errors"] += 1
+                            except Exception as exc:
                                 item.scrape_status = "error"
+                                item.scrape_message = f"自动刮削失败：{exc}"[:2000]
                                 stats["errors"] += 1
-                        except Exception as exc:
-                            item.scrape_status = "error"
-                            item.scrape_message = f"自动刮削失败：{exc}"[:2000]
-                            stats["errors"] += 1
                 else:
                     item.scrape_status = "skipped"
                     item.scrape_message = "订阅未启用本地刮削"

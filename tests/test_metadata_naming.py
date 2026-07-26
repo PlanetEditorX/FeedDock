@@ -13,9 +13,9 @@ from app.models import FeedItem, Subscription
 from unittest.mock import patch
 
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
-from app.metadata_service import MetadataRecord, MetadataService
+from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
 from app.naming import media_folder_name, remote_to_local_path, render_desired_name
-from app.scraper import ScrapeResult, scrape_subscription
+from app.scraper import ScrapeResult, scrape_subscription, trigger_tmm_scrape
 
 
 class _Response:
@@ -80,6 +80,35 @@ class MetadataNamingTests(unittest.TestCase):
         )
         values.update(overrides)
         return SimpleNamespace(**values)
+
+
+    def test_season_inference_supports_chinese_and_english(self):
+        self.assertEqual(infer_season_from_title("金牌得主 第二季"), 2)
+        self.assertEqual(infer_season_from_title("Show Season 3"), 3)
+        self.assertEqual(infer_season_from_title("Show S04"), 4)
+
+    def test_tmdb_latest_and_title_season_modes(self):
+        config = SimpleNamespace(tmdb_read_access_token="token", language="zh-CN")
+        detail = {
+            "id": 99, "name": "动画", "first_air_date": "2024-01-01",
+            "seasons": [
+                {"season_number": 0, "name": "特别篇", "episode_count": 2, "air_date": "2024-01-01"},
+                {"season_number": 1, "name": "第1季", "episode_count": 12, "air_date": "2024-01-01"},
+                {"season_number": 2, "name": "第2季", "episode_count": 10, "air_date": "2026-01-01"},
+            ],
+        }
+        routes = {
+            ("GET", "https://api.themoviedb.org/3/tv/99"): detail,
+            ("GET", "https://api.themoviedb.org/3/tv/99/season/2"): {"episodes": [{"episode_number": n} for n in range(1, 11)]},
+        }
+        service = MetadataService()
+        with patch("app.metadata_service.load_metadata_config", return_value=config), patch("app.metadata_service.httpx.Client", side_effect=lambda *a, **k: _FakeMetadataHttpClient(routes)):
+            latest = service.get(SimpleNamespace(), provider="tmdb", metadata_id=99, media_type="tv", season=1, season_mode="latest")
+            titled = service.get(SimpleNamespace(), provider="tmdb", metadata_id=99, media_type="tv", season=1, season_mode="title", query_title="动画 第二季")
+        self.assertEqual(latest.season, 2)
+        self.assertEqual(titled.season, 2)
+        self.assertEqual(latest.recommended_season, 2)
+        self.assertEqual(len(latest.available_seasons), 3)
 
     def test_emby_folder_and_episode_name(self):
         sub = self.subscription()
@@ -155,6 +184,30 @@ class MetadataNamingTests(unittest.TestCase):
             record = service.get(SimpleNamespace(), provider="bangumi", metadata_id=66, season=1)
         self.assertEqual(record.total_episodes, 13)
         self.assertEqual(record.title, "番剧")
+
+
+    def test_tmm_scrape_uses_path_scope_and_api_key(self):
+        sub = self.subscription(scrape_enabled=True, scrape_mode="tmm", save_path_template="{base}/{media_folder}/Season {season:02}")
+        metadata_config = SimpleNamespace(tmm_configured=True, tmm_url="http://tmm:7878", tmm_api_key="secret")
+        qbit_config = SimpleNamespace(download_path="/media")
+        captured = {}
+        class Client:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def post(self, url, headers=None, json=None):
+                captured.update(url=url, headers=headers, json=json)
+                return _Response(status_code=200, payload={})
+        with patch("app.scraper.load_metadata_config", return_value=metadata_config), \
+             patch("app.scraper.load_qbittorrent_config", return_value=qbit_config), \
+             patch("app.rss_service.load_qbittorrent_config", return_value=qbit_config), \
+             patch("app.scraper.httpx.Client", Client):
+            result = trigger_tmm_scrape(SimpleNamespace(), sub)
+        self.assertTrue(result.ok)
+        self.assertEqual(captured["headers"]["api-key"], "secret")
+        self.assertTrue(captured["url"].endswith("/api/tvshow"))
+        self.assertEqual(captured["json"][0]["scope"]["name"], "path")
+        self.assertTrue(captured["json"][0]["scope"]["args"][0].startswith("/media/"))
 
     def test_download_completion_triggers_scrape_once(self):
         engine = create_engine("sqlite:///:memory:", future=True)

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .config import settings
+from .outbound import external_client, external_get
 
 
 @dataclass(slots=True)
@@ -109,7 +110,7 @@ class UpdateService:
             headers["Authorization"] = f"Bearer {self.github_token}"
 
         try:
-            response = httpx.get(url, headers=headers, timeout=self.timeout, follow_redirects=True)
+            response = external_get(url, headers=headers, timeout=self.timeout)
             if response.status_code == 404:
                 result.message = "仓库尚未发布 GitHub Release，或仓库不可访问"
                 return result
@@ -133,12 +134,14 @@ class UpdateService:
         if not self.updater_configured:
             return False, "未配置 Watchtower 更新服务"
         try:
-            response = httpx.post(
+            with external_client(
                 f"{self.watchtower_url}/v1/update",
-                headers={"Authorization": f"Bearer {self.watchtower_token}"},
                 timeout=max(self.timeout, 30),
-                follow_redirects=True,
-            )
+            ) as client:
+                response = client.post(
+                    f"{self.watchtower_url}/v1/update",
+                    headers={"Authorization": f"Bearer {self.watchtower_token}"},
+                )
             if response.status_code not in {200, 204}:
                 body = response.text.strip()[:300]
                 return False, f"更新服务返回 HTTP {response.status_code}{f'：{body}' if body else ''}"

@@ -19,9 +19,10 @@ from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
-from .scraper import refresh_emby_library, scrape_subscription
+from .scraper import refresh_emby_library, scrape_subscription, test_tmm_connection
 from .rss_service import (
     calculate_missing_episodes,
+    dispatch_scheduled_downloads,
     preview_subscription,
     refresh_all,
     retry_item,
@@ -29,18 +30,25 @@ from .rss_service import (
 from .runtime_config import (
     get_app_setting,
     load_metadata_config,
+    load_automation_config,
+    load_proxy_config,
     load_mikan_hidden_filters,
     load_qbittorrent_config,
     reset_metadata_config,
+    reset_automation_config,
+    reset_proxy_config,
     reset_qbittorrent_config,
     save_metadata_config,
+    save_automation_config,
+    save_proxy_config,
     save_mikan_weekday_hidden_filter,
     save_qbittorrent_config,
     set_app_setting,
 )
-from .scheduler import start_scheduler, stop_scheduler
+from .scheduler import scheduler, start_scheduler, stop_scheduler
 from .schemas import (
     AuthStatusOut,
+    AutomationSettingsUpdate,
     ChangePasswordRequest,
     DiscoverySearchOut,
     FeedItemOut,
@@ -52,10 +60,12 @@ from .schemas import (
     MetadataRecordOut,
     MetadataSettingsUpdate,
     MetadataSyncRequest,
+    MetadataReviewSkipRequest,
     MikanBangumiDetailOut,
     MikanCatalogOut,
     MikanWeekdayFilterOut,
     MikanWeekdayFilterUpdate,
+    ProxySettingsUpdate,
     QBittorrentSettingsUpdate,
     SubscriptionCreate,
     SubscriptionOut,
@@ -76,6 +86,7 @@ from .security import (
     verify_password,
 )
 from .update_service import UpdateService
+from .outbound import external_get
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -218,6 +229,12 @@ def health() -> dict[str, str]:
     return {"status": "ok", "version": settings.app_version}
 
 
+@app.get("/api/auth/bootstrap")
+def auth_bootstrap(db: Session = Depends(get_db)) -> dict[str, bool]:
+    account = db.scalar(select(AdminAccount).order_by(AdminAccount.id))
+    return {"initial_password_change_required": bool(account and account.must_change_password)}
+
+
 @app.get("/api/auth/status", response_model=AuthStatusOut)
 def auth_status(request: Request, db: Session = Depends(get_db)) -> AuthStatusOut:
     account = resolve_admin(request, db)
@@ -286,6 +303,8 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
         "mikan_cache_hours": settings.mikan_cache_hours,
         "metadata_auto_sync_hours": settings.metadata_auto_sync_hours,
         **metadata.public_dict(),
+        "automation": load_automation_config(db).public_dict(),
+        "proxy": load_proxy_config(db).public_dict(),
     }
 
 
@@ -341,6 +360,10 @@ def update_metadata_settings(
             emby_url=payload.emby_url,
             emby_api_key=payload.emby_api_key,
             clear_emby_api_key=payload.clear_emby_api_key,
+            tmm_url=payload.tmm_url,
+            tmm_api_key=payload.tmm_api_key,
+            clear_tmm_api_key=payload.clear_tmm_api_key,
+            tmm_enabled=payload.tmm_enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -352,13 +375,86 @@ def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | 
     return reset_metadata_config(db).public_dict()
 
 
+@app.post("/api/metadata/test-tmm", dependencies=[Depends(require_admin)])
+def test_tmm(db: Session = Depends(get_db)) -> dict[str, Any]:
+    return test_tmm_connection(db).as_dict()
+
+
+@app.get("/api/automation/settings", dependencies=[Depends(require_admin)])
+def get_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return load_automation_config(db).public_dict()
+
+
+@app.put("/api/automation/settings", dependencies=[Depends(require_admin)])
+def update_automation_settings(payload: AutomationSettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    try:
+        return save_automation_config(db, download_enabled=payload.download_enabled, scrape_enabled=payload.scrape_enabled, daily_time=payload.daily_time, timezone=payload.timezone).public_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/automation/settings", dependencies=[Depends(require_admin)])
+def restore_automation_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return reset_automation_config(db).public_dict()
+
+
+@app.post("/api/automation/run", dependencies=[Depends(require_admin)])
+def run_automation_now() -> dict[str, Any]:
+    return scheduler.run_daily_automation(force=True)
+
+
+@app.get("/api/proxy/settings", dependencies=[Depends(require_admin)])
+def get_proxy_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return load_proxy_config(db).public_dict()
+
+
+@app.put("/api/proxy/settings", dependencies=[Depends(require_admin)])
+def update_proxy_settings(payload: ProxySettingsUpdate, db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    try:
+        return save_proxy_config(db, enabled=payload.enabled, proxy_url=payload.proxy_url, clear_proxy_url=payload.clear_proxy_url, no_proxy=payload.no_proxy).public_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/proxy/settings", dependencies=[Depends(require_admin)])
+def restore_proxy_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return reset_proxy_config(db).public_dict()
+
+
+@app.post("/api/proxy/test", dependencies=[Depends(require_admin)])
+def test_proxy(db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        response = external_get("https://api.bgm.tv/v0/calendar", db=db, timeout=settings.request_timeout_seconds, headers={"User-Agent": settings.rss_user_agent})
+        return {"ok": response.status_code == 200, "message": f"代理连通测试 HTTP {response.status_code}"}
+    except Exception as exc:
+        return {"ok": False, "message": f"代理连通失败：{exc}"}
+
+
+@app.get("/api/secrets/{secret_name}", dependencies=[Depends(require_admin)])
+def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, str]:
+    qbit = load_qbittorrent_config(db)
+    metadata = load_metadata_config(db)
+    proxy = load_proxy_config(db)
+    values = {
+        "qbit_password": qbit.password,
+        "tmdb_read_access_token": metadata.tmdb_read_access_token,
+        "bangumi_access_token": metadata.bangumi_access_token,
+        "emby_api_key": metadata.emby_api_key,
+        "tmm_api_key": metadata.tmm_api_key,
+        "proxy_url": proxy.url,
+    }
+    if secret_name not in values:
+        raise HTTPException(status_code=404, detail="未知密钥字段")
+    return {"value": values[secret_name]}
+
+
 @app.get(
     "/api/metadata/search",
     response_model=list[MetadataCandidateOut],
     dependencies=[Depends(require_admin)],
 )
 def search_metadata(
-    provider: str = Query(pattern="^(tmdb|bangumi)$"),
+    provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
     q: str = Query(min_length=1, max_length=300),
     media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
     year: int = Query(default=0, ge=0, le=9999),
@@ -381,10 +477,12 @@ def search_metadata(
     dependencies=[Depends(require_admin)],
 )
 def metadata_detail(
-    provider: str = Query(pattern="^(tmdb|bangumi)$"),
+    provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
     metadata_id: int = Query(gt=0),
     media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
     season: int = Query(default=1, ge=0, le=999),
+    season_mode: str = Query(default="title", pattern="^(manual|latest|title)$"),
+    query_title: str = Query(default="", max_length=300),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
@@ -394,6 +492,8 @@ def metadata_detail(
             metadata_id=metadata_id,
             media_type=media_type,
             season=season,
+            season_mode=season_mode,
+            query_title=query_title,
         ).as_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -606,6 +706,18 @@ def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_d
     return _subscription_out(db, subscription)
 
 
+@app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
+def skip_subscription_metadata_review(subscription_id: int, payload: MetadataReviewSkipRequest, db: Session = Depends(get_db)) -> SubscriptionOut:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    subscription.metadata_review_skipped = payload.skipped
+    subscription.metadata_confirmed = False
+    db.commit()
+    db.refresh(subscription)
+    return _subscription_out(db, subscription)
+
+
 @app.patch(
     "/api/subscriptions/{subscription_id}",
     response_model=SubscriptionOut,
@@ -647,6 +759,7 @@ def apply_subscription_metadata(
             metadata_id=payload.metadata_id,
             media_type=payload.media_type,
             season=payload.season,
+            season_mode=payload.season_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

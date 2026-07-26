@@ -1,10 +1,72 @@
 # FeedDock
 
+当前版本：`1.10.0`
+
+## v1.10.0：季度识别、真实 TMM 刮削、定时窗口与代理
+
+### 登录与密钥显示
+
+- “首次成功登录后强制修改密码”提示只在管理员仍使用初始密码时显示；密码修改完成后，后续登录页不再显示。
+- 登录、修改密码以及管理页面中的 qBittorrent 密码、TMDB/Bangumi Token、Emby/TMM API Key、代理地址均提供小眼睛按钮。
+- 已保存密钥默认不回传到页面，只有管理员主动点击小眼睛时才通过受保护接口读取。
+
+### TMDB 季度识别
+
+每个订阅支持三种季度模式：
+
+- `title`：从“第二季”“第2期”“Season 2”“S02”等标题文字识别；这是新订阅默认值。
+- `latest`：选择 TMDB 返回的最高且已播出的正季，自动排除 Season 0 特别篇。
+- `manual`：始终使用手动填写的季编号。
+
+TMDB 详情会返回全部季度、每季首播日期和集数。选择结果后，FeedDock 会把最终采用的季度写回订阅。
+
+### 元数据人工确认
+
+新增订阅时，如果尚未在表单中确认元数据，会自动打开确认窗口。窗口可切换：
+
+1. TMDB：最适合 Emby 识别及季度结构；
+2. Bangumi：适合中文名、日文名、简介和动画话数；
+3. AniList：公开动漫 API，可作为 TMDB/Bangumi 匹配不准时的备选；
+4. 完全跳过：保留手动标题，仅使用本地命名，不再强制匹配。
+
+### 刮削方式
+
+订阅可分别选择：
+
+- `local`：FeedDock 写入 `tvshow.nfo`、`season.nfo`、海报和背景图；
+- `tmm`：调用 tinyMediaManager HTTP API，让 TMM 扫描指定路径、在线刮削并下载缺失图片；
+- `both`：先写本地 NFO，再调用 TMM；
+- `off`：完全跳过刮削。
+
+注意：FeedDock 本地 NFO 与 tinyMediaManager 是两种不同功能。使用 TMM 模式时，TMM、FeedDock、qBittorrent 必须把同一宿主机媒体目录挂载为同一个容器路径，例如都使用 `/media`。
+
+### 每日统一执行时间
+
+可独立开启：
+
+- 下载等待：RSS 先记录为“等待定时推送”，每天指定时间统一发送给 qBittorrent；
+- 刮削等待：下载仍可立即开始，但完成后等待每天指定时间统一刮削。
+
+默认时间为 `02:00`，时区默认 `Asia/Shanghai`。管理页面提供“立即执行一次”按钮。
+
+### 全局代理
+
+支持：
+
+- `http://`、`https://`；
+- `socks5://`、`socks5h://`；
+- 带用户名密码的代理 URL；
+- `NO_PROXY` 风格的排除列表。
+
+代理应用于 RSS、Mikan、封面、TMDB、Bangumi、AniList、GitHub 更新检查等外部请求。qBittorrent、Emby、TMM 等本地服务建议加入排除列表。
+
+# FeedDock
+
 FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取你配置的 RSS，将匹配条目推送给 qBittorrent，并提供 Mikan 季度目录、持久过滤、封面缓存、TMDB/Bangumi 元数据匹配、Emby 规范命名、总集数同步和可选本地 NFO 刮削。
 
-当前版本：`1.9.1`
+当前版本：`1.10.0`
 
-## v1.9.1 修正与增强
+## v1.10.0 修正与增强
 
 - 选择 TMDB/Bangumi 条目后，订阅名称、来源标题和卡片统一显示 `标题 (年份)`。
 - 无法从示例标题识别集数时，预览使用明确标注的 `S01E01` 演示值，不再生成 `Eunknown`；真实下载仍必须识别到真实集数才自动改名。
@@ -191,7 +253,7 @@ environment:
   MEDIA_LOCAL_ROOT: "/media"
 ```
 
-qBittorrent 与 FeedDock 必须把同一宿主机目录挂载到相同容器路径。v1.9.1 强制网页中的下载根目录与刮削根目录保持一致，推荐统一使用 `/media`：
+qBittorrent 与 FeedDock 必须把同一宿主机目录挂载到相同容器路径。v1.10.0 强制网页中的下载根目录与刮削根目录保持一致，推荐统一使用 `/media`：
 
 ```yaml
 DOWNLOAD_PATH: "/media"
@@ -261,7 +323,7 @@ TAKE_OWNERSHIP: "false"
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.9.1
+FEEDDOCK_BUILD_VERSION=1.10.0
 METADATA_LANGUAGE=zh-CN
 METADATA_AUTO_SYNC_HOURS=24
 TMDB_READ_ACCESS_TOKEN=
@@ -277,7 +339,7 @@ MIKAN_THUMBNAIL_HEIGHT=320
 
 ## 数据库升级
 
-启动时会对 SQLite 执行兼容迁移，不删除旧订阅和下载去重指纹。旧订阅仍默认不开启自动重命名；本地刮削在 v1.9.1 中一次性迁移为默认开启，可在订阅中关闭。所有订阅的下载根目录会同步为当前 qBittorrent 根目录。
+启动时会对 SQLite 执行兼容迁移，不删除旧订阅和下载去重指纹。旧订阅仍默认不开启自动重命名；本地刮削在 v1.10.0 中一次性迁移为默认开启，可在订阅中关闭。所有订阅的下载根目录会同步为当前 qBittorrent 根目录。
 
 新增字段包括：
 

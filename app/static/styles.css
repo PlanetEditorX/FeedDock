@@ -233,3 +233,11 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
   .metadata-subscription-card { grid-template-columns: 78px minmax(0, 1fr); gap: 12px; }
   .subscription-poster { width: 78px; height: 112px; }
 }
+
+.password-field { display: flex; align-items: stretch; gap: .35rem; width: 100%; }
+.password-field input { flex: 1; min-width: 0; }
+.password-toggle { flex: 0 0 auto; padding: .45rem .7rem; line-height: 1; }
+.split-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; }
+#metadataReviewModal .modal-card { max-width: 900px; }
+#metadataReviewModal .metadata-search-row { padding: 1rem; }
+#metadataReviewModal #reviewResults { padding: 0 1rem 1rem; max-height: 60vh; overflow: auto; }

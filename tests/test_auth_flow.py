@@ -20,6 +20,10 @@ from app.models import FeedItem, SystemLog
 class AuthFlowTests(unittest.TestCase):
     def test_first_login_requires_password_change(self):
         with TestClient(app, follow_redirects=False) as client:
+            bootstrap = client.get("/api/auth/bootstrap")
+            self.assertEqual(bootstrap.status_code, 200)
+            self.assertTrue(bootstrap.json()["initial_password_change_required"])
+
             root = client.get("/")
             self.assertEqual(root.status_code, 303)
             self.assertEqual(root.headers["location"], "/login")
@@ -58,6 +62,8 @@ class AuthFlowTests(unittest.TestCase):
             )
             self.assertEqual(change.status_code, 200)
             self.assertFalse(change.json()["must_change_password"])
+            bootstrap_after = client.get("/api/auth/bootstrap")
+            self.assertFalse(bootstrap_after.json()["initial_password_change_required"])
 
             dashboard = client.get("/api/dashboard")
             self.assertEqual(dashboard.status_code, 200)

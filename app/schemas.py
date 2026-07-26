@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -32,18 +33,22 @@ class SubscriptionCreate(BaseModel):
     bgm_url: str = ""
     air_date: date | None = None
     season: int = Field(default=1, ge=0, le=999)
+    season_mode: str = Field(default="title", pattern="^(manual|latest|title)$")
 
-    naming_mode: str = Field(default="auto", pattern="^(auto|manual|bangumi|tmdb)$")
+    naming_mode: str = Field(default="auto", pattern="^(auto|manual|bangumi|tmdb|anilist)$")
     media_type: str = Field(default="tv", pattern="^(tv|movie)$")
     manual_title: str = ""
     tmdb_id: int = Field(default=0, ge=0)
     bangumi_id: int = Field(default=0, ge=0)
+    anilist_id: int = Field(default=0, ge=0)
     metadata_year: int = Field(default=0, ge=0, le=9999)
     metadata_source: str = Field(default="", max_length=32)
     metadata_overview: str = ""
     poster_url: str = ""
     backdrop_url: str = ""
     auto_metadata: bool = False
+    metadata_confirmed: bool = False
+    metadata_review_skipped: bool = False
 
     primary_rss_name: str = ""
     rss_url: HttpUrl
@@ -62,6 +67,7 @@ class SubscriptionCreate(BaseModel):
     rename_enabled: bool = True
     file_name_template: str = "{title} - S{season:02}E{episode:02}"
     scrape_enabled: bool = True
+    scrape_mode: str = Field(default="local", pattern="^(local|tmm|both|off)$")
     save_path_template: str = "{base}/{media_folder}/Season {season:02}"
     custom_download_path: str = ""
     missing_detection: bool = False
@@ -86,18 +92,22 @@ class SubscriptionUpdate(BaseModel):
     bgm_url: str | None = None
     air_date: date | None = None
     season: int | None = Field(default=None, ge=0, le=999)
+    season_mode: str | None = Field(default=None, pattern="^(manual|latest|title)$")
 
-    naming_mode: str | None = Field(default=None, pattern="^(auto|manual|bangumi|tmdb)$")
+    naming_mode: str | None = Field(default=None, pattern="^(auto|manual|bangumi|tmdb|anilist)$")
     media_type: str | None = Field(default=None, pattern="^(tv|movie)$")
     manual_title: str | None = None
     tmdb_id: int | None = Field(default=None, ge=0)
     bangumi_id: int | None = Field(default=None, ge=0)
+    anilist_id: int | None = Field(default=None, ge=0)
     metadata_year: int | None = Field(default=None, ge=0, le=9999)
     metadata_source: str | None = Field(default=None, max_length=32)
     metadata_overview: str | None = None
     poster_url: str | None = None
     backdrop_url: str | None = None
     auto_metadata: bool | None = None
+    metadata_confirmed: bool | None = None
+    metadata_review_skipped: bool | None = None
 
     primary_rss_name: str | None = None
     rss_url: HttpUrl | None = None
@@ -116,6 +126,7 @@ class SubscriptionUpdate(BaseModel):
     rename_enabled: bool | None = None
     file_name_template: str | None = None
     scrape_enabled: bool | None = None
+    scrape_mode: str | None = Field(default=None, pattern="^(local|tmm|both|off)$")
     save_path_template: str | None = None
     custom_download_path: str | None = None
     missing_detection: bool | None = None
@@ -133,11 +144,13 @@ class SubscriptionOut(BaseModel):
     bgm_url: str
     air_date: str
     season: int
+    season_mode: str
     naming_mode: str
     media_type: str
     manual_title: str
     tmdb_id: int
     bangumi_id: int
+    anilist_id: int
     metadata_year: int
     metadata_source: str
     metadata_overview: str
@@ -145,6 +158,8 @@ class SubscriptionOut(BaseModel):
     backdrop_url: str
     metadata_last_synced_at: datetime | None
     auto_metadata: bool
+    metadata_confirmed: bool
+    metadata_review_skipped: bool
     primary_rss_name: str
     rss_url: str
     backup_rss_name: str
@@ -160,6 +175,7 @@ class SubscriptionOut(BaseModel):
     rename_enabled: bool
     file_name_template: str
     scrape_enabled: bool
+    scrape_mode: str
     save_path_template: str
     custom_download_path: str
     missing_detection: bool
@@ -289,6 +305,30 @@ class MetadataSettingsUpdate(BaseModel):
     emby_url: str = Field(default="", max_length=2000)
     emby_api_key: str | None = Field(default=None, max_length=1000)
     clear_emby_api_key: bool = False
+    tmm_url: str = Field(default="", max_length=2000)
+    tmm_api_key: str | None = Field(default=None, max_length=1000)
+    clear_tmm_api_key: bool = False
+    tmm_enabled: bool = False
+
+
+
+
+class AutomationSettingsUpdate(BaseModel):
+    download_enabled: bool = False
+    scrape_enabled: bool = False
+    daily_time: str = Field(default="02:00", max_length=5)
+    timezone: str = Field(default="Asia/Shanghai", max_length=100)
+
+
+class ProxySettingsUpdate(BaseModel):
+    enabled: bool = False
+    proxy_url: str | None = Field(default=None, max_length=2000)
+    clear_proxy_url: bool = False
+    no_proxy: str = Field(default="localhost,127.0.0.1,host.docker.internal", max_length=4000)
+
+
+class MetadataReviewSkipRequest(BaseModel):
+    skipped: bool = True
 
 
 class MetadataCandidateOut(BaseModel):
@@ -309,17 +349,20 @@ class MetadataRecordOut(MetadataCandidateOut):
     backdrop_url: str = ""
     season: int = 1
     air_date: str = ""
+    available_seasons: list[dict[str, Any]] = Field(default_factory=list)
+    recommended_season: int = 1
 
 
 class MetadataApplyRequest(BaseModel):
-    provider: str = Field(pattern="^(tmdb|bangumi)$")
+    provider: str = Field(pattern="^(tmdb|bangumi|anilist)$")
     metadata_id: int = Field(gt=0)
     media_type: str = Field(default="tv", pattern="^(tv|movie)$")
     season: int = Field(default=1, ge=0, le=999)
+    season_mode: str = Field(default="title", pattern="^(manual|latest|title)$")
 
 
 class MetadataSyncRequest(BaseModel):
-    provider: str = Field(default="auto", pattern="^(auto|tmdb|bangumi)$")
+    provider: str = Field(default="auto", pattern="^(auto|tmdb|bangumi|anilist)$")
 
 
 class DiscoverySubscriptionPresetOut(BaseModel):

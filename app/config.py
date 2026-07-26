@@ -66,10 +66,17 @@ class Settings:
     tmdb_read_access_token: str
     bangumi_api_base: str
     bangumi_access_token: str
+    anilist_api_url: str
     metadata_auto_sync_hours: int
     media_local_root: Path | None
     emby_url: str
     emby_api_key: str
+    tmm_url: str
+    tmm_api_key: str
+    automation_time: str
+    automation_timezone: str
+    outbound_proxy_url: str
+    outbound_no_proxy: str
 
 
 def load_settings() -> Settings:
@@ -79,7 +86,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.9.1"),
+        app_version=os.getenv("APP_VERSION", "1.10.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -90,7 +97,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.9.1 (+self-hosted RSS automation)",
+            "FeedDock/1.10.0 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -123,10 +130,17 @@ def load_settings() -> Settings:
         tmdb_read_access_token=os.getenv("TMDB_READ_ACCESS_TOKEN", "").strip(),
         bangumi_api_base=os.getenv("BANGUMI_API_BASE", "https://api.bgm.tv").strip().rstrip("/"),
         bangumi_access_token=os.getenv("BANGUMI_ACCESS_TOKEN", "").strip(),
+        anilist_api_url=os.getenv("ANILIST_API_URL", "https://graphql.anilist.co").strip().rstrip("/"),
         metadata_auto_sync_hours=_as_int("METADATA_AUTO_SYNC_HOURS", 24),
         media_local_root=_optional_path("MEDIA_LOCAL_ROOT"),
         emby_url=os.getenv("EMBY_URL", "").strip().rstrip("/"),
         emby_api_key=os.getenv("EMBY_API_KEY", "").strip(),
+        tmm_url=os.getenv("TMM_URL", "").strip().rstrip("/"),
+        tmm_api_key=os.getenv("TMM_API_KEY", "").strip(),
+        automation_time=os.getenv("AUTOMATION_TIME", "02:00").strip() or "02:00",
+        automation_timezone=os.getenv("AUTOMATION_TIMEZONE", os.getenv("TZ", "Asia/Shanghai")).strip() or "Asia/Shanghai",
+        outbound_proxy_url=os.getenv("OUTBOUND_PROXY_URL", "").strip(),
+        outbound_no_proxy=os.getenv("OUTBOUND_NO_PROXY", "localhost,127.0.0.1,host.docker.internal").strip(),
     )
 
 

@@ -17,6 +17,16 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
 
+    def test_workflow_validates_both_fnos_volume_mounts(self) -> None:
+        workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
+        self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', workflow)
+        self.assertIn('"/vol2/1000/影视:/media"', workflow)
+        self.assertIn("missing_volumes = required_volumes - volumes", workflow)
+        self.assertNotIn(
+            'service["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]',
+            workflow,
+        )
+
     def test_fnos_compose_has_source_discovery_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)

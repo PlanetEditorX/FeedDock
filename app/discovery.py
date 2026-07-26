@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 import httpx
 
 from .config import settings
+from .outbound import external_get
 from .rss_parser import parse_feed
 from .rss_service import extract_download_url
 
@@ -644,11 +645,10 @@ class DiscoveryService:
         if self.client is not None:
             response = self.client.get(url, headers=self.headers, follow_redirects=True)
         else:
-            response = httpx.get(
+            response = external_get(
                 url,
                 headers=self.headers,
                 timeout=self.timeout,
-                follow_redirects=True,
             )
         response.raise_for_status()
         if len(response.content) > _MAX_RESPONSE_BYTES:
@@ -719,7 +719,7 @@ class DiscoveryService:
         if self.client is not None:
             response = self.client.get(target, headers=headers, follow_redirects=True)
         else:
-            response = httpx.get(target, headers=headers, timeout=self.timeout, follow_redirects=True)
+            response = external_get(target, headers=headers, timeout=self.timeout)
         response.raise_for_status()
         final_base = _normalize_base(str(response.url))
         if final_base not in self.mikan_bases:

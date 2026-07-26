@@ -68,6 +68,11 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'metadata_year', 0);
   setFormValue(subscriptionForm, 'tmdb_id', 0);
   setFormValue(subscriptionForm, 'bangumi_id', 0);
+  setFormValue(subscriptionForm, 'anilist_id', 0);
+  setFormValue(subscriptionForm, 'season_mode', 'title');
+  setFormValue(subscriptionForm, 'scrape_mode', 'local');
+  setFormValue(subscriptionForm, 'metadata_confirmed', false);
+  setFormValue(subscriptionForm, 'metadata_review_skipped', false);
   setFormValue(subscriptionForm, 'season', 1);
   setFormValue(subscriptionForm, 'episode_group', 0);
   setFormValue(subscriptionForm, 'episode_offset', 0);
@@ -102,16 +107,17 @@ function subscriptionPayload({ forPreview = false, formData = null } = {}) {
     media_type: get('media_type') || 'tv', bgm_url: get('bgm_url'), air_date: get('air_date') || null,
     metadata_year: integer('metadata_year', 0), metadata_source: get('metadata_source'),
     metadata_overview: get('metadata_overview'), poster_url: get('poster_url'), backdrop_url: get('backdrop_url'),
+    metadata_confirmed: get('metadata_confirmed') === 'true', metadata_review_skipped: get('metadata_review_skipped') === 'true',
     tmdb_id: integer('tmdb_id', 0),
-    bangumi_id: integer('bangumi_id', 0), auto_metadata: checkbox('auto_metadata'),
-    season: integer('season', 1), primary_rss_name: get('primary_rss_name'), rss_url: get('rss_url'),
+    bangumi_id: integer('bangumi_id', 0), anilist_id: integer('anilist_id', 0), auto_metadata: checkbox('auto_metadata'),
+    season: integer('season', 1), season_mode: get('season_mode') || 'title', primary_rss_name: get('primary_rss_name'), rss_url: get('rss_url'),
     backup_rss_name: get('backup_rss_name'), backup_rss_url: get('backup_rss_url') || null,
     include_keywords: get('include_keywords'), exclude_keywords: get('exclude_keywords'),
     episode_regex: get('episode_regex'), episode_group: integer('episode_group', 0),
     episode_offset: integer('episode_offset', 0), total_episodes: integer('total_episodes', 0),
     total_episodes_locked: checkbox('total_episodes_locked'), total_episodes_source: get('total_episodes_source'),
     rename_enabled: checkbox('rename_enabled'), file_name_template: get('file_name_template') || '{title} - S{season:02}E{episode:02}',
-    scrape_enabled: checkbox('scrape_enabled'),
+    scrape_enabled: checkbox('scrape_enabled'), scrape_mode: get('scrape_mode') || 'local',
     save_path_template: get('save_path_template') || '{base}/{media_folder}/Season {season:02}',
     custom_download_path: get('custom_download_path'), missing_detection: checkbox('missing_detection'),
     only_latest: checkbox('only_latest'), enabled: checkbox('enabled'),
@@ -243,10 +249,15 @@ async function loadMetadataSettings() {
   form.elements.emby_url.value = data.emby_url || '';
   form.elements.emby_api_key.value = '';
   form.elements.emby_api_key.placeholder = data.emby_api_key_configured ? '已保存；留空表示不修改' : '可选';
+  form.elements.tmm_url.value = data.tmm_url || '';
+  form.elements.tmm_api_key.value = '';
+  form.elements.tmm_api_key.placeholder = data.tmm_api_key_configured ? '已保存；留空表示不修改' : '可选';
+  form.elements.tmm_enabled.checked = Boolean(data.tmm_enabled);
   form.elements.clear_tmdb_token.checked = false;
   form.elements.clear_bangumi_token.checked = false;
   form.elements.clear_emby_api_key.checked = false;
-  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi ${data.bangumi_token_configured ? '已配置 Token' : '公开访问'} · 统一媒体根目录 ${data.media_local_root || currentDownloadRoot} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
+  form.elements.clear_tmm_api_key.checked = false;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi 公开 API · AniList 公开 API · TMM ${data.tmm_configured ? '已配置' : '未配置'} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
 }
 
 function metadataSettingsPayload() {
@@ -261,14 +272,21 @@ function metadataSettingsPayload() {
     emby_url: form.elements.emby_url.value.trim(),
     emby_api_key: form.elements.emby_api_key.value.trim() || null,
     clear_emby_api_key: form.elements.clear_emby_api_key.checked,
+    tmm_url: form.elements.tmm_url.value.trim(),
+    tmm_api_key: form.elements.tmm_api_key.value.trim() || null,
+    clear_tmm_api_key: form.elements.clear_tmm_api_key.checked,
+    tmm_enabled: form.elements.tmm_enabled.checked,
   };
 }
 
 async function applyMetadataCandidateToForm(candidate) {
   const season = Number.parseInt(subscriptionForm.elements.season.value || '1', 10) || 0;
-  const params = new URLSearchParams({ provider: candidate.provider, metadata_id: String(candidate.id), media_type: candidate.media_type || 'tv', season: String(season) });
+  const seasonMode = subscriptionForm.elements.season_mode.value || 'title';
+  const queryTitle = subscriptionForm.elements.name.value.trim() || candidate.title || '';
+  const params = new URLSearchParams({ provider: candidate.provider, metadata_id: String(candidate.id), media_type: candidate.media_type || 'tv', season: String(season), season_mode: seasonMode, query_title: queryTitle });
   const detail = await api(`/api/metadata/detail?${params}`);
   setFormValue(subscriptionForm, 'media_type', detail.media_type || 'tv');
+  setFormValue(subscriptionForm, 'season', detail.recommended_season || detail.season || season || 1);
   setFormValue(subscriptionForm, 'metadata_year', detail.year || 0);
   setFormValue(subscriptionForm, 'metadata_source', detail.provider);
   setFormValue(subscriptionForm, 'metadata_overview', detail.overview || '');
@@ -284,14 +302,21 @@ async function applyMetadataCandidateToForm(candidate) {
     setFormValue(subscriptionForm, 'tmdb_id', detail.id);
     setFormValue(subscriptionForm, 'tmdb_title', displayTitle);
     setFormValue(subscriptionForm, 'naming_mode', 'tmdb');
-  } else {
+  } else if (detail.provider === 'bangumi') {
     setFormValue(subscriptionForm, 'bangumi_id', detail.id);
     setFormValue(subscriptionForm, 'reference_title', displayTitle);
     setFormValue(subscriptionForm, 'bgm_url', detail.detail_url || `https://bangumi.tv/subject/${detail.id}`);
     if (!subscriptionForm.elements.tmdb_id.value || subscriptionForm.elements.tmdb_id.value === '0') setFormValue(subscriptionForm, 'naming_mode', 'bangumi');
+  } else {
+    setFormValue(subscriptionForm, 'anilist_id', detail.id);
+    setFormValue(subscriptionForm, 'reference_title', displayTitle);
+    if (!subscriptionForm.elements.tmdb_id.value || subscriptionForm.elements.tmdb_id.value === '0') setFormValue(subscriptionForm, 'naming_mode', 'anilist');
   }
   setFormValue(subscriptionForm, 'name', displayTitle);
-  showNotice(`已读取 ${detail.provider.toUpperCase()} 详情；总集数 ${detail.total_episodes || '未知'}`);
+  setFormValue(subscriptionForm, 'metadata_confirmed', true);
+  setFormValue(subscriptionForm, 'metadata_review_skipped', false);
+  const seasons = (detail.available_seasons || []).map(row => `S${String(row.season_number).padStart(2, '0')} ${row.name || ''}`).join('、');
+  showNotice(`已读取 ${detail.provider.toUpperCase()}；采用第 ${detail.recommended_season || detail.season || 1} 季；总集数 ${detail.total_episodes || '未知'}${seasons ? `；可用季度 ${seasons}` : ''}`);
 }
 
 function renderMetadataResults(results) {
@@ -349,7 +374,7 @@ function applyDiscoveryPreset(preset) {
   if (!preset) return;
   resetSubscriptionForm();
   const fields = [
-    'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season',
+    'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season', 'season_mode',
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
@@ -807,11 +832,11 @@ async function loadMikanCatalog(form, forceRefresh = false) {
 function populateSubscriptionForm(sub) {
   const fields = [
     'name', 'reference_title', 'tmdb_title', 'manual_title', 'naming_mode', 'media_type',
-    'bgm_url', 'air_date', 'metadata_year', 'metadata_source', 'metadata_overview', 'poster_url', 'backdrop_url', 'tmdb_id', 'bangumi_id', 'auto_metadata', 'season',
+    'bgm_url', 'air_date', 'metadata_year', 'metadata_source', 'metadata_overview', 'poster_url', 'backdrop_url', 'metadata_confirmed', 'metadata_review_skipped', 'tmdb_id', 'bangumi_id', 'anilist_id', 'auto_metadata', 'season', 'season_mode',
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'total_episodes_locked', 'total_episodes_source',
-    'rename_enabled', 'file_name_template', 'scrape_enabled', 'save_path_template',
+    'rename_enabled', 'file_name_template', 'scrape_enabled', 'scrape_mode', 'save_path_template',
     'custom_download_path', 'missing_detection', 'only_latest', 'enabled',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, sub[field]));
@@ -846,10 +871,10 @@ async function loadSubscriptions() {
     const meta = document.createElement('div'); meta.className = 'subscription-meta';
     meta.append(text('span', `原订阅名：${sub.name}`));
     meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
-    meta.append(text('span', `来源：${sub.metadata_source || '未匹配'} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'}`));
-    meta.append(text('span', `季 ${sub.season} · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
+    meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
+    meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
-    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 下载完成自动刮削 ${sub.scrape_enabled ? '开启' : '关闭'}`));
+    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 刮削：${sub.scrape_enabled ? (sub.scrape_mode || 'local') : '关闭'}`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
     content.append(meta);
     content.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
@@ -873,7 +898,7 @@ async function loadItems() {
     const titleCell = document.createElement('td');
     if (item.source_url) { const link = text('a', item.title); link.href = item.source_url; link.target = '_blank'; link.rel = 'noreferrer noopener'; titleCell.append(link); } else titleCell.textContent = item.title;
     row.append(titleCell); row.append(text('td', item.episode || '—'));
-    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
+    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', scheduled: '等待定时推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
     if (item.status === 'queued') statusCell.append(text('small', ` ${item.download_progress || 0}%`, 'muted')); row.append(statusCell);
     const rename = [item.rename_status || (item.desired_name ? '等待处理' : '未启用'), item.desired_name || '', item.rename_message || '', item.scrape_status ? `刮削：${item.scrape_status}` : '', item.scrape_message || ''].filter(Boolean).join('\n');
     row.append(text('td', rename, item.rename_status === 'error' || item.scrape_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
@@ -907,11 +932,85 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
-      loadSubscriptions(), loadItems(), loadLogs(),
+      loadSubscriptions(), loadItems(), loadLogs(), loadAutomationSettings(), loadProxySettings(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
   }
+}
+
+
+async function revealSavedSecret(input, secretName) {
+  if (input.type === 'text') { input.type = 'password'; return; }
+  if (!input.value) {
+    const data = await api(`/api/secrets/${secretName}`);
+    input.value = data.value || '';
+  }
+  input.type = 'text';
+}
+
+function initializePasswordToggles() {
+  const mappings = {
+    qbit_password: 'qbit_password', tmdb_read_access_token: 'tmdb_read_access_token',
+    bangumi_access_token: 'bangumi_access_token', emby_api_key: 'emby_api_key',
+    tmm_api_key: 'tmm_api_key', proxy_url: 'proxy_url',
+  };
+  Object.entries(mappings).forEach(([name, secret]) => {
+    const input = document.querySelector(`[name="${name}"]`);
+    if (!input || input.parentElement.classList.contains('password-field')) return;
+    const wrapper = document.createElement('span'); wrapper.className = 'password-field';
+    input.parentNode.insertBefore(wrapper, input); wrapper.append(input);
+    const button = text('button', '👁', 'password-toggle'); button.type = 'button'; button.setAttribute('aria-label', '显示或隐藏已保存内容');
+    button.addEventListener('click', async () => { try { await revealSavedSecret(input, secret); } catch (error) { showNotice(error.message, false); } });
+    wrapper.append(button);
+  });
+}
+
+async function loadAutomationSettings() {
+  const data = await api('/api/automation/settings');
+  const form = document.getElementById('automationSettingsForm');
+  form.elements.download_enabled.checked = Boolean(data.download_enabled);
+  form.elements.scrape_enabled.checked = Boolean(data.scrape_enabled);
+  form.elements.daily_time.value = data.daily_time || '02:00';
+  form.elements.timezone.value = data.timezone || 'Asia/Shanghai';
+}
+
+async function loadProxySettings() {
+  const data = await api('/api/proxy/settings');
+  const form = document.getElementById('proxySettingsForm');
+  form.elements.enabled.checked = Boolean(data.enabled);
+  form.elements.proxy_url.value = '';
+  form.elements.proxy_url.placeholder = data.url_configured ? '已保存；点击小眼睛查看或留空保留' : 'http:// 或 socks5://';
+  form.elements.no_proxy.value = data.no_proxy || 'localhost,127.0.0.1,host.docker.internal';
+  form.elements.clear_proxy_url.checked = false;
+}
+
+let reviewSubscription = null;
+function closeMetadataReview() { document.getElementById('metadataReviewModal').classList.add('hidden'); document.body.classList.remove('modal-open'); reviewSubscription = null; }
+function openMetadataReview(subscription) {
+  reviewSubscription = subscription;
+  document.getElementById('metadataReviewTitle').textContent = `确认：${subscription.name}`;
+  document.getElementById('reviewQuery').value = subscription.name || subscription.reference_title || '';
+  document.getElementById('reviewResults').textContent = '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
+  document.getElementById('metadataReviewModal').classList.remove('hidden'); document.body.classList.add('modal-open');
+}
+
+function renderReviewResults(results) {
+  const container = document.getElementById('reviewResults'); container.replaceChildren(); container.className = 'metadata-results';
+  if (!results.length) { container.append(text('p', '没有找到结果，可切换另一个来源或跳过。', 'empty')); return; }
+  results.forEach(candidate => {
+    const card = document.createElement('article'); card.className = 'metadata-card';
+    if (candidate.poster_url) { const img=document.createElement('img'); img.src=candidate.poster_url; img.loading='lazy'; card.append(img); }
+    const body=document.createElement('div'); body.className='metadata-card-body'; body.append(text('strong', titleWithYear(candidate.title,candidate.year)));
+    if (candidate.overview) body.append(text('p',candidate.overview.slice(0,220),'metadata-overview'));
+    const choose=text('button','确认此条目'); choose.type='button'; choose.addEventListener('click', async()=>{
+      if (!reviewSubscription) return;
+      const seasonMode=reviewSubscription.season_mode || 'title';
+      await api(`/api/subscriptions/${reviewSubscription.id}/metadata/apply`, {method:'POST', body:JSON.stringify({provider:candidate.provider, metadata_id:candidate.id, media_type:candidate.media_type || 'tv', season:reviewSubscription.season || 1, season_mode:seasonMode})});
+      closeMetadataReview(); await reloadAll(); showNotice(`已确认 ${candidate.provider.toUpperCase()} 元数据`);
+    });
+    body.append(choose); card.append(body); container.append(card);
+  });
 }
 
 document.getElementById('downloaderForm').elements.download_path.addEventListener('input', (event) => {
@@ -1018,11 +1117,12 @@ subscriptionForm.addEventListener('submit', async (event) => {
   try {
     const path = id ? `/api/subscriptions/${id}` : '/api/subscriptions';
     const method = id ? 'PATCH' : 'POST';
-    await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
+    const saved = await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
     formElement.reset();
     resetSubscriptionForm();
     showNotice(id ? '订阅已更新' : '订阅已保存');
     await reloadAll();
+    if (!id && !saved.metadata_confirmed && !saved.metadata_review_skipped) openMetadataReview(saved);
   } catch (error) { showNotice(error.message, false); }
 });
 
@@ -1100,8 +1200,25 @@ document.getElementById('clearSystemLogs').addEventListener('click', async () =>
   try { const result = await api('/api/logs', { method: 'DELETE' }); showNotice(result.message); await loadLogs(); } catch (error) { showNotice(error.message, false); }
 });
 
+
+document.getElementById('automationSettingsForm').addEventListener('submit', async (event) => {
+  event.preventDefault(); const f=event.currentTarget;
+  try { await api('/api/automation/settings',{method:'PUT',body:JSON.stringify({download_enabled:f.elements.download_enabled.checked,scrape_enabled:f.elements.scrape_enabled.checked,daily_time:f.elements.daily_time.value,timezone:f.elements.timezone.value.trim()})}); await loadAutomationSettings(); showNotice('统一执行时间已保存'); } catch(error){showNotice(error.message,false);}
+});
+document.getElementById('runAutomationNow').addEventListener('click', async()=>{try{const r=await api('/api/automation/run',{method:'POST'});showNotice(r.message||'统一任务已执行');await reloadAll();}catch(e){showNotice(e.message,false);}});
+document.getElementById('restoreAutomation').addEventListener('click', async()=>{await api('/api/automation/settings',{method:'DELETE'});await loadAutomationSettings();showNotice('已恢复即时下载和即时刮削');});
+document.getElementById('proxySettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();const f=event.currentTarget;try{await api('/api/proxy/settings',{method:'PUT',body:JSON.stringify({enabled:f.elements.enabled.checked,proxy_url:f.elements.proxy_url.value.trim()||null,clear_proxy_url:f.elements.clear_proxy_url.checked,no_proxy:f.elements.no_proxy.value.trim()})});await loadProxySettings();showNotice('代理设置已保存');}catch(e){showNotice(e.message,false);}});
+document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
+document.getElementById('testTmm').addEventListener('click',async()=>{try{await api('/api/metadata/settings',{method:'PUT',body:JSON.stringify(metadataSettingsPayload())});const r=await api('/api/metadata/test-tmm',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);
+document.querySelector('[data-close-metadata-review]').addEventListener('click', closeMetadataReview);
+document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在搜索…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
+document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称和本地 NFO');});
+
 document.getElementById('statusFilter').addEventListener('change', loadItems);
 initializeCollapsiblePanels();
+initializePasswordToggles();
 initializeCatalogSelectors();
 resetSubscriptionForm();
 reloadAll();

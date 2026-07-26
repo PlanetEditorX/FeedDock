@@ -300,6 +300,9 @@ METADATA_SETTING_KEYS = {
     "media_local_root",
     "emby_url",
     "emby_api_key",
+    "tmm_url",
+    "tmm_api_key",
+    "tmm_enabled",
 }
 
 
@@ -311,6 +314,9 @@ class MetadataConfig:
     media_local_root: str
     emby_url: str
     emby_api_key: str
+    tmm_url: str
+    tmm_api_key: str
+    tmm_enabled: bool
     source: str
 
     @property
@@ -319,8 +325,6 @@ class MetadataConfig:
 
     @property
     def bangumi_configured(self) -> bool:
-        # Most public Bangumi reads work without a token. A token is still
-        # supported for administrators who need authenticated access.
         return True
 
     @property
@@ -331,18 +335,35 @@ class MetadataConfig:
     def emby_configured(self) -> bool:
         return bool(self.emby_url and self.emby_api_key)
 
+    @property
+    def tmm_configured(self) -> bool:
+        return bool(self.tmm_enabled and self.tmm_url and self.tmm_api_key)
+
     def public_dict(self) -> dict[str, str | bool]:
         return {
             "tmdb_token_configured": self.tmdb_configured,
             "bangumi_token_configured": bool(self.bangumi_access_token),
+            "anilist_configured": True,
             "metadata_language": self.language,
             "media_local_root": self.media_local_root,
             "emby_url": self.emby_url,
             "emby_api_key_configured": bool(self.emby_api_key),
+            "tmm_url": self.tmm_url,
+            "tmm_api_key_configured": bool(self.tmm_api_key),
+            "tmm_enabled": self.tmm_enabled,
+            "tmm_configured": self.tmm_configured,
             "scraper_configured": self.scraper_configured,
             "emby_configured": self.emby_configured,
             "source": self.source,
         }
+
+
+def _bool_value(value: str | bool | None, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _environment_metadata_config() -> MetadataConfig:
@@ -353,6 +374,9 @@ def _environment_metadata_config() -> MetadataConfig:
         media_local_root=str(settings.media_local_root or settings.download_path),
         emby_url=settings.emby_url,
         emby_api_key=settings.emby_api_key,
+        tmm_url=settings.tmm_url,
+        tmm_api_key=settings.tmm_api_key,
+        tmm_enabled=bool(settings.tmm_url and settings.tmm_api_key),
         source="compose",
     )
 
@@ -367,6 +391,9 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         media_local_root=qbit_root,
         emby_url=fallback.emby_url,
         emby_api_key=fallback.emby_api_key,
+        tmm_url=fallback.tmm_url,
+        tmm_api_key=fallback.tmm_api_key,
+        tmm_enabled=fallback.tmm_enabled,
         source=fallback.source,
     )
     try:
@@ -379,14 +406,15 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
     if not rows:
         return fallback
     return MetadataConfig(
-        tmdb_read_access_token=rows.get(
-            "tmdb_read_access_token", fallback.tmdb_read_access_token
-        ),
+        tmdb_read_access_token=rows.get("tmdb_read_access_token", fallback.tmdb_read_access_token),
         bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
         language=rows.get("metadata_language", fallback.language).strip() or "zh-CN",
         media_local_root=qbit_root,
         emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
         emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
+        tmm_url=rows.get("tmm_url", fallback.tmm_url).strip().rstrip("/"),
+        tmm_api_key=rows.get("tmm_api_key", fallback.tmm_api_key),
+        tmm_enabled=_bool_value(rows.get("tmm_enabled"), fallback.tmm_enabled),
         source="web",
     )
 
@@ -422,6 +450,10 @@ def save_metadata_config(
     emby_url: str,
     emby_api_key: str | None,
     clear_emby_api_key: bool,
+    tmm_url: str = "",
+    tmm_api_key: str | None = None,
+    clear_tmm_api_key: bool = False,
+    tmm_enabled: bool = False,
 ) -> MetadataConfig:
     current = load_metadata_config(db)
     language = metadata_language.strip() or "zh-CN"
@@ -435,31 +467,32 @@ def save_metadata_config(
     if len(local_root) > 2000:
         raise ValueError("本地媒体挂载目录过长")
     if local_root != qbit_root:
-        raise ValueError(
-            f"本地媒体挂载目录必须与 qBittorrent 下载保存根目录一致：{qbit_root}"
-        )
+        raise ValueError(f"本地媒体挂载目录必须与 qBittorrent 下载保存根目录一致：{qbit_root}")
 
     clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
+    clean_tmm_url = _validate_optional_http_url(tmm_url, "tinyMediaManager 地址")
     tmdb_token = "" if clear_tmdb_token else (
-        current.tmdb_read_access_token
-        if tmdb_read_access_token is None
-        else tmdb_read_access_token.strip()
+        current.tmdb_read_access_token if tmdb_read_access_token is None else tmdb_read_access_token.strip()
     )
     bangumi_token = "" if clear_bangumi_token else (
-        current.bangumi_access_token
-        if bangumi_access_token is None
-        else bangumi_access_token.strip()
+        current.bangumi_access_token if bangumi_access_token is None else bangumi_access_token.strip()
     )
     emby_key = "" if clear_emby_api_key else (
         current.emby_api_key if emby_api_key is None else emby_api_key.strip()
+    )
+    tmm_key = "" if clear_tmm_api_key else (
+        current.tmm_api_key if tmm_api_key is None else tmm_api_key.strip()
     )
     for value, label, limit in (
         (tmdb_token, "TMDB Token", 2000),
         (bangumi_token, "Bangumi Token", 2000),
         (emby_key, "Emby API Key", 1000),
+        (tmm_key, "tinyMediaManager API Key", 1000),
     ):
         if len(value) > limit:
             raise ValueError(f"{label}过长")
+    if tmm_enabled and (not clean_tmm_url or not tmm_key):
+        raise ValueError("启用 tinyMediaManager 时必须填写地址和 API Key")
 
     values = {
         "tmdb_read_access_token": tmdb_token,
@@ -468,6 +501,9 @@ def save_metadata_config(
         "media_local_root": local_root,
         "emby_url": clean_emby_url,
         "emby_api_key": emby_key,
+        "tmm_url": clean_tmm_url,
+        "tmm_api_key": tmm_key,
+        "tmm_enabled": "1" if tmm_enabled else "0",
     }
     existing = {
         row.key: row
@@ -487,3 +523,230 @@ def reset_metadata_config(db: Session) -> MetadataConfig:
     db.execute(delete(AppSetting).where(AppSetting.key.in_(METADATA_SETTING_KEYS)))
     db.commit()
     return load_metadata_config(db)
+
+
+AUTOMATION_SETTING_KEYS = {
+    "automation_download_enabled",
+    "automation_scrape_enabled",
+    "automation_time",
+    "automation_timezone",
+    "automation_last_run_date",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AutomationConfig:
+    download_enabled: bool
+    scrape_enabled: bool
+    daily_time: str
+    timezone: str
+    last_run_date: str
+    source: str
+
+    @property
+    def enabled(self) -> bool:
+        return self.download_enabled or self.scrape_enabled
+
+    def public_dict(self) -> dict[str, str | bool]:
+        return {
+            "download_enabled": self.download_enabled,
+            "scrape_enabled": self.scrape_enabled,
+            "daily_time": self.daily_time,
+            "timezone": self.timezone,
+            "last_run_date": self.last_run_date,
+            "enabled": self.enabled,
+            "source": self.source,
+        }
+
+
+def _valid_daily_time(value: str) -> str:
+    cleaned = value.strip()
+    parts = cleaned.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("执行时间必须是 HH:MM 格式")
+    hour, minute = map(int, parts)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError("执行时间必须在 00:00 到 23:59 之间")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def load_automation_config(db: Session | None = None) -> AutomationConfig:
+    def _load(session: Session) -> AutomationConfig:
+        fallback = AutomationConfig(
+            download_enabled=False,
+            scrape_enabled=False,
+            daily_time=_valid_daily_time(settings.automation_time),
+            timezone=settings.automation_timezone,
+            last_run_date="",
+            source="compose",
+        )
+        try:
+            rows = {
+                row.key: row.value
+                for row in session.scalars(select(AppSetting).where(AppSetting.key.in_(AUTOMATION_SETTING_KEYS)))
+            }
+        except (OperationalError, ProgrammingError):
+            return fallback
+        if not rows:
+            return fallback
+        try:
+            daily_time = _valid_daily_time(rows.get("automation_time", fallback.daily_time))
+        except ValueError:
+            daily_time = fallback.daily_time
+        return AutomationConfig(
+            download_enabled=_bool_value(rows.get("automation_download_enabled"), fallback.download_enabled),
+            scrape_enabled=_bool_value(rows.get("automation_scrape_enabled"), fallback.scrape_enabled),
+            daily_time=daily_time,
+            timezone=rows.get("automation_timezone", fallback.timezone).strip() or fallback.timezone,
+            last_run_date=rows.get("automation_last_run_date", "").strip(),
+            source="web",
+        )
+    if db is not None:
+        return _load(db)
+    with SessionLocal() as session:
+        return _load(session)
+
+
+def save_automation_config(
+    db: Session,
+    *,
+    download_enabled: bool,
+    scrape_enabled: bool,
+    daily_time: str,
+    timezone: str,
+) -> AutomationConfig:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    valid_time = _valid_daily_time(daily_time)
+    timezone = timezone.strip() or settings.timezone
+    try:
+        ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("无效的 IANA 时区，例如 Asia/Shanghai") from exc
+    values = {
+        "automation_download_enabled": "1" if download_enabled else "0",
+        "automation_scrape_enabled": "1" if scrape_enabled else "0",
+        "automation_time": valid_time,
+        "automation_timezone": timezone,
+    }
+    for key, value in values.items():
+        row = db.get(AppSetting, key)
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+    db.commit()
+    return load_automation_config(db)
+
+
+def mark_automation_run(db: Session, local_date: str) -> None:
+    set_app_setting(db, "automation_last_run_date", local_date)
+
+
+def reset_automation_config(db: Session) -> AutomationConfig:
+    db.execute(delete(AppSetting).where(AppSetting.key.in_(AUTOMATION_SETTING_KEYS)))
+    db.commit()
+    return load_automation_config(db)
+
+
+PROXY_SETTING_KEYS = {"proxy_enabled", "proxy_url", "proxy_no_proxy"}
+
+
+@dataclass(frozen=True, slots=True)
+class ProxyConfig:
+    enabled: bool
+    url: str
+    no_proxy: str
+    source: str
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.enabled and self.url)
+
+    def public_dict(self) -> dict[str, str | bool]:
+        return {
+            "enabled": self.enabled,
+            "url_configured": bool(self.url),
+            "no_proxy": self.no_proxy,
+            "configured": self.configured,
+            "source": self.source,
+        }
+
+
+def _validate_proxy_url(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        return ""
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in {"http", "https", "socks5", "socks5h"} or not parsed.hostname:
+        raise ValueError("代理地址必须是 http://、https://、socks5:// 或 socks5h://")
+    if len(cleaned) > 2000:
+        raise ValueError("代理地址过长")
+    return cleaned
+
+
+def load_proxy_config(db: Session | None = None) -> ProxyConfig:
+    def _load(session: Session) -> ProxyConfig:
+        fallback = ProxyConfig(
+            enabled=bool(settings.outbound_proxy_url),
+            url=settings.outbound_proxy_url,
+            no_proxy=settings.outbound_no_proxy,
+            source="compose",
+        )
+        try:
+            rows = {
+                row.key: row.value
+                for row in session.scalars(select(AppSetting).where(AppSetting.key.in_(PROXY_SETTING_KEYS)))
+            }
+        except (OperationalError, ProgrammingError):
+            return fallback
+        if not rows:
+            return fallback
+        return ProxyConfig(
+            enabled=_bool_value(rows.get("proxy_enabled"), fallback.enabled),
+            url=rows.get("proxy_url", fallback.url),
+            no_proxy=rows.get("proxy_no_proxy", fallback.no_proxy),
+            source="web",
+        )
+    if db is not None:
+        return _load(db)
+    with SessionLocal() as session:
+        return _load(session)
+
+
+def save_proxy_config(
+    db: Session,
+    *,
+    enabled: bool,
+    proxy_url: str | None,
+    clear_proxy_url: bool,
+    no_proxy: str,
+) -> ProxyConfig:
+    current = load_proxy_config(db)
+    url = "" if clear_proxy_url else (
+        current.url if proxy_url is None else _validate_proxy_url(proxy_url)
+    )
+    if enabled and not url:
+        raise ValueError("启用代理时必须填写代理地址")
+    cleaned_no_proxy = ",".join(part.strip() for part in no_proxy.split(",") if part.strip())
+    if len(cleaned_no_proxy) > 4000:
+        raise ValueError("不使用代理的地址列表过长")
+    values = {
+        "proxy_enabled": "1" if enabled else "0",
+        "proxy_url": url,
+        "proxy_no_proxy": cleaned_no_proxy,
+    }
+    for key, value in values.items():
+        row = db.get(AppSetting, key)
+        if row:
+            row.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+    db.commit()
+    return load_proxy_config(db)
+
+
+def reset_proxy_config(db: Session) -> ProxyConfig:
+    db.execute(delete(AppSetting).where(AppSetting.key.in_(PROXY_SETTING_KEYS)))
+    db.commit()
+    return load_proxy_config(db)
