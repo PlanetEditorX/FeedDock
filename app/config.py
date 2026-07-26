@@ -77,6 +77,7 @@ class Settings:
     automation_timezone: str
     outbound_proxy_url: str
     outbound_no_proxy: str
+    log_level: str
 
 
 def load_settings() -> Settings:
@@ -141,6 +142,7 @@ def load_settings() -> Settings:
         automation_timezone=os.getenv("AUTOMATION_TIMEZONE", os.getenv("TZ", "Asia/Shanghai")).strip() or "Asia/Shanghai",
         outbound_proxy_url=os.getenv("OUTBOUND_PROXY_URL", "").strip(),
         outbound_no_proxy=os.getenv("OUTBOUND_NO_PROXY", "localhost,127.0.0.1,host.docker.internal").strip(),
+        log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
     )
 
 

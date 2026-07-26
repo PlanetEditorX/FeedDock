@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
+from .debug_logging import format_exception_details
 from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .naming import media_folder_name, naming_context, render_desired_name
@@ -204,7 +205,7 @@ def fingerprint_for(entry: Any, title: str, download_url: str) -> str:
 
 
 def add_log(db: Session, level: str, message: str, details: str = "") -> None:
-    db.add(SystemLog(level=level.upper(), message=message, details=details[:4000]))
+    db.add(SystemLog(level=level.upper(), message=message, details=details[:50000]))
 
 
 def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
@@ -317,7 +318,16 @@ def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
     except Exception as exc:
         # Metadata outages must never prevent RSS processing. The error is
         # visible in the system log and the next scheduled run retries it.
-        add_log(db, "WARNING", f"自动元数据同步失败：{subscription.name}", str(exc))
+        add_log(
+            db,
+            "WARNING",
+            f"自动元数据同步失败：{subscription.name}",
+            format_exception_details(
+                exc,
+                stage="rss.auto-metadata",
+                context={"subscription_id": subscription.id, "subscription_name": subscription.name},
+            ),
+        )
         db.commit()
 
 
@@ -391,7 +401,21 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     except Exception as exc:
         subscription.last_checked_at = datetime.now(timezone.utc)
         subscription.last_error = str(exc)[:1000]
-        add_log(db, "ERROR", f"订阅检查失败：{subscription.name}", str(exc))
+        add_log(
+            db,
+            "ERROR",
+            f"订阅检查失败：{subscription.name}",
+            format_exception_details(
+                exc,
+                stage="rss.load",
+                context={
+                    "subscription_id": subscription.id,
+                    "subscription_name": subscription.name,
+                    "rss_url": subscription.rss_url,
+                    "backup_rss_url": subscription.backup_rss_url,
+                },
+            ),
+        )
         db.commit()
         stats["errors"] += 1
         return stats

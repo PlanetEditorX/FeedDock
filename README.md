@@ -360,3 +360,16 @@ node --check app/static/app.js
 ```
 
 详细飞牛部署见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)，功能设计与限制见 [METADATA_NAMING.md](METADATA_NAMING.md)。
+
+
+## 清理最近条目与日志
+
+- “清理条目”只隐藏历史显示，不删除 RSS 去重指纹，因此旧条目不会重新下载。
+- “清理日志”会删除全部系统日志。
+- 新产生的条目和日志会继续正常显示。
+
+## DEBUG 调试日志
+
+“系统日志”板块可以在 `INFO` 与 `DEBUG` 之间切换。DEBUG 会额外记录 API 请求、添加/编辑订阅的处理阶段、请求编号、异常类型和完整 Python traceback。500 错误会在页面中显示请求编号，展开对应 ERROR 日志即可查看具体失败位置。
+
+日志同时写入网页、Docker 标准输出和 `/data/logs/feeddock.log`。敏感密码、Token、API Key、Cookie 和代理认证信息会自动隐藏。详细操作见 [DEBUG_LOGGING.md](DEBUG_LOGGING.md)。

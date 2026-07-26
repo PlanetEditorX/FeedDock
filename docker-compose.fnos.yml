@@ -20,6 +20,8 @@ services:
       COOKIE_SECURE: "false"
       POLL_INTERVAL_MINUTES: "10"
       REQUEST_TIMEOUT_SECONDS: "20"
+      # INFO 或 DEBUG；也可以在网页“系统日志”板块切换
+      LOG_LEVEL: "INFO"
 
       # Mikan 番剧目录；若主域名不可用，会依次尝试备用地址
       MIKAN_BASE_URL: "https://mikanime.tv"

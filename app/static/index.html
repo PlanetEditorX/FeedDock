@@ -138,7 +138,7 @@
 
     <section class="panel" data-panel-id="recent-items"><div class="panel-head"><div><h2>最近条目</h2><p>显示下载进度、规范命名及自动刮削状态。</p></div><div class="actions"><select id="statusFilter"><option value="">全部状态</option><option value="scheduled">等待定时推送</option><option value="queued">已推送</option><option value="skipped">已跳过</option><option value="error">错误</option></select><button id="clearRecentItems" type="button" class="small danger">清理条目</button></div></div><div class="table-wrap panel-body"><table><thead><tr><th>时间</th><th>标题</th><th>集数</th><th>状态</th><th>命名</th><th>说明</th><th></th></tr></thead><tbody id="items"><tr><td colspan="7">正在加载…</td></tr></tbody></table></div></section>
 
-    <section class="panel" data-panel-id="system-logs"><div class="panel-head"><div><h2>系统日志</h2><p>最近 50 条轮询和后处理日志。</p></div><button id="clearSystemLogs" type="button" class="small danger">清理日志</button></div><div id="logs" class="logs panel-body"></div></section>
+    <section class="panel" data-panel-id="system-logs"><div class="panel-head"><div><h2>系统日志</h2><p>INFO 记录常规事件；DEBUG 会额外记录 API 请求、保存阶段、异常类型和完整 traceback。</p></div><div class="actions log-toolbar"><label>日志级别<select id="logLevelSetting"><option value="INFO">INFO</option><option value="DEBUG">DEBUG</option></select></label><button id="saveLogLevel" type="button" class="small secondary">保存级别</button><button id="refreshSystemLogs" type="button" class="small secondary">刷新日志</button><button id="clearSystemLogs" type="button" class="small danger">清理日志</button></div></div><p id="logFilePath" class="hint panel-body"></p><div id="logs" class="logs panel-body"></div></section>
     <section class="legal">本工具不提供、存储或分发任何媒体资源。请只处理你有权访问的 RSS 与媒体文件。</section>
   </main>
 

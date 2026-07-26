@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .config import settings
 from .database import SessionLocal
+from .debug_logging import log_exception
 from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
@@ -61,8 +62,8 @@ class PollScheduler:
             if now >= next_rss_refresh:
                 try:
                     refresh_all()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_exception("后台 RSS 刷新异常", exc, stage="scheduler.refresh-all")
                 next_rss_refresh = time.monotonic() + settings.poll_interval_minutes * 60
 
             if now >= next_completion_check:
@@ -74,19 +75,19 @@ class PollScheduler:
                             limit=100,
                             allow_scrape=not automation.scrape_enabled,
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_exception("后台下载完成检查异常", exc, stage="scheduler.normalize-pending")
                 next_completion_check = time.monotonic() + 120
 
             try:
                 self.run_daily_automation()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception("每日自动任务异常", exc, stage="scheduler.daily-automation")
 
             try:
                 refresh_due_mikan_catalogs()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_exception("Mikan 后台缓存刷新异常", exc, stage="scheduler.mikan-refresh")
 
             next_event = min(next_rss_refresh, next_completion_check)
             wait_seconds = max(1.0, next_event - time.monotonic())

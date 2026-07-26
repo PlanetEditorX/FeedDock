@@ -908,8 +908,16 @@ async function loadItems() {
   }
 }
 
+async function loadLogSettings() {
+  const settings = await api('/api/logs/settings');
+  const select = document.getElementById('logLevelSetting');
+  if (select) select.value = settings.level || 'INFO';
+  const path = document.getElementById('logFilePath');
+  if (path) path.textContent = `文件日志：${settings.file || '/data/logs/feeddock.log'}；500 错误可按提示中的请求编号在详细内容中定位。`;
+}
+
 async function loadLogs() {
-  const data = await api('/api/logs?limit=50');
+  const data = await api('/api/logs?limit=100');
   const container = document.getElementById('logs');
   container.replaceChildren();
   if (!data.length) {
@@ -918,11 +926,18 @@ async function loadLogs() {
   }
   for (const log of data) {
     const row = document.createElement('div');
-    row.className = 'log-row';
+    row.className = `log-row log-${String(log.level || 'INFO').toLowerCase()}`;
     row.append(text('time', fmtDate(log.created_at)));
-    row.append(text('span', log.level, `badge ${log.level === 'ERROR' ? 'error' : 'queued'}`));
+    row.append(text('span', log.level, `badge ${log.level === 'ERROR' ? 'error' : log.level === 'DEBUG' ? 'scheduled' : 'queued'}`));
     row.append(text('strong', log.message));
-    row.append(text('span', log.details, 'muted'));
+    if (log.details) {
+      const details = document.createElement('details');
+      details.className = 'log-details';
+      if (log.level === 'ERROR') details.open = true;
+      details.append(text('summary', log.level === 'ERROR' ? '错误详情（已展开）' : '查看详细内容'));
+      details.append(text('pre', log.details));
+      row.append(details);
+    }
     container.append(row);
   }
 }
@@ -932,7 +947,7 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadAutomationSettings(), loadProxySettings(),
+      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
@@ -1198,6 +1213,20 @@ document.getElementById('clearRecentItems').addEventListener('click', async () =
 document.getElementById('clearSystemLogs').addEventListener('click', async () => {
   if (!window.confirm('确认清空全部系统日志？')) return;
   try { const result = await api('/api/logs', { method: 'DELETE' }); showNotice(result.message); await loadLogs(); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('saveLogLevel').addEventListener('click', async () => {
+  const level = document.getElementById('logLevelSetting').value;
+  try {
+    await api('/api/logs/settings', { method: 'PUT', body: JSON.stringify({ level }) });
+    await Promise.all([loadLogSettings(), loadLogs()]);
+    showNotice(`日志级别已切换为 ${level}`);
+  } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('refreshSystemLogs').addEventListener('click', async () => {
+  try { await loadLogs(); showNotice('日志已刷新'); }
+  catch (error) { showNotice(error.message, false); }
 });
 
 

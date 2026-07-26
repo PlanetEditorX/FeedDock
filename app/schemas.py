@@ -253,6 +253,18 @@ class LogOut(BaseModel):
     created_at: datetime
 
 
+class LogSettingsUpdate(BaseModel):
+    level: str = Field(default="INFO", max_length=16)
+
+    @field_validator("level")
+    @classmethod
+    def validate_level(cls, value: str) -> str:
+        level = value.strip().upper()
+        if level not in {"INFO", "DEBUG"}:
+            raise ValueError("日志级别只能是 INFO 或 DEBUG")
+        return level
+
+
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=1, max_length=500)

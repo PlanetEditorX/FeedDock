@@ -2,16 +2,29 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
+from .debug_logging import (
+    debug_enabled,
+    log_event,
+    log_exception,
+    normalize_log_level,
+    runtime_log_level,
+    safe_json,
+    set_runtime_log_level,
+)
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
@@ -55,6 +68,7 @@ from .schemas import (
     GlobalRulesUpdate,
     LoginRequest,
     LogOut,
+    LogSettingsUpdate,
     MetadataApplyRequest,
     MetadataCandidateOut,
     MetadataRecordOut,
@@ -181,6 +195,8 @@ async def lifespan(_app: FastAPI):
         qbit_root = load_qbittorrent_config(db).download_path
         db.execute(update(Subscription).values(custom_download_path=qbit_root))
         db.commit()
+        set_runtime_log_level(get_app_setting("log_level", settings.log_level, db))
+    log_event("INFO", "日志系统已启动", f"当前级别：{runtime_log_level()}", persist=False)
     start_scheduler()
     yield
     stop_scheduler()
@@ -193,6 +209,86 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def debug_request_middleware(request: Request, call_next):
+    request_id = uuid4().hex[:12]
+    request.state.request_id = request_id
+    request.state.debug_stage = "request"
+    request.state.debug_context = {}
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        stage = str(getattr(request.state, "debug_stage", "request"))
+        context = getattr(request.state, "debug_context", {}) or {}
+        log_exception(
+            f"未处理的服务器异常 [{request_id}]",
+            exc,
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            stage=stage,
+            context=context,
+        )
+        detail = f"服务器内部错误 [{request_id}]：{type(exc).__name__}: {exc}"
+        response = JSONResponse(status_code=500, content={"detail": detail, "request_id": request_id})
+    response.headers["X-Request-ID"] = request_id
+    elapsed_ms = round((perf_counter() - started) * 1000, 2)
+    if debug_enabled() and request.url.path.startswith("/api/") and response.status_code < 400:
+        log_event(
+            "DEBUG",
+            f"{request.method} {request.url.path} -> {response.status_code}",
+            safe_json({
+                "request_id": request_id,
+                "query": dict(request.query_params),
+                "elapsed_ms": elapsed_ms,
+                "stage": str(getattr(request.state, "debug_stage", "completed")),
+            }),
+        )
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def logged_http_exception(request: Request, exc: HTTPException):
+    request_id = str(getattr(request.state, "request_id", uuid4().hex[:12]))
+    stage = str(getattr(request.state, "debug_stage", "http-exception"))
+    context = getattr(request.state, "debug_context", {}) or {}
+    cause = exc.__cause__
+    if exc.status_code >= 500 and cause is not None:
+        log_exception(
+            f"HTTP {exc.status_code} [{request_id}]",
+            cause,
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            stage=stage,
+            context={**context, "http_detail": exc.detail},
+        )
+    elif exc.status_code >= 500 or debug_enabled():
+        log_event(
+            "ERROR" if exc.status_code >= 500 else "DEBUG",
+            f"HTTP {exc.status_code} [{request_id}] {request.method} {request.url.path}",
+            safe_json({"detail": exc.detail, "stage": stage, "context": context}),
+        )
+    response = await http_exception_handler(request, exc)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def logged_validation_exception(request: Request, exc: RequestValidationError):
+    request_id = str(getattr(request.state, "request_id", uuid4().hex[:12]))
+    if debug_enabled():
+        log_event(
+            "DEBUG",
+            f"请求参数校验失败 [{request_id}] {request.method} {request.url.path}",
+            safe_json({"errors": exc.errors(), "body": exc.body}),
+        )
+    response = await request_validation_exception_handler(request, exc)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -698,12 +794,29 @@ def preview_subscription_route(
 
 
 @app.post("/api/subscriptions", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
-def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db)) -> SubscriptionOut:
-    subscription = Subscription(**_subscription_values(payload, db))
-    db.add(subscription)
-    db.commit()
-    db.refresh(subscription)
-    return _subscription_out(db, subscription)
+def create_subscription(
+    payload: SubscriptionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    request.state.debug_context = {
+        "operation": "create_subscription",
+        "payload": payload.model_dump(mode="json"),
+    }
+    try:
+        request.state.debug_stage = "subscription.build-values"
+        subscription = Subscription(**_subscription_values(payload, db))
+        request.state.debug_stage = "subscription.insert"
+        db.add(subscription)
+        request.state.debug_stage = "subscription.commit"
+        db.commit()
+        request.state.debug_stage = "subscription.refresh"
+        db.refresh(subscription)
+        request.state.debug_stage = "subscription.serialize"
+        return _subscription_out(db, subscription)
+    except Exception:
+        db.rollback()
+        raise
 
 
 @app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
@@ -726,16 +839,31 @@ def skip_subscription_metadata_review(subscription_id: int, payload: MetadataRev
 def update_subscription(
     subscription_id: int,
     payload: SubscriptionUpdate,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
+    request.state.debug_context = {
+        "operation": "update_subscription",
+        "subscription_id": subscription_id,
+        "payload": payload.model_dump(mode="json", exclude_unset=True),
+    }
+    request.state.debug_stage = "subscription.load"
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    for key, value in _subscription_values(payload, db).items():
-        setattr(subscription, key, value)
-    db.commit()
-    db.refresh(subscription)
-    return _subscription_out(db, subscription)
+    try:
+        request.state.debug_stage = "subscription.apply-values"
+        for key, value in _subscription_values(payload, db).items():
+            setattr(subscription, key, value)
+        request.state.debug_stage = "subscription.commit"
+        db.commit()
+        request.state.debug_stage = "subscription.refresh"
+        db.refresh(subscription)
+        request.state.debug_stage = "subscription.serialize"
+        return _subscription_out(db, subscription)
+    except Exception:
+        db.rollback()
+        raise
 
 
 @app.post(
@@ -854,6 +982,25 @@ def clear_recent_items(
     db.commit()
     count = int(result.rowcount or 0)
     return {"ok": True, "count": count, "message": f"已清理 {count} 条最近记录（不会重复下载）"}
+
+
+@app.get("/api/logs/settings", dependencies=[Depends(require_admin)])
+def get_log_settings(db: Session = Depends(get_db)) -> dict[str, str]:
+    level = normalize_log_level(get_app_setting("log_level", settings.log_level, db))
+    if level != runtime_log_level():
+        set_runtime_log_level(level)
+    return {"level": level, "file": str(settings.data_dir / "logs" / "feeddock.log")}
+
+
+@app.put("/api/logs/settings", dependencies=[Depends(require_admin)])
+def update_log_settings(
+    payload: LogSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    level = set_runtime_log_level(payload.level)
+    set_app_setting(db, "log_level", level)
+    log_event("INFO", "日志级别已更新", f"当前级别：{level}")
+    return {"level": level, "file": str(settings.data_dir / "logs" / "feeddock.log")}
 
 
 @app.get("/api/logs", response_model=list[LogOut], dependencies=[Depends(require_admin)])
