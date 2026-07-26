@@ -96,10 +96,27 @@ jobs:
           from pathlib import Path
           import yaml
 
-          payload = yaml.safe_load(Path("docker-compose.fnos.yml").read_text())
-          assert payload["services"]["feeddock"]["image"].startswith("ghcr.io/planeteditorx/feeddock:")
-          assert "host.docker.internal:host-gateway" in payload["services"]["feeddock"]["extra_hosts"]
-          assert payload["services"]["feeddock"]["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]
+          payload = yaml.safe_load(Path("docker-compose.fnos.yml").read_text(encoding="utf-8"))
+          service = payload["services"]["feeddock"]
+
+          image = str(service.get("image", ""))
+          assert image.startswith("ghcr.io/planeteditorx/feeddock:"), f"Unexpected image: {image!r}"
+
+          extra_hosts = set(service.get("extra_hosts") or [])
+          required_host = "host.docker.internal:host-gateway"
+          assert required_host in extra_hosts, f"Missing extra_hosts entry: {required_host}"
+
+          volumes = set(service.get("volumes") or [])
+          required_volumes = {
+              "/vol1/1000/应用/feeddock/data:/data",
+              "/vol2/1000/影视:/media",
+          }
+          missing_volumes = required_volumes - volumes
+          assert not missing_volumes, f"Missing fnOS volume mounts: {sorted(missing_volumes)}"
+
+          environment = service.get("environment") or {}
+          assert environment.get("DOWNLOAD_PATH") == "/media", "DOWNLOAD_PATH must be /media"
+          assert environment.get("MEDIA_LOCAL_ROOT") == "/media", "MEDIA_LOCAL_ROOT must be /media"
           PY
 
   build-and-push:
