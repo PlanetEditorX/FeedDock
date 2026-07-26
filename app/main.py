@@ -384,7 +384,7 @@ def logout(response: Response) -> dict[str, bool]:
 
 
 @app.get("/api/config", dependencies=[Depends(require_admin)])
-def get_config(db: Session = Depends(get_db)) -> dict[str, str | int | bool]:
+def get_config(db: Session = Depends(get_db)) -> dict[str, Any]:
     qbit = load_qbittorrent_config(db)
     metadata = load_metadata_config(db)
     return {

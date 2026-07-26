@@ -67,6 +67,12 @@ class AuthFlowTests(unittest.TestCase):
 
             dashboard = client.get("/api/dashboard")
             self.assertEqual(dashboard.status_code, 200)
+
+            config = client.get("/api/config")
+            self.assertEqual(config.status_code, 200, config.text)
+            self.assertIsInstance(config.json()["automation"], dict)
+            self.assertIsInstance(config.json()["proxy"], dict)
+
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
             self.assertIn("系统与更新", home.text)
