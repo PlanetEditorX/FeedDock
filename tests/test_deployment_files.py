@@ -191,11 +191,11 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('load_rss_poll_config', scheduler)
 
     def test_feeddock_icon_is_used_on_main_and_auth_pages(self) -> None:
-        icon = (ROOT / "app/static/feeddock-icon.svg").read_text(encoding="utf-8")
-        self.assertIn('<svg', icon)
+        icon = ROOT / "app/static/feeddock-icon.png"
+        self.assertTrue(icon.is_file())
         for name in ("index.html", "login.html", "change-password.html"):
             page = (ROOT / "app/static" / name).read_text(encoding="utf-8")
-            self.assertIn('/static/feeddock-icon.svg', page)
+            self.assertIn('/static/feeddock-icon.png', page)
 
     def test_subscription_details_and_metadata_search_are_user_controlled(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
