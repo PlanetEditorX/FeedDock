@@ -273,7 +273,7 @@ def _subscription_preset(
         "episode_group": 0,
         "episode_offset": 0,
         "total_episodes": 0,
-        "save_path_template": "{base}/{subscription}/Season {season}",
+        "save_path_template": "{base}/{media_folder}/Season {season:02}",
         "custom_download_path": "",
         "missing_detection": False,
         "only_latest": False,

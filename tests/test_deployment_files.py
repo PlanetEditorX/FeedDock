@@ -190,6 +190,13 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('RSS_POLL_INTERVAL_SETTING_KEY', runtime)
         self.assertIn('load_rss_poll_config', scheduler)
 
+    def test_legacy_default_save_paths_upgrade_to_media_folder(self) -> None:
+        database = (ROOT / "app/database.py").read_text(encoding="utf-8")
+        rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
+        self.assertIn("migration:1.11.1:media-folder-paths", database)
+        self.assertIn("{base}/{media_folder}/Season {season:02}", database)
+        self.assertIn("_LEGACY_DEFAULT_SAVE_PATH_TEMPLATES", rss_service)
+
     def test_feeddock_icon_is_used_on_main_and_auth_pages(self) -> None:
         icon = ROOT / "app/static/feeddock-icon.png"
         self.assertTrue(icon.is_file())

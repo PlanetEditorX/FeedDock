@@ -59,6 +59,10 @@ class RSSServiceTests(unittest.TestCase):
             episode_offset=-13,
             total_episodes=9,
             season=2,
+            naming_mode="tmdb",
+            tmdb_title="金牌得主 (2025)",
+            metadata_year=2025,
+            tmdb_id=123,
             custom_download_path="/vol2/1000/影视/金牌得主 (2025)/Season 2",
             save_path_template="{base}/{subscription}/Season {season}",
         )
@@ -69,7 +73,7 @@ class RSSServiceTests(unittest.TestCase):
         self.assertTrue(result["matched"])
         self.assertEqual(result["parsed_episode"], "14")
         self.assertEqual(result["adjusted_episode"], "1")
-        self.assertEqual(result["save_path"], "/media/金牌得主 第二季/Season 2")
+        self.assertEqual(result["save_path"], "/media/金牌得主 (2025) [tmdbid=123]/Season 02")
 
     def test_regex_and_global_exclusion(self):
         self.assertFalse(match_title("Demo 01-02 1080p", "", r"\d-\d", "")[0])

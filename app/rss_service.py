@@ -31,6 +31,10 @@ _DEFAULT_EPISODE_PATTERNS = (
     re.compile(r"-\s*0*(\d{1,4}(?:\.5)?)(?:\s*(?:v\d+)?\s*(?:\[|\(|$))", re.IGNORECASE),
     re.compile(r"\[\s*0*(\d{1,4}(?:\.5)?)\s*\]"),
 )
+_LEGACY_DEFAULT_SAVE_PATH_TEMPLATES = {
+    "{base}/{subscription}/Season {season}",
+    "{base}/{subscription}/Season {season:02}",
+}
 
 
 def split_rules(value: str) -> list[str]:
@@ -173,6 +177,11 @@ def render_save_path(subscription: Subscription, episode: str, db: Session | Non
 
     context = _path_context(subscription, episode, base_root)
     template = (subscription.save_path_template or "").strip()
+    # Early versions used {subscription}, which is the raw RSS title and
+    # therefore cannot include the confirmed TMDB marker. Treat only the old
+    # built-in defaults as upgrades; intentionally custom templates remain as-is.
+    if template in _LEGACY_DEFAULT_SAVE_PATH_TEMPLATES:
+        template = "{base}/{media_folder}/Season {season:02}"
     if not template:
         template = (
             "{base}/{media_folder}"

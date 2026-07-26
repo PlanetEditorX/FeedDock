@@ -126,6 +126,34 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+    # Upgrade the previous built-in directory template to media_folder. The
+    # latter includes [tmdbid=...] after metadata confirmation, while custom
+    # user templates are intentionally preserved.
+    marker = "migration:1.11.1:media-folder-paths"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(
+                text(
+                    "UPDATE subscriptions SET save_path_template = :new_template "
+                    "WHERE save_path_template IN (:legacy_template, :legacy_padded_template)"
+                ),
+                {
+                    "new_template": "{base}/{media_folder}/Season {season:02}",
+                    "legacy_template": "{base}/{subscription}/Season {season}",
+                    "legacy_padded_template": "{base}/{subscription}/Season {season:02}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
+
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()

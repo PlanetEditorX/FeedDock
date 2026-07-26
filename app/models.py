@@ -97,7 +97,7 @@ class Subscription(Base):
 
     save_path_template: Mapped[str] = mapped_column(
         Text,
-        default="{base}/{subscription}/Season {season}",
+        default="{base}/{media_folder}/Season {season:02}",
         nullable=False,
     )
     custom_download_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
