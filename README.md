@@ -2,19 +2,19 @@
 
 FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取你配置的 RSS，将匹配条目推送给 qBittorrent，并提供 Mikan 季度目录、持久过滤、封面缓存、TMDB/Bangumi 元数据匹配、Emby 规范命名、总集数同步和可选本地 NFO 刮削。
 
-当前版本：`1.9.0`
+当前版本：`1.9.1`
 
-## v1.9.0 新增
+## v1.9.1 修正与增强
 
-- 手动、TMDB、Bangumi、自动四种命名模式。
-- Emby 友好目录：`标题 (年份) [tmdbid=ID]/Season 01`。
-- Emby 友好文件名：`标题 - S01E01.mkv`，字幕同步改名。
-- TMDB/Bangumi 搜索、详情读取、首播年份、简介、海报和总集数同步。
-- 总集数手动锁定；锁定后第三方同步不会覆盖。
-- 所有主板块可收起/展开，浏览器自动记住状态。
-- 可选生成 `tvshow.nfo`、`season.nfo`、`movie.nfo`、`poster.jpg`、`backdrop.jpg`。
-- 可选通知 Emby 扫描媒体库。
-- Mikan 240×320 WebP 封面本地优先缓存。
+- 选择 TMDB/Bangumi 条目后，订阅名称、来源标题和卡片统一显示 `标题 (年份)`。
+- 无法从示例标题识别集数时，预览使用明确标注的 `S01E01` 演示值，不再生成 `Eunknown`；真实下载仍必须识别到真实集数才自动改名。
+- qBittorrent 下载根目录、订阅根目录和本地刮削根目录强制使用同一个容器路径，默认 `/media`；子目录结构只由模板控制。
+- 订阅卡片显示元数据海报、简介、来源 ID、总集数、最终媒体目录和自动刮削状态。
+- qBittorrent 报告 100% 下载完成后自动写入本地 NFO/图片，并可通知 Emby 刷新。
+- 最近条目支持安全清理（保留去重指纹），系统日志支持清空。
+- 新订阅和本次升级后的旧订阅默认启用本地 NFO/图片刮削，仍可逐订阅关闭。
+- 飞牛默认以 `PUID=0`、`PGID=0` 运行，并在启动时实际检查 `/data`、`/media` 可写性。
+- 保留手动/TMDB/Bangumi/自动命名、板块折叠记忆、总集数锁定、Mikan 本地缩略图缓存等现有功能。
 
 ## 工作流程
 
@@ -31,7 +31,7 @@ TMDB 或 Bangumi 元数据匹配
    ↓
 qBittorrent 获取磁力元数据后，通过 WebUI API 重命名视频和同名字幕
    ↓
-可选写入本地 NFO/海报，并通知 Emby 刷新
+qBittorrent 达到 100% 后自动写入本地 NFO/海报，并可通知 Emby 刷新
 ```
 
 FeedDock 不提供媒体资源，也不会绕过 qBittorrent 直接移动正在做种的文件。
@@ -41,7 +41,7 @@ FeedDock 不提供媒体资源，也不会绕过 qBittorrent 直接移动正在�
 电视剧/季度番剧：
 
 ```text
-/downloads/rss/
+/media/
 └── 金牌得主 (2025) [tmdbid=123456]/
     └── Season 02/
         ├── 金牌得主 - S02E01.mkv
@@ -52,7 +52,7 @@ FeedDock 不提供媒体资源，也不会绕过 qBittorrent 直接移动正在�
 剧场版/电影：
 
 ```text
-/downloads/rss/
+/media/
 └── 电影标题 (2026) [tmdbid=123456]/
     ├── 电影标题 (2026).mkv
     ├── movie.nfo
@@ -185,11 +185,13 @@ volumes:
   - "/vol2/1000/影视:/media"
 
 environment:
-  DOWNLOAD_PATH: "/downloads/rss"
+  PUID: "0"
+  PGID: "0"
+  DOWNLOAD_PATH: "/media"
   MEDIA_LOCAL_ROOT: "/media"
 ```
 
-这里要求 qBittorrent 的 `DOWNLOAD_PATH` 与 FeedDock 的本地挂载存在可映射关系。最简单的方式是两个容器都把同一宿主机目录挂载到相同容器路径，例如都使用 `/media`：
+qBittorrent 与 FeedDock 必须把同一宿主机目录挂载到相同容器路径。v1.9.1 强制网页中的下载根目录与刮削根目录保持一致，推荐统一使用 `/media`：
 
 ```yaml
 DOWNLOAD_PATH: "/media"
@@ -202,7 +204,7 @@ MEDIA_LOCAL_ROOT: "/media"
 {base}/{media_folder}/Season {season:02}
 ```
 
-启用“允许生成本地 NFO 与图片”后，成功规范化文件时会自动：
+“允许生成本地 NFO 与图片”默认开启。qBittorrent 报告任务 100% 完成后会自动：
 
 - 写入 `tvshow.nfo` / `season.nfo` 或 `movie.nfo`；
 - 保存 `poster.jpg` 和 `backdrop.jpg`；
@@ -237,15 +239,34 @@ localStorage: feeddock.panelState.v1
 
 只要本地图片有效，即使超过浏览器缓存时间也不会主动重新访问 Mikan。仅在文件缺失、为空、损坏或图片 URL 改变时重新获取。
 
+## 清理最近条目与日志
+
+- “清理条目”只把历史条目标记为隐藏，保留 RSS 指纹，因此同一旧条目不会再次下载。
+- “清理日志”会删除全部系统日志。
+- 新产生的条目和日志会继续正常显示。
+
+## 飞牛权限
+
+默认 Compose 使用：
+
+```yaml
+PUID: "0"
+PGID: "0"
+UMASK: "002"
+TAKE_OWNERSHIP: "false"
+```
+
+容器以 root 运行可规避飞牛共享目录常见的 UID/GID 不一致问题。入口脚本不会递归修改整个影视库所有者，只会测试 `/data` 和 `/media` 是否可写；不可写时容器会直接输出明确错误。确认宿主机挂载目录正确后，也可改为普通 UID/GID，并自行授予目录读写权限。
+
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.9.0
+FEEDDOCK_BUILD_VERSION=1.9.1
 METADATA_LANGUAGE=zh-CN
 METADATA_AUTO_SYNC_HOURS=24
 TMDB_READ_ACCESS_TOKEN=
 BANGUMI_ACCESS_TOKEN=
-MEDIA_LOCAL_ROOT=
+MEDIA_LOCAL_ROOT=/media
 EMBY_URL=
 EMBY_API_KEY=
 MIKAN_THUMBNAIL_WIDTH=240
@@ -256,7 +277,7 @@ MIKAN_THUMBNAIL_HEIGHT=320
 
 ## 数据库升级
 
-启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除旧订阅和历史条目。旧订阅默认不开启重命名；编辑旧订阅后可主动勾选。
+启动时会对 SQLite 执行兼容迁移，不删除旧订阅和下载去重指纹。旧订阅仍默认不开启自动重命名；本地刮削在 v1.9.1 中一次性迁移为默认开启，可在订阅中关闭。所有订阅的下载根目录会同步为当前 qBittorrent 根目录。
 
 新增字段包括：
 

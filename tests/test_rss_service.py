@@ -69,7 +69,7 @@ class RSSServiceTests(unittest.TestCase):
         self.assertTrue(result["matched"])
         self.assertEqual(result["parsed_episode"], "14")
         self.assertEqual(result["adjusted_episode"], "1")
-        self.assertEqual(result["save_path"], "/vol2/1000/影视/金牌得主 (2025)/Season 2")
+        self.assertEqual(result["save_path"], "/media/金牌得主 第二季/Season 2")
 
     def test_regex_and_global_exclusion(self):
         self.assertFalse(match_title("Demo 01-02 1080p", "", r"\d-\d", "")[0])
@@ -81,9 +81,32 @@ class RSSServiceTests(unittest.TestCase):
         self.assertEqual(parse_episode("Demo 13.5", r"\d+(\.5)?", 0), "13.5")
         self.assertEqual(apply_episode_offset("13.5", -13), "0.5")
 
+    def test_preview_without_episode_uses_e01_example(self):
+        sub = Subscription(
+            name="从0位居民开始的边境领主大人 (2026)",
+            tmdb_title="从0位居民开始的边境领主大人 (2026)",
+            naming_mode="tmdb",
+            metadata_year=2026,
+            tmdb_id=296437,
+            rss_url="https://example.com/feed.xml",
+            season=1,
+            rename_enabled=True,
+            file_name_template="{title} - S{season:02}E{episode:02}",
+            save_path_template="{base}/{media_folder}/Season {season:02}",
+        )
+        result = preview_subscription(sub, "从0位居民开始的边境领主大人 (2026)")
+        self.assertFalse(result["episode_recognized"])
+        self.assertEqual(result["preview_episode"], "1")
+        self.assertNotIn("unknown", result["desired_name"])
+        self.assertTrue(result["desired_name"].endswith("S01E01"))
+        self.assertEqual(
+            result["save_path"],
+            "/media/从0位居民开始的边境领主大人 (2026) [tmdbid=296437]/Season 01",
+        )
+
     def test_path_traversal_is_confined(self):
         sub = Subscription(name="Demo", rss_url="https://example.com/feed.xml", save_path_template="{base}/../../etc")
-        self.assertTrue(render_save_path(sub, "1").endswith("/Demo"))
+        self.assertEqual(render_save_path(sub, "1"), "/media/Demo/Season 01")
 
 
 if __name__ == "__main__":

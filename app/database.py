@@ -56,7 +56,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     # default from the request body.
     "rename_enabled": "BOOLEAN NOT NULL DEFAULT 0",
     "file_name_template": "TEXT NOT NULL DEFAULT '{title} - S{season:02}E{episode:02}'",
-    "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "scrape_enabled": "BOOLEAN NOT NULL DEFAULT 1",
     "custom_download_path": "TEXT NOT NULL DEFAULT ''",
     "missing_detection": "BOOLEAN NOT NULL DEFAULT 0",
     "only_latest": "BOOLEAN NOT NULL DEFAULT 0",
@@ -68,6 +68,12 @@ _FEED_ITEM_COLUMNS: dict[str, str] = {
     "torrent_hash": "VARCHAR(80) NOT NULL DEFAULT ''",
     "rename_status": "VARCHAR(32) NOT NULL DEFAULT ''",
     "rename_message": "TEXT NOT NULL DEFAULT ''",
+    "download_progress": "INTEGER NOT NULL DEFAULT 0",
+    "completed_at": "DATETIME NULL",
+    "scrape_status": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "scrape_message": "TEXT NOT NULL DEFAULT ''",
+    "scraped_at": "DATETIME NULL",
+    "hidden": "BOOLEAN NOT NULL DEFAULT 0",
 }
 
 
@@ -91,6 +97,23 @@ def ensure_schema() -> None:
         return
     _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
     _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
+
+    # v1.9.1 changes local scraping from opt-in to opt-out. Apply this once to
+    # installations upgraded from v1.9.0, while preserving later user choices.
+    marker = "migration:1.9.1:scrape-default-enabled"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(text("UPDATE subscriptions SET scrape_enabled = 1"))
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
 
 
 def get_db() -> Generator[Session, None, None]:

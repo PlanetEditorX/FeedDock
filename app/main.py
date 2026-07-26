@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -93,7 +93,10 @@ def _set_session_cookie(response: Response, account: AdminAccount) -> None:
     )
 
 
-def _subscription_values(payload: SubscriptionCreate | SubscriptionUpdate | SubscriptionPreviewRequest) -> dict[str, Any]:
+def _subscription_values(
+    payload: SubscriptionCreate | SubscriptionUpdate | SubscriptionPreviewRequest,
+    db: Session | None = None,
+) -> dict[str, Any]:
     values = payload.model_dump(exclude_unset=isinstance(payload, SubscriptionUpdate), exclude={"sample_title"})
     for key in ("rss_url", "backup_rss_url"):
         if key in values:
@@ -105,6 +108,10 @@ def _subscription_values(payload: SubscriptionCreate | SubscriptionUpdate | Subs
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
+    if db is not None:
+        # qBittorrent, FeedDock scraping, and subscription rendering must use
+        # one identical container path. Customize only the folder template.
+        values["custom_download_path"] = load_qbittorrent_config(db).download_path
     return values
 
 
@@ -158,6 +165,11 @@ async def lifespan(_app: FastAPI):
     ensure_schema()
     with SessionLocal() as db:
         initialize_admin(db)
+        # Upgrade old subscriptions to the one-root model. qBittorrent and
+        # FeedDock must see the same container path (normally /media).
+        qbit_root = load_qbittorrent_config(db).download_path
+        db.execute(update(Subscription).values(custom_download_path=qbit_root))
+        db.commit()
     start_scheduler()
     yield
     stop_scheduler()
@@ -555,7 +567,7 @@ def refresh_mikan_bangumi_detail(
 
 @app.get("/api/dashboard", dependencies=[Depends(require_admin)])
 def dashboard(db: Session = Depends(get_db)) -> dict[str, int]:
-    statuses = dict(db.execute(select(FeedItem.status, func.count()).group_by(FeedItem.status)).all())
+    statuses = dict(db.execute(select(FeedItem.status, func.count()).where(FeedItem.hidden.is_(False)).group_by(FeedItem.status)).all())
     return {
         "subscriptions": db.scalar(select(func.count()).select_from(Subscription)) or 0,
         "enabled_subscriptions": db.scalar(
@@ -579,7 +591,7 @@ def preview_subscription_route(
     payload: SubscriptionPreviewRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, str | bool]:
-    values = _subscription_values(payload)
+    values = _subscription_values(payload, db)
     subscription = Subscription(**values)
     sample_title = payload.sample_title or payload.reference_title or payload.name
     return preview_subscription(subscription, sample_title, db)
@@ -587,7 +599,7 @@ def preview_subscription_route(
 
 @app.post("/api/subscriptions", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
 def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db)) -> SubscriptionOut:
-    subscription = Subscription(**_subscription_values(payload))
+    subscription = Subscription(**_subscription_values(payload, db))
     db.add(subscription)
     db.commit()
     db.refresh(subscription)
@@ -607,7 +619,7 @@ def update_subscription(
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    for key, value in _subscription_values(payload).items():
+    for key, value in _subscription_values(payload, db).items():
         setattr(subscription, key, value)
     db.commit()
     db.refresh(subscription)
@@ -700,7 +712,7 @@ def list_items(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> list[FeedItem]:
-    query = select(FeedItem).order_by(desc(FeedItem.created_at)).limit(limit)
+    query = select(FeedItem).where(FeedItem.hidden.is_(False)).order_by(desc(FeedItem.created_at)).limit(limit)
     if status:
         query = query.where(FeedItem.status == status)
     return list(db.scalars(query))
@@ -715,12 +727,36 @@ def retry_feed_item(item_id: int, db: Session = Depends(get_db)) -> dict[str, bo
     return {"ok": ok, "message": message}
 
 
+@app.delete("/api/items", dependencies=[Depends(require_admin)])
+def clear_recent_items(
+    status: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, int | bool | str]:
+    """Hide history rows without deleting fingerprints used for RSS deduplication."""
+
+    conditions = [FeedItem.hidden.is_(False)]
+    if status:
+        conditions.append(FeedItem.status == status)
+    result = db.execute(update(FeedItem).where(*conditions).values(hidden=True))
+    db.commit()
+    count = int(result.rowcount or 0)
+    return {"ok": True, "count": count, "message": f"已清理 {count} 条最近记录（不会重复下载）"}
+
+
 @app.get("/api/logs", response_model=list[LogOut], dependencies=[Depends(require_admin)])
 def list_logs(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> list[SystemLog]:
     return list(db.scalars(select(SystemLog).order_by(desc(SystemLog.created_at)).limit(limit)))
+
+
+@app.delete("/api/logs", dependencies=[Depends(require_admin)])
+def clear_logs(db: Session = Depends(get_db)) -> dict[str, int | bool | str]:
+    result = db.execute(delete(SystemLog))
+    db.commit()
+    count = int(result.rowcount or 0)
+    return {"ok": True, "count": count, "message": f"已清理 {count} 条系统日志"}
 
 
 @app.post("/api/actions/refresh", dependencies=[Depends(require_admin)])

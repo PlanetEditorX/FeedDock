@@ -31,19 +31,35 @@ def _chown_tree(path: Path, uid: int, gid: int) -> None:
             os.chown(Path(root) / name, uid, gid)
 
 
+def _assert_writable(path: Path, label: str) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".feeddock-write-test"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except OSError as exc:
+        raise SystemExit(
+            f"{label}不可写：{path}。请检查飞牛目录权限、容器挂载以及 PUID/PGID：{exc}"
+        ) from exc
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("missing command")
 
-    uid = _number("PUID", 1000)
-    gid = _number("PGID", 1000)
-    umask = _number("UMASK", 0o022, base=8)
+    uid = _number("PUID", 0)
+    gid = _number("PGID", 0)
+    umask = _number("UMASK", 0o002, base=8)
     os.umask(umask)
+    data_dir = Path(os.getenv("DATA_DIR", "/data"))
+    media_value = os.getenv("MEDIA_LOCAL_ROOT", "").strip()
+    media_dir = Path(media_value) if media_value else None
 
     if os.geteuid() == 0:
-        data_dir = Path(os.getenv("DATA_DIR", "/data"))
-        if _boolean("TAKE_OWNERSHIP", True):
+        if _boolean("TAKE_OWNERSHIP", False):
             try:
+                # Only adjust FeedDock's small application data directory. Never
+                # recursively chown a user's entire media library.
                 _chown_tree(data_dir, uid, gid)
             except PermissionError as exc:
                 raise SystemExit(
@@ -54,6 +70,10 @@ def main() -> None:
             os.setgroups([])
             os.setgid(gid)
             os.setuid(uid)
+
+    _assert_writable(data_dir, "FeedDock 数据目录")
+    if media_dir is not None:
+        _assert_writable(media_dir, "媒体目录")
 
     os.execvp(sys.argv[1], sys.argv[1:])
 

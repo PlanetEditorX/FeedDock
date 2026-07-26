@@ -4,6 +4,7 @@ const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 let subscriptionsById = new Map();
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
+let currentDownloadRoot = '/media';
 const mikanWeekdayDrafts = new Map();
 const PANEL_STATE_KEY = 'feeddock.panelState.v1';
 const MIKAN_WEEKDAY_STATE_KEY = 'feeddock.mikanWeekdayState.v1';
@@ -47,6 +48,11 @@ function fmtDate(value) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—';
 }
 
+function titleWithYear(title, year) {
+  const cleaned = String(title || '').trim().replace(/\s*\(\d{4}\)\s*$/, '');
+  return year ? `${cleaned} (${year})` : cleaned;
+}
+
 function setFormValue(form, name, value) {
   const element = form.elements[name];
   if (!element) return;
@@ -70,6 +76,8 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'save_path_template', '{base}/{media_folder}/Season {season:02}');
   setFormValue(subscriptionForm, 'file_name_template', '{title} - S{season:02}E{episode:02}');
   setFormValue(subscriptionForm, 'rename_enabled', true);
+  setFormValue(subscriptionForm, 'scrape_enabled', true);
+  setFormValue(subscriptionForm, 'custom_download_path', currentDownloadRoot);
   setFormValue(subscriptionForm, 'enabled', true);
   document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
   document.getElementById('metadataSearchResults').className = 'metadata-results muted';
@@ -163,7 +171,11 @@ async function loadDownloaderSettings() {
     ? '已保存密码；留空表示不修改'
     : '请输入 qBittorrent WebUI 密码';
   form.elements.qbit_category.value = data.qbit_category || 'rss';
-  form.elements.download_path.value = data.download_path || '/downloads/rss';
+  currentDownloadRoot = data.download_path || '/media';
+  form.elements.download_path.value = currentDownloadRoot;
+  if (!subscriptionForm.elements.custom_download_path.value) subscriptionForm.elements.custom_download_path.value = currentDownloadRoot;
+  const metadataForm = document.getElementById('metadataSettingsForm');
+  if (metadataForm && !metadataForm.elements.media_local_root.value) metadataForm.elements.media_local_root.value = currentDownloadRoot;
   form.elements.clear_password.checked = false;
 
   const source = data.source === 'web' ? '网页保存' : 'Compose 环境变量';
@@ -227,14 +239,14 @@ async function loadMetadataSettings() {
   form.elements.bangumi_access_token.value = '';
   form.elements.bangumi_access_token.placeholder = data.bangumi_token_configured ? '已保存；留空表示不修改' : '公开查询通常可留空';
   form.elements.metadata_language.value = data.metadata_language || data.language || 'zh-CN';
-  form.elements.media_local_root.value = data.media_local_root || '';
+  form.elements.media_local_root.value = data.media_local_root || currentDownloadRoot;
   form.elements.emby_url.value = data.emby_url || '';
   form.elements.emby_api_key.value = '';
   form.elements.emby_api_key.placeholder = data.emby_api_key_configured ? '已保存；留空表示不修改' : '可选';
   form.elements.clear_tmdb_token.checked = false;
   form.elements.clear_bangumi_token.checked = false;
   form.elements.clear_emby_api_key.checked = false;
-  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi ${data.bangumi_token_configured ? '已配置 Token' : '公开访问'} · 本地刮削 ${data.media_local_root ? '已启用' : '未启用'} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · Bangumi ${data.bangumi_token_configured ? '已配置 Token' : '公开访问'} · 统一媒体根目录 ${data.media_local_root || currentDownloadRoot} · Emby ${data.emby_api_key_configured && data.emby_url ? '已配置' : '未配置'}`;
 }
 
 function metadataSettingsPayload() {
@@ -267,16 +279,18 @@ async function applyMetadataCandidateToForm(candidate) {
     setFormValue(subscriptionForm, 'total_episodes', detail.total_episodes);
     setFormValue(subscriptionForm, 'total_episodes_source', detail.provider);
   }
+  const displayTitle = titleWithYear(detail.title, detail.year);
   if (detail.provider === 'tmdb') {
     setFormValue(subscriptionForm, 'tmdb_id', detail.id);
-    setFormValue(subscriptionForm, 'tmdb_title', detail.title);
+    setFormValue(subscriptionForm, 'tmdb_title', displayTitle);
     setFormValue(subscriptionForm, 'naming_mode', 'tmdb');
   } else {
     setFormValue(subscriptionForm, 'bangumi_id', detail.id);
-    setFormValue(subscriptionForm, 'reference_title', detail.title);
+    setFormValue(subscriptionForm, 'reference_title', displayTitle);
     setFormValue(subscriptionForm, 'bgm_url', detail.detail_url || `https://bangumi.tv/subject/${detail.id}`);
     if (!subscriptionForm.elements.tmdb_id.value || subscriptionForm.elements.tmdb_id.value === '0') setFormValue(subscriptionForm, 'naming_mode', 'bangumi');
   }
+  setFormValue(subscriptionForm, 'name', displayTitle);
   showNotice(`已读取 ${detail.provider.toUpperCase()} 详情；总集数 ${detail.total_episodes || '未知'}`);
 }
 
@@ -290,7 +304,7 @@ function renderMetadataResults(results) {
     if (candidate.poster_url) { const img = document.createElement('img'); img.src = candidate.poster_url; img.loading = 'lazy'; img.alt = ''; card.append(img); }
     const body = document.createElement('div'); body.className = 'metadata-card-body';
     const heading = document.createElement('div'); heading.className = 'metadata-card-title';
-    heading.append(text('strong', candidate.title || candidate.original_title));
+    heading.append(text('strong', titleWithYear(candidate.title || candidate.original_title, candidate.year)));
     heading.append(text('span', `${candidate.provider.toUpperCase()} · ${candidate.year || '年份未知'} · 匹配 ${(Number(candidate.score || 0) * 100).toFixed(0)}%`, 'muted'));
     body.append(heading);
     if (candidate.original_title && candidate.original_title !== candidate.title) body.append(text('span', `原名：${candidate.original_title}`, 'muted'));
@@ -818,27 +832,34 @@ async function loadSubscriptions() {
   container.replaceChildren();
   if (!data.length) { container.append(text('p', '还没有订阅。', 'empty')); return; }
   for (const sub of data) {
-    const card = document.createElement('article'); card.className = 'subscription-card';
+    const card = document.createElement('article'); card.className = 'subscription-card metadata-subscription-card';
+    if (sub.poster_url) {
+      const img = document.createElement('img');
+      img.className = 'subscription-poster'; img.src = sub.poster_url; img.loading = 'lazy'; img.decoding = 'async';
+      img.alt = `${sub.canonical_title || sub.name} 海报`; card.append(img);
+    }
+    const content = document.createElement('div'); content.className = 'subscription-card-content';
     const titleRow = document.createElement('div'); titleRow.className = 'subscription-title';
     titleRow.append(text('h3', sub.canonical_title || sub.name));
-    titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); card.append(titleRow);
+    titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
+    if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
     const meta = document.createElement('div'); meta.className = 'subscription-meta';
     meta.append(text('span', `原订阅名：${sub.name}`));
     meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
     meta.append(text('span', `来源：${sub.metadata_source || '未匹配'} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'}`));
     meta.append(text('span', `季 ${sub.season} · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
-    meta.append(text('span', `路径：${sub.custom_download_path || sub.save_path_template}`));
-    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 本地刮削 ${sub.scrape_enabled ? '开启' : '关闭'}`));
+    meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
+    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 下载完成自动刮削 ${sub.scrape_enabled ? '开启' : '关闭'}`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
-    card.append(meta);
-    card.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
+    content.append(meta);
+    content.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, sub.last_error ? 'error-text' : 'muted'));
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
-    const scrape = text('button', '刮削本地文件', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape?notify_emby=true`, { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); } });
+    const scrape = text('button', '立即刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape?notify_emby=true`, { method: 'POST' }); showNotice(result.message, result.ok); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
     const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
-    controls.append(edit, sync, scrape, toggle, remove); card.append(controls); container.append(card);
+    controls.append(edit, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
   }
 }
 
@@ -852,12 +873,12 @@ async function loadItems() {
     const titleCell = document.createElement('td');
     if (item.source_url) { const link = text('a', item.title); link.href = item.source_url; link.target = '_blank'; link.rel = 'noreferrer noopener'; titleCell.append(link); } else titleCell.textContent = item.title;
     row.append(titleCell); row.append(text('td', item.episode || '—'));
-    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`)); row.append(statusCell);
-    const rename = item.rename_status ? `${item.rename_status}${item.desired_name ? `：${item.desired_name}` : ''}${item.rename_message ? `
-${item.rename_message}` : ''}` : (item.desired_name || '未启用');
-    row.append(text('td', rename, item.rename_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
+    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
+    if (item.status === 'queued') statusCell.append(text('small', ` ${item.download_progress || 0}%`, 'muted')); row.append(statusCell);
+    const rename = [item.rename_status || (item.desired_name ? '等待处理' : '未启用'), item.desired_name || '', item.rename_message || '', item.scrape_status ? `刮削：${item.scrape_status}` : '', item.scrape_message || ''].filter(Boolean).join('\n');
+    row.append(text('td', rename, item.rename_status === 'error' || item.scrape_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
     const actionCell = document.createElement('td');
-    if (item.status === 'error') { const retry = text('button', '重试', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
+    if (item.status === 'error' || item.scrape_status === 'error') { const retry = text('button', '重试', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
     row.append(actionCell); tbody.append(row);
   }
 }
@@ -892,6 +913,14 @@ async function reloadAll() {
     showNotice(error.message, false);
   }
 }
+
+document.getElementById('downloaderForm').elements.download_path.addEventListener('input', (event) => {
+  const value = event.currentTarget.value.trim();
+  if (!value) return;
+  currentDownloadRoot = value;
+  document.getElementById('metadataSettingsForm').elements.media_local_root.value = value;
+  if (!subscriptionForm.elements.subscription_id.value) subscriptionForm.elements.custom_download_path.value = value;
+});
 
 document.getElementById('downloaderForm').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -965,7 +994,7 @@ document.getElementById('searchMetadata').addEventListener('click', async () => 
 });
 
 document.getElementById('normalizeTorrents').addEventListener('click', async () => {
-  try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`规范化完成：成功 ${result.renamed || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
+  try { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(`检查完成：规范化 ${result.renamed || 0}，下载完成 ${result.completed || 0}，自动刮削 ${result.scraped || 0}，等待 ${result.pending || 0}，需手动 ${result.manual_required || 0}，失败 ${result.errors || 0}`, !(result.errors)); await loadItems(); } catch (error) { showNotice(error.message, false); }
 });
 
 document.getElementById('refreshEmby').addEventListener('click', async () => {
@@ -1005,8 +1034,9 @@ document.getElementById('previewSubscription').addEventListener('click', async (
     });
     subscriptionPreviewBox.textContent = [
       `匹配结果：${result.matched ? '通过' : '不通过'}（${result.match_reason}）`,
-      `原始集数：${result.parsed_episode || '未识别'}`,
+      `原始集数：${result.parsed_episode || '未识别（请粘贴真实 RSS 标题）'}`,
       `偏移后集数：${result.adjusted_episode || '未识别'}`,
+      `命名预览集数：${result.episode_recognized ? result.preview_episode : `${result.preview_episode}（仅作 E01 示例）`}`,
       `媒体目录：${result.media_folder || '—'}`,
       `最终下载位置：${result.save_path}`,
       `规范文件名：${result.desired_name || '未生成'}`,
@@ -1058,6 +1088,16 @@ document.getElementById('applyUpdate').addEventListener('click', async () => {
 document.getElementById('logout').addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.replace('/login');
+});
+
+document.getElementById('clearRecentItems').addEventListener('click', async () => {
+  if (!window.confirm('确认清空最近条目显示？历史指纹会保留，旧 RSS 不会因此重复下载。')) return;
+  try { const result = await api('/api/items', { method: 'DELETE' }); showNotice(result.message); await Promise.all([loadItems(), loadDashboard()]); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('clearSystemLogs').addEventListener('click', async () => {
+  if (!window.confirm('确认清空全部系统日志？')) return;
+  try { const result = await api('/api/logs', { method: 'DELETE' }); showNotice(result.message); await loadLogs(); } catch (error) { showNotice(error.message, false); }
 });
 
 document.getElementById('statusFilter').addEventListener('change', loadItems);

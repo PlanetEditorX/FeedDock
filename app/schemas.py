@@ -61,7 +61,7 @@ class SubscriptionCreate(BaseModel):
 
     rename_enabled: bool = True
     file_name_template: str = "{title} - S{season:02}E{episode:02}"
-    scrape_enabled: bool = False
+    scrape_enabled: bool = True
     save_path_template: str = "{base}/{media_folder}/Season {season:02}"
     custom_download_path: str = ""
     missing_detection: bool = False
@@ -186,6 +186,8 @@ class SubscriptionPreviewRequest(SubscriptionCreate):
 class SubscriptionPreviewOut(BaseModel):
     parsed_episode: str = ""
     adjusted_episode: str = ""
+    episode_recognized: bool = False
+    preview_episode: str = ""
     matched: bool
     match_reason: str
     save_path: str
@@ -215,6 +217,12 @@ class FeedItemOut(BaseModel):
     torrent_hash: str
     rename_status: str
     rename_message: str
+    download_progress: int
+    completed_at: datetime | None
+    scrape_status: str
+    scrape_message: str
+    scraped_at: datetime | None
+    hidden: bool
     created_at: datetime
     updated_at: datetime
 
@@ -263,7 +271,7 @@ class QBittorrentSettingsUpdate(BaseModel):
     qbit_password: str | None = Field(default=None, max_length=500)
     clear_password: bool = False
     qbit_category: str = Field(default="rss", max_length=200)
-    download_path: str = Field(default="/downloads/rss", max_length=2000)
+    download_path: str = Field(default="/media", max_length=2000)
 
     @field_validator("qbit_url", "qbit_username", "qbit_category", "download_path")
     @classmethod

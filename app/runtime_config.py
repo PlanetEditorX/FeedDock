@@ -4,13 +4,13 @@ from dataclasses import dataclass
 import json
 from urllib.parse import urlparse
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
-from .models import AppSetting
+from .models import AppSetting, Subscription
 
 
 QBIT_SETTING_KEYS = {
@@ -136,6 +136,7 @@ def save_qbittorrent_config(
         download_path=download_path,
     )
     current = load_qbittorrent_config(db)
+    old_download_path = current.download_path
     password = "" if clear_password else (current.password if qbit_password is None else qbit_password)
     if len(password) > 500:
         raise ValueError("qBittorrent 密码过长")
@@ -157,12 +158,31 @@ def save_qbittorrent_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
+
+    # Keep the FeedDock scraper mount path aligned with the qBittorrent save
+    # root. This is the safest fnOS setup because both containers then use the
+    # same internal path, normally /media.
+    media_row = db.get(AppSetting, "media_local_root")
+    if media_row is None:
+        db.add(AppSetting(key="media_local_root", value=path))
+    else:
+        media_row.value = path
+    # Every subscription uses the same container-visible media root. Folder
+    # customization belongs in save_path_template, not in a second root path.
+    db.execute(update(Subscription).values(custom_download_path=path))
     db.commit()
     return load_qbittorrent_config(db)
 
 
 def reset_qbittorrent_config(db: Session) -> QBittorrentConfig:
     db.execute(delete(AppSetting).where(AppSetting.key.in_(QBIT_SETTING_KEYS)))
+    fallback = _environment_config()
+    db.execute(update(Subscription).values(custom_download_path=fallback.download_path))
+    media_row = db.get(AppSetting, "media_local_root")
+    if media_row:
+        media_row.value = fallback.download_path
+    else:
+        db.add(AppSetting(key="media_local_root", value=fallback.download_path))
     db.commit()
     return load_qbittorrent_config(db)
 
@@ -330,7 +350,7 @@ def _environment_metadata_config() -> MetadataConfig:
         tmdb_read_access_token=settings.tmdb_read_access_token,
         bangumi_access_token=settings.bangumi_access_token,
         language=settings.metadata_language,
-        media_local_root=str(settings.media_local_root or ""),
+        media_local_root=str(settings.media_local_root or settings.download_path),
         emby_url=settings.emby_url,
         emby_api_key=settings.emby_api_key,
         source="compose",
@@ -339,6 +359,16 @@ def _environment_metadata_config() -> MetadataConfig:
 
 def _load_metadata_with_session(db: Session) -> MetadataConfig:
     fallback = _environment_metadata_config()
+    qbit_root = load_qbittorrent_config(db).download_path
+    fallback = MetadataConfig(
+        tmdb_read_access_token=fallback.tmdb_read_access_token,
+        bangumi_access_token=fallback.bangumi_access_token,
+        language=fallback.language,
+        media_local_root=qbit_root,
+        emby_url=fallback.emby_url,
+        emby_api_key=fallback.emby_api_key,
+        source=fallback.source,
+    )
     try:
         rows = {
             row.key: row.value
@@ -354,7 +384,7 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         ),
         bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
         language=rows.get("metadata_language", fallback.language).strip() or "zh-CN",
-        media_local_root=rows.get("media_local_root", fallback.media_local_root).strip(),
+        media_local_root=qbit_root,
         emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
         emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
         source="web",
@@ -398,11 +428,16 @@ def save_metadata_config(
     if len(language) > 20:
         raise ValueError("元数据语言代码过长")
 
-    local_root = media_local_root.strip().rstrip("/")
-    if local_root and not local_root.startswith("/"):
+    qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
+    local_root = media_local_root.strip().rstrip("/") or qbit_root
+    if not local_root.startswith("/"):
         raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
     if len(local_root) > 2000:
         raise ValueError("本地媒体挂载目录过长")
+    if local_root != qbit_root:
+        raise ValueError(
+            f"本地媒体挂载目录必须与 qBittorrent 下载保存根目录一致：{qbit_root}"
+        )
 
     clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
     tmdb_token = "" if clear_tmdb_token else (

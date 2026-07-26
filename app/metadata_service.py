@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .models import Subscription
-from .naming import canonical_title
+from .naming import canonical_title, title_with_year
 from .runtime_config import MetadataConfig, load_metadata_config
 
 
@@ -147,12 +147,17 @@ class MetadataService:
         if record.air_date:
             subscription.air_date = record.air_date
 
+        display_title = title_with_year(record.title, record.year)
+        # Selecting a metadata record is an explicit request to use its
+        # canonical display name. Keep the subscription label aligned as well
+        # so cards, search results, and edit forms all show the year suffix.
+        subscription.name = display_title or subscription.name
         if provider == "tmdb":
             subscription.tmdb_id = record.id
-            subscription.tmdb_title = record.title
+            subscription.tmdb_title = display_title
         else:
             subscription.bangumi_id = record.id
-            subscription.reference_title = record.title
+            subscription.reference_title = display_title
             subscription.bgm_url = record.detail_url
 
         if record.total_episodes > 0 and not subscription.total_episodes_locked:
@@ -255,7 +260,7 @@ class MetadataService:
                     provider="tmdb",
                     id=int(item.get("id") or 0),
                     media_type=kind,
-                    title=title or original,
+                    title=title_with_year(title or original, item_year),
                     original_title=original,
                     year=item_year,
                     overview=str(item.get("overview") or "").strip(),
@@ -302,7 +307,21 @@ class MetadataService:
         year = int(date_value[:4]) if len(date_value) >= 4 and date_value[:4].isdigit() else 0
         poster_path = str(season_detail.get("poster_path") or detail.get("poster_path") or "")
         backdrop_path = str(detail.get("backdrop_path") or "")
-        total = 1 if kind == "movie" else len(season_detail.get("episodes") or [])
+        if kind == "movie":
+            total = 1
+        else:
+            total = len(season_detail.get("episodes") or [])
+            if total <= 0:
+                for season_row in detail.get("seasons") or []:
+                    try:
+                        season_number = int(season_row.get("season_number") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if season_number == int(season):
+                        total = int(season_row.get("episode_count") or 0)
+                        break
+            if total <= 0 and int(season) == 1:
+                total = int(detail.get("number_of_episodes") or 0)
         return MetadataRecord(
             provider="tmdb",
             id=metadata_id,
@@ -355,7 +374,7 @@ class MetadataService:
                     provider="bangumi",
                     id=subject_id,
                     media_type="tv",
-                    title=title or original,
+                    title=title_with_year(title or original, item_year),
                     original_title=original,
                     year=item_year,
                     overview=str(item.get("summary") or "").strip(),

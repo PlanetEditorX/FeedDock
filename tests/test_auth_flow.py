@@ -13,6 +13,8 @@ os.environ["APP_VERSION"] = "1.7.0"
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.database import SessionLocal
+from app.models import FeedItem, SystemLog
 
 
 class AuthFlowTests(unittest.TestCase):
@@ -211,6 +213,8 @@ class AuthFlowTests(unittest.TestCase):
             )
             self.assertEqual(created_subscription.status_code, 200)
             self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
+            self.assertTrue(created_subscription.json()["scrape_enabled"])
+            self.assertEqual(created_subscription.json()["custom_download_path"], "/media")
             subscriptions = client.get("/api/subscriptions")
             self.assertEqual(subscriptions.status_code, 200)
             self.assertTrue(
@@ -253,7 +257,7 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(preview.json()["adjusted_episode"], "1")
             self.assertEqual(
                 preview.json()["save_path"],
-                "/vol2/1000/影视/金牌得主 (2025)/Season 2",
+                "/media/金牌得主 第二季/Season 2",
             )
 
             advanced = client.post("/api/subscriptions", json=advanced_payload)
@@ -290,6 +294,39 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(preserve_password.status_code, 200)
             self.assertTrue(preserve_password.json()["qbit_password_configured"])
             self.assertEqual(preserve_password.json()["qbit_category"], "anime")
+
+            aligned_subscriptions = client.get("/api/subscriptions")
+            self.assertEqual(aligned_subscriptions.status_code, 200)
+            self.assertTrue(aligned_subscriptions.json())
+            self.assertTrue(all(
+                item["custom_download_path"] == "/media/downloads/rss"
+                for item in aligned_subscriptions.json()
+            ))
+
+            with SessionLocal() as db:
+                subscription_id = aligned_subscriptions.json()[0]["id"]
+                db.add(FeedItem(
+                    subscription_id=subscription_id,
+                    fingerprint="c" * 64,
+                    title="清理测试条目",
+                    status="skipped",
+                    reason="test",
+                ))
+                db.add(SystemLog(level="INFO", message="清理测试日志", details="test"))
+                db.commit()
+
+            clear_items = client.delete("/api/items")
+            self.assertEqual(clear_items.status_code, 200)
+            self.assertGreaterEqual(clear_items.json()["count"], 1)
+            self.assertEqual(client.get("/api/items").json(), [])
+            with SessionLocal() as db:
+                hidden_item = db.query(FeedItem).filter(FeedItem.fingerprint == "c" * 64).one()
+                self.assertTrue(hidden_item.hidden)
+
+            clear_logs = client.delete("/api/logs")
+            self.assertEqual(clear_logs.status_code, 200)
+            self.assertGreaterEqual(clear_logs.json()["count"], 1)
+            self.assertEqual(client.get("/api/logs").json(), [])
 
             logout = client.post("/api/auth/logout")
             self.assertEqual(logout.status_code, 200)

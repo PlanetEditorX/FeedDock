@@ -79,7 +79,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.9.0"),
+        app_version=os.getenv("APP_VERSION", "1.9.1"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -90,13 +90,13 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.9.0 (+self-hosted RSS automation)",
+            "FeedDock/1.9.1 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
         qbit_password=os.getenv("QBIT_PASSWORD", ""),
         qbit_category=os.getenv("QBIT_CATEGORY", "rss").strip(),
-        download_path=os.getenv("DOWNLOAD_PATH", "/downloads/rss").strip(),
+        download_path=os.getenv("DOWNLOAD_PATH", "/media").strip(),
         timezone=os.getenv("TZ", "Asia/Shanghai"),
         update_repository=os.getenv("UPDATE_REPOSITORY", "planeteditorx/feeddock").strip().strip("/"),
         update_api_url=os.getenv("UPDATE_API_URL", "https://api.github.com").strip().rstrip("/"),

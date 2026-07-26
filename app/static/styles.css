@@ -223,3 +223,13 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
   .metadata-card { grid-template-columns: 66px minmax(0, 1fr); }
   .metadata-card > img { width: 66px; height: 94px; }
 }
+
+/* v1.9.1 subscription metadata cards and maintenance actions */
+.metadata-subscription-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; }
+.subscription-poster { width: 120px; height: 172px; border-radius: 9px; object-fit: cover; background: var(--panel-2); }
+.subscription-card-content { min-width: 0; }
+.subscription-overview { color: var(--muted); line-height: 1.65; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+@media (max-width: 620px) {
+  .metadata-subscription-card { grid-template-columns: 78px minmax(0, 1fr); gap: 12px; }
+  .subscription-poster { width: 78px; height: 112px; }
+}

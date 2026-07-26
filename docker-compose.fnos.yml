@@ -10,9 +10,10 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       TZ: "Asia/Shanghai"
-      PUID: "1000"
-      PGID: "1000"
-      UMASK: "022"
+      PUID: "0"
+      PGID: "0"
+      UMASK: "002"
+      TAKE_OWNERSHIP: "false"
       ADMIN_USER: "admin"
       ADMIN_PASSWORD: "password"
       SESSION_DAYS: "7"
@@ -33,15 +34,14 @@ services:
       QBIT_USERNAME: ""
       QBIT_PASSWORD: ""
       QBIT_CATEGORY: "rss"
-      DOWNLOAD_PATH: "/downloads/rss"
+      DOWNLOAD_PATH: "/media"
 
       # 元数据与 Emby 规范命名
       METADATA_LANGUAGE: "zh-CN"
       METADATA_AUTO_SYNC_HOURS: "24"
       TMDB_READ_ACCESS_TOKEN: ""
       BANGUMI_ACCESS_TOKEN: ""
-      # 仅在下方挂载媒体目录后填写 /media
-      MEDIA_LOCAL_ROOT: ""
+      MEDIA_LOCAL_ROOT: "/media"
       EMBY_URL: ""
       EMBY_API_KEY: ""
 
@@ -56,5 +56,4 @@ services:
 
     volumes:
       - "/vol1/1000/应用/feeddock/data:/data"
-      # 可选：启用本地 NFO/海报刮削时取消注释并修改真实媒体目录
-      # - "/vol2/1000/影视:/media"
+      - "/vol2/1000/影视:/media"

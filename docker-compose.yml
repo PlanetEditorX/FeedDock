@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.9.0}
+        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.9.1}
     image: ${FEEDDOCK_IMAGE:-feeddock:local}
     container_name: feeddock
     restart: unless-stopped
@@ -15,9 +15,7 @@ services:
       - "${APP_PORT:-7789}:8000"
     volumes:
       - ./data:/data
-      - ./downloads:/downloads
-      # 可选：本地 NFO/图片刮削需要与 qBittorrent 使用同一媒体目录
-      # - /你的/媒体目录:/media
+      - ./downloads:/media
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     networks:
@@ -29,8 +27,8 @@ services:
     profiles: ["with-qbit"]
     restart: unless-stopped
     environment:
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
+      PUID: "${PUID:-0}"
+      PGID: "${PGID:-0}"
       TZ: "${TZ:-Asia/Shanghai}"
       WEBUI_PORT: "8080"
       TORRENTING_PORT: "6881"
@@ -40,7 +38,7 @@ services:
       - "6881:6881/udp"
     volumes:
       - ./qbit-config:/config
-      - ./downloads:/downloads
+      - ./downloads:/media
     labels:
       com.centurylinklabs.watchtower.enable: "false"
     networks:

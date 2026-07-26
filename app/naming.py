@@ -24,6 +24,19 @@ def safe_segment(value: str, fallback: str = "未命名") -> str:
     return cleaned or fallback
 
 
+
+
+def title_with_year(title: str, year: int) -> str:
+    """Return a display title with one trailing ``(YYYY)`` suffix."""
+
+    cleaned = " ".join((title or "").split()).strip()
+    if not cleaned:
+        return ""
+    if year <= 0:
+        return cleaned
+    cleaned = re.sub(r"\s*\(\d{4}\)\s*$", "", cleaned).rstrip()
+    return f"{cleaned} ({year})"
+
 def canonical_title(subscription: Subscription) -> str:
     mode = str(_value(subscription, "naming_mode", "auto") or "auto").strip().lower()
     manual = str(_value(subscription, "manual_title", "") or "").strip()

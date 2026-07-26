@@ -4,12 +4,18 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.database import Base
+from app.models import FeedItem, Subscription
 from unittest.mock import patch
 
-from app.downloader import QBittorrentClient
+from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService
 from app.naming import media_folder_name, remote_to_local_path, render_desired_name
-from app.scraper import scrape_subscription
+from app.scraper import ScrapeResult, scrape_subscription
 
 
 class _Response:
@@ -42,7 +48,7 @@ class _FakeQbitClient:
     def get(self, path, params=None):
         self.calls.append(("GET", path, params, None))
         if path.endswith("torrents/info"):
-            return _Response(payload=[{"hash": "abc", "added_on": 1}])
+            return _Response(payload=[{"hash": "abc", "added_on": 1, "progress": 1.0, "amount_left": 0, "state": "uploading"}])
         if path.endswith("torrents/files"):
             return _Response(payload=[
                 {"name": "raw/[Group] Show - 01.mkv"},
@@ -98,7 +104,7 @@ class MetadataNamingTests(unittest.TestCase):
             self.assertTrue(added.ok)
             normalized = client.normalize_single_video(tag="feeddock-item-1", desired_name="Show - S01E01")
         self.assertTrue(normalized.ok)
-        self.assertEqual(normalized.state, "renamed")
+        self.assertEqual(normalized.state, "completed")
         add_call = next(call for call in calls if call[1].endswith("torrents/add"))
         self.assertEqual(add_call[3]["rename"][1], "Show - S01E01")
         self.assertEqual(add_call[3]["tags"][1], "feeddock-item-1")
@@ -116,6 +122,8 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertEqual(sub.total_episodes, 12)
         self.assertEqual(sub.total_episodes_source, "tmdb")
         self.assertEqual(sub.tmdb_id, 88)
+        self.assertEqual(sub.name, "规范标题 (2026)")
+        self.assertEqual(sub.tmdb_title, "规范标题 (2026)")
 
         sub.total_episodes = 24
         sub.total_episodes_locked = True
@@ -147,6 +155,51 @@ class MetadataNamingTests(unittest.TestCase):
             record = service.get(SimpleNamespace(), provider="bangumi", metadata_id=66, season=1)
         self.assertEqual(record.total_episodes, 13)
         self.assertEqual(record.title, "番剧")
+
+    def test_download_completion_triggers_scrape_once(self):
+        engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as db:
+            sub = Subscription(
+                name="自动刮削番剧 (2026)",
+                rss_url="https://example.com/rss",
+                scrape_enabled=True,
+                rename_enabled=True,
+            )
+            db.add(sub)
+            db.flush()
+            item = FeedItem(
+                subscription_id=sub.id,
+                fingerprint="a" * 64,
+                title="自动刮削番剧 - 01",
+                status="queued",
+                qbit_tag="feeddock-item-1",
+                desired_name="自动刮削番剧 - S01E01",
+                rename_status="waiting_completion",
+                scrape_status="pending",
+            )
+            db.add(item)
+            db.commit()
+
+            fake_qbit = SimpleNamespace(
+                normalize_single_video=lambda **_: TorrentNormalizeResult(
+                    True, "completed", "下载已完成", "abc", True, 100
+                )
+            )
+            from app.postprocess import normalize_pending_items
+            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit), \
+                 patch("app.scraper.scrape_subscription", return_value=ScrapeResult(True, "已刮削")), \
+                 patch("app.scraper.refresh_emby_library", return_value=ScrapeResult(True, "已刷新")):
+                result = normalize_pending_items(db)
+
+            db.refresh(item)
+            self.assertEqual(result["completed"], 1)
+            self.assertEqual(result["scraped"], 1)
+            self.assertEqual(item.download_progress, 100)
+            self.assertEqual(item.scrape_status, "success")
+            self.assertIsNotNone(item.completed_at)
+            self.assertIsNotNone(item.scraped_at)
 
     def test_local_scraper_writes_nfo_without_downloading_images(self):
         with tempfile.TemporaryDirectory() as tmp:

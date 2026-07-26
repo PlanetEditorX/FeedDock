@@ -169,9 +169,35 @@ class DeploymentFileTests(unittest.TestCase):
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)
         self.assertIn('BANGUMI_ACCESS_TOKEN: ""', compose)
-        self.assertIn('MEDIA_LOCAL_ROOT: ""', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
         self.assertIn('EMBY_URL: ""', compose)
-        self.assertIn('# - "/vol2/1000/影视:/media"', compose)
+        self.assertIn('- "/vol2/1000/影视:/media"', compose)
+
+    def test_fnos_permissions_and_media_root_are_consistent(self) -> None:
+        compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "docker-entrypoint.py").read_text(encoding="utf-8")
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('PUID: "0"', compose)
+        self.assertIn('PGID: "0"', compose)
+        self.assertIn('DOWNLOAD_PATH: "/media"', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
+        self.assertIn('chown -R 0:0 /app /data /media', dockerfile)
+        self.assertIn('_number("PUID", 0)', entrypoint)
+        self.assertIn('name="media_local_root" placeholder="/media" readonly', index)
+        self.assertIn('name="custom_download_path" placeholder="/media" readonly', index)
+        self.assertIn("currentDownloadRoot = '/media'", script)
+
+    def test_subscription_cards_show_metadata_and_cleanup_controls(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('id="clearRecentItems"', index)
+        self.assertIn('id="clearSystemLogs"', index)
+        self.assertIn("className = 'subscription-poster'", script)
+        self.assertIn('sub.metadata_overview', script)
+        self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', true)", script)
+        self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 
 if __name__ == "__main__":
     unittest.main()

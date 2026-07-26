@@ -164,9 +164,14 @@ def _path_context(subscription: Subscription, episode: str, download_path: str) 
 
 
 def render_save_path(subscription: Subscription, episode: str, db: Session | None = None) -> str:
-    download_path = load_qbittorrent_config(db).download_path
-    context = _path_context(subscription, episode, download_path)
-    template = (subscription.custom_download_path or subscription.save_path_template).strip()
+    # A single container-visible root is used by qBittorrent and FeedDock's
+    # local scraper. Per-subscription customization belongs in the path
+    # template below, never in a second, potentially unmapped root.
+    qbit_root = posixpath.normpath("/" + load_qbittorrent_config(db).download_path.lstrip("/"))
+    base_root = qbit_root
+
+    context = _path_context(subscription, episode, base_root)
+    template = (subscription.save_path_template or "").strip()
     if not template:
         template = (
             "{base}/{media_folder}"
@@ -175,18 +180,20 @@ def render_save_path(subscription: Subscription, episode: str, db: Session | Non
         )
     try:
         rendered = template.format_map(context)
-    except (KeyError, ValueError):
-        rendered = f"{context['base']}/{context['subscription']}/Season {context['season']}"
+    except (KeyError, ValueError, TypeError):
+        rendered = (
+            f"{context['base']}/{context['media_folder']}"
+            if (subscription.media_type or "tv") == "movie"
+            else f"{context['base']}/{context['media_folder']}/Season {context['season']:02d}"
+        )
 
     normalized = posixpath.normpath("/" + rendered.lstrip("/"))
-    if subscription.custom_download_path:
-        # Custom paths are explicitly entered by the administrator and are sent
-        # to qBittorrent as-is after normalization. FeedDock never touches them.
-        return normalized
-
-    base = posixpath.normpath("/" + download_path.lstrip("/"))
-    if not (normalized == base or normalized.startswith(base.rstrip("/") + "/")):
-        return f"{base}/{context['subscription']}"
+    if normalized != base_root and not normalized.startswith(base_root.rstrip("/") + "/"):
+        return (
+            f"{base_root}/{context['media_folder']}"
+            if (subscription.media_type or "tv") == "movie"
+            else f"{base_root}/{context['media_folder']}/Season {context['season']:02d}"
+        )
     return normalized
 
 
@@ -247,6 +254,12 @@ def preview_subscription(subscription: Subscription, sample_title: str, db: Sess
     global_excludes = get_app_setting("global_exclude_rules", "", db)
     parsed = parse_episode(sample_title, subscription.episode_regex, subscription.episode_group)
     adjusted = apply_episode_offset(parsed, subscription.episode_offset) if parsed else ""
+    episode_recognized = bool(adjusted)
+    # A metadata title such as “番剧名 (2026)” normally has no episode number.
+    # Preview the path and naming template with E01 rather than emitting
+    # ``Eunknown``. Real downloads still require a parsed RSS episode and never
+    # use this preview-only fallback.
+    preview_episode = adjusted or "1"
     matched, reason = match_title(
         sample_title,
         subscription.include_keywords,
@@ -256,13 +269,17 @@ def preview_subscription(subscription: Subscription, sample_title: str, db: Sess
     number = episode_number(adjusted)
     if matched and subscription.total_episodes and number is not None and number > subscription.total_episodes:
         matched, reason = False, f"集数 {adjusted} 超过总集数 {subscription.total_episodes}"
+    elif matched and not episode_recognized:
+        reason = "标题匹配通过；示例标题未识别集数，文件名按第 1 集演示"
     return {
         "parsed_episode": parsed,
         "adjusted_episode": adjusted,
+        "episode_recognized": episode_recognized,
+        "preview_episode": preview_episode,
         "matched": matched,
         "match_reason": reason,
-        "save_path": render_save_path(subscription, adjusted, db),
-        "desired_name": render_desired_name(subscription, adjusted) if subscription.rename_enabled else "",
+        "save_path": render_save_path(subscription, preview_episode, db),
+        "desired_name": render_desired_name(subscription, preview_episode) if subscription.rename_enabled else "",
         "media_folder": media_folder_name(subscription),
     }
 
@@ -416,9 +433,11 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             if subscription.rename_enabled and candidate["episode"]
             else ""
         )
-        qbit_tag = f"feeddock-item-{item.id}" if desired_name else ""
+        qbit_tag = f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
         item.desired_name = desired_name
         item.qbit_tag = qbit_tag
+        item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
+        item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用本地刮削"
         result = downloader.add_url(
             candidate["download_url"],
             save_path,
@@ -428,16 +447,21 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         if result.ok:
             item.status = "queued"
             item.reason = result.message
-            item.rename_status = "pending" if desired_name else "skipped"
+            item.rename_status = "pending" if qbit_tag else "skipped"
             item.rename_message = (
-                "等待 qBittorrent 获取种子文件列表" if desired_name else "未启用规范命名"
+                "等待 qBittorrent 获取文件列表并完成下载"
+                if qbit_tag
+                else "未启用规范命名或自动刮削"
             )
             stats["queued"] += 1
         else:
             item.status = "error"
             item.reason = result.message
-            item.rename_status = "error" if desired_name else ""
-            item.rename_message = result.message if desired_name else ""
+            item.rename_status = "error" if qbit_tag else ""
+            item.rename_message = result.message if qbit_tag else ""
+            if subscription.scrape_enabled:
+                item.scrape_status = "error"
+                item.scrape_message = result.message
             stats["errors"] += 1
 
     subscription.last_checked_at = datetime.now(timezone.utc)
@@ -491,8 +515,12 @@ def retry_item(db: Session, item: FeedItem) -> tuple[bool, str]:
         if subscription.rename_enabled and item.episode
         else ""
     )
-    item.qbit_tag = item.qbit_tag or (f"feeddock-item-{item.id}" if desired_name else "")
+    item.qbit_tag = item.qbit_tag or (
+        f"feeddock-item-{item.id}" if (desired_name or subscription.scrape_enabled) else ""
+    )
     item.desired_name = desired_name
+    item.scrape_status = "pending" if subscription.scrape_enabled else "skipped"
+    item.scrape_message = "等待下载完成后自动刮削" if subscription.scrape_enabled else "订阅未启用本地刮削"
     result = QBittorrentClient().add_url(
         item.download_url,
         save_path,
@@ -502,7 +530,10 @@ def retry_item(db: Session, item: FeedItem) -> tuple[bool, str]:
     item.save_path = save_path
     item.status = "queued" if result.ok else "error"
     item.reason = result.message
-    item.rename_status = "pending" if result.ok and desired_name else ("error" if desired_name else "skipped")
-    item.rename_message = "等待 qBittorrent 获取种子文件列表" if result.ok and desired_name else result.message
+    item.rename_status = "pending" if result.ok and item.qbit_tag else ("error" if item.qbit_tag else "skipped")
+    item.rename_message = "等待 qBittorrent 获取文件列表并完成下载" if result.ok and item.qbit_tag else result.message
+    if not result.ok and subscription.scrape_enabled:
+        item.scrape_status = "error"
+        item.scrape_message = result.message
     db.commit()
     return result.ok, result.message

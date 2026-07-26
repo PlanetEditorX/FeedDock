@@ -88,7 +88,7 @@ class Subscription(Base):
     file_name_template: Mapped[str] = mapped_column(
         Text, default="{title} - S{season:02}E{episode:02}", nullable=False
     )
-    scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    scrape_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     save_path_template: Mapped[str] = mapped_column(
         Text,
@@ -140,6 +140,12 @@ class FeedItem(Base):
     torrent_hash: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     rename_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     rename_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    download_progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scrape_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    scrape_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False

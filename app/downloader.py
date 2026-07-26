@@ -24,6 +24,8 @@ class TorrentNormalizeResult:
     state: str
     message: str
     torrent_hash: str = ""
+    completed: bool = False
+    progress: int = 0
 
 
 class QBittorrentClient:
@@ -149,20 +151,20 @@ class QBittorrentClient:
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
 
-    def normalize_single_video(self, *, tag: str, desired_name: str) -> TorrentNormalizeResult:
-        """Rename one-video anime torrents through qBittorrent's own API.
+    def normalize_single_video(self, *, tag: str, desired_name: str = "") -> TorrentNormalizeResult:
+        """Inspect one tagged torrent, normalize a single video, and report completion.
 
-        Magnet links may not have metadata immediately after they are added. In
-        that case this method returns ``pending`` and the scheduler retries it.
-        Multi-video packs are deliberately not guessed because renaming them to
-        a single SxxExx name would be destructive.
+        Renaming may happen as soon as magnet metadata is available, but local
+        scraping is intentionally deferred until qBittorrent reports 100%.
+        Multi-video packs are never guessed; they may still be scraped after
+        completion because series-level NFO files do not require file renaming.
         """
 
         error = self._configuration_error()
         if error:
             return TorrentNormalizeResult(False, "error", error)
-        if not tag or not desired_name:
-            return TorrentNormalizeResult(False, "skipped", "没有重命名标签或目标名称")
+        if not tag:
+            return TorrentNormalizeResult(False, "skipped", "没有任务标签")
 
         try:
             with self._client() as client:
@@ -183,6 +185,19 @@ class QBittorrentClient:
                 if not torrent_hash:
                     return TorrentNormalizeResult(False, "pending", "等待 qBittorrent 返回任务哈希")
 
+                try:
+                    progress_value = max(0.0, min(1.0, float(torrent.get("progress") or 0.0)))
+                except (TypeError, ValueError):
+                    progress_value = 0.0
+                progress = int(round(progress_value * 100))
+                amount_left = torrent.get("amount_left")
+                state_name = str(torrent.get("state") or "")
+                completed = progress_value >= 0.999999 or (
+                    amount_left is not None
+                    and int(amount_left or 0) == 0
+                    and state_name not in {"metaDL", "checkingResumeData", "unknown"}
+                )
+
                 files_response = client.get(
                     "api/v2/torrents/files", params={"hash": torrent_hash}
                 )
@@ -190,74 +205,92 @@ class QBittorrentClient:
                 files = files_response.json()
                 if not isinstance(files, list) or not files:
                     return TorrentNormalizeResult(
-                        False, "pending", "磁力链接元数据尚未获取", torrent_hash
+                        False, "pending", "磁力链接元数据尚未获取", torrent_hash, completed, progress
                     )
                 videos = [file for file in files if is_video_file(str(file.get("name") or ""))]
                 if not videos:
+                    state = "completed_no_video" if completed else "waiting_completion"
                     return TorrentNormalizeResult(
-                        False, "pending", "暂未发现视频文件", torrent_hash
+                        False, state, "暂未发现视频文件", torrent_hash, completed, progress
                     )
-                if len(videos) > 1:
+
+                rename_message = ""
+                manual_required = False
+                if desired_name:
+                    if len(videos) > 1:
+                        manual_required = True
+                        rename_message = f"检测到 {len(videos)} 个视频文件，已保留原文件名"
+                    else:
+                        video_path = str(videos[0].get("name") or "")
+                        directory, filename = posixpath.split(video_path)
+                        old_stem, extension = posixpath.splitext(filename)
+                        target_stem = safe_segment(desired_name)
+                        new_video_path = posixpath.join(directory, target_stem + extension)
+                        if video_path != new_video_path:
+                            rename_response = client.post(
+                                "api/v2/torrents/renameFile",
+                                data={
+                                    "hash": torrent_hash,
+                                    "oldPath": video_path,
+                                    "newPath": new_video_path,
+                                },
+                            )
+                            if rename_response.status_code != 200:
+                                return TorrentNormalizeResult(
+                                    False,
+                                    "error",
+                                    f"视频文件重命名失败：HTTP {rename_response.status_code}",
+                                    torrent_hash,
+                                    completed,
+                                    progress,
+                                )
+
+                        subtitle_count = 0
+                        for file in files:
+                            subtitle_path = str(file.get("name") or "")
+                            if not is_subtitle_file(subtitle_path):
+                                continue
+                            subtitle_dir, subtitle_filename = posixpath.split(subtitle_path)
+                            if subtitle_dir != directory:
+                                continue
+                            subtitle_stem, subtitle_ext = posixpath.splitext(subtitle_filename)
+                            if not subtitle_stem.startswith(old_stem):
+                                continue
+                            suffix = subtitle_stem[len(old_stem) :]
+                            new_subtitle_path = posixpath.join(
+                                subtitle_dir, target_stem + suffix + subtitle_ext
+                            )
+                            if subtitle_path == new_subtitle_path:
+                                continue
+                            response = client.post(
+                                "api/v2/torrents/renameFile",
+                                data={
+                                    "hash": torrent_hash,
+                                    "oldPath": subtitle_path,
+                                    "newPath": new_subtitle_path,
+                                },
+                            )
+                            if response.status_code == 200:
+                                subtitle_count += 1
+
+                        rename_message = f"已规范化为 {target_stem + extension}"
+                        if subtitle_count:
+                            rename_message += f"，并同步重命名 {subtitle_count} 个字幕"
+
+                if completed:
+                    state = "manual_required" if manual_required else "completed"
+                    message = rename_message or "下载已完成"
+                    if rename_message:
+                        message += "；下载已完成"
                     return TorrentNormalizeResult(
-                        False,
-                        "manual_required",
-                        f"检测到 {len(videos)} 个视频文件，为避免错误重命名已跳过合集",
-                        torrent_hash,
+                        True, state, message, torrent_hash, True, 100
                     )
 
-                video_path = str(videos[0].get("name") or "")
-                directory, filename = posixpath.split(video_path)
-                old_stem, extension = posixpath.splitext(filename)
-                target_stem = safe_segment(desired_name)
-                new_video_path = posixpath.join(directory, target_stem + extension)
-                if video_path != new_video_path:
-                    rename_response = client.post(
-                        "api/v2/torrents/renameFile",
-                        data={
-                            "hash": torrent_hash,
-                            "oldPath": video_path,
-                            "newPath": new_video_path,
-                        },
-                    )
-                    if rename_response.status_code != 200:
-                        return TorrentNormalizeResult(
-                            False,
-                            "error",
-                            f"视频文件重命名失败：HTTP {rename_response.status_code}",
-                            torrent_hash,
-                        )
-
-                subtitle_count = 0
-                for file in files:
-                    subtitle_path = str(file.get("name") or "")
-                    if not is_subtitle_file(subtitle_path):
-                        continue
-                    subtitle_dir, subtitle_filename = posixpath.split(subtitle_path)
-                    if subtitle_dir != directory:
-                        continue
-                    subtitle_stem, subtitle_ext = posixpath.splitext(subtitle_filename)
-                    if not subtitle_stem.startswith(old_stem):
-                        continue
-                    suffix = subtitle_stem[len(old_stem) :]
-                    new_subtitle_path = posixpath.join(
-                        subtitle_dir, target_stem + suffix + subtitle_ext
-                    )
-                    if subtitle_path == new_subtitle_path:
-                        continue
-                    response = client.post(
-                        "api/v2/torrents/renameFile",
-                        data={
-                            "hash": torrent_hash,
-                            "oldPath": subtitle_path,
-                            "newPath": new_subtitle_path,
-                        },
-                    )
-                    if response.status_code == 200:
-                        subtitle_count += 1
-
-                message = f"已规范化为 {target_stem + extension}"
-                if subtitle_count:
-                    message += f"，并同步重命名 {subtitle_count} 个字幕"
-                return TorrentNormalizeResult(True, "renamed", message, torrent_hash)
+                state = "manual_required_waiting" if manual_required else "waiting_completion"
+                message = rename_message or "任务已建立"
+                message += f"；等待下载完成（{progress}%）"
+                return TorrentNormalizeResult(
+                    True, state, message, torrent_hash, False, progress
+                )
         except (httpx.HTTPError, ValueError, TypeError) as exc:
-            return TorrentNormalizeResult(False, "error", f"重命名请求失败：{exc}")
+            return TorrentNormalizeResult(False, "error", f"重命名或完成状态检查失败：{exc}")
