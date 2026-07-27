@@ -1,8 +1,18 @@
 # FeedDock
 
-当前版本：`1.17.0`
+当前版本：`1.17.1`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
+
+## v1.17.1：容器 DNS 修复与网络诊断
+
+- Compose 为 FeedDock 容器设置三个可轮换外部 DNS，修复 NAS Docker 继承不可达解析器的问题；
+- 普通 Compose 可通过 `FEEDDOCK_DNS_PRIMARY`、`FEEDDOCK_DNS_SECONDARY` 和 `FEEDDOCK_DNS_TERTIARY` 覆盖；
+- 新增“设置 → 代理设置 → 诊断 DNS”，显示容器 nameserver 和各原站域名解析结果；
+- 外部请求测试会同时返回 DNS 状态，便于区分解析失败与 HTTPS/代理失败；
+- DNS 修改后必须重新创建容器，普通重启不会更新 `/etc/resolv.conf`。
+
+完整排障步骤见 [`NETWORK_TROUBLESHOOTING.md`](NETWORK_TROUBLESHOOTING.md)。
 
 ## v1.17.0：原站番剧目录与跨站状态
 
@@ -264,7 +274,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.0
+FEEDDOCK_BUILD_VERSION=1.17.1
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

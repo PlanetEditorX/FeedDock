@@ -1819,7 +1819,30 @@ document.getElementById('notificationSettingsForm').addEventListener('submit', a
 document.getElementById('testNotifications').addEventListener('click',async()=>{try{await saveNotificationSettings();const r=await api('/api/notifications/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreNotifications').addEventListener('click',async()=>{if(!window.confirm('确认清空网页保存的全部通知渠道和密钥？'))return;await api('/api/notifications/settings',{method:'DELETE'});await loadNotificationSettings();showNotice('通知设置已清空');});
 document.getElementById('proxySettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();const f=event.currentTarget;try{await api('/api/proxy/settings',{method:'PUT',body:JSON.stringify({enabled:f.elements.enabled.checked,proxy_url:f.elements.proxy_url.value.trim()||null,clear_proxy_url:f.elements.clear_proxy_url.checked,no_proxy:f.elements.no_proxy.value.trim()})});await loadProxySettings();showNotice('代理设置已保存');}catch(e){showNotice(e.message,false);}});
-document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+function renderNetworkDiagnostics(data) {
+  const container = document.getElementById('networkDiagnostics');
+  if (!container || !data) return;
+  container.replaceChildren();
+  container.classList.toggle('network-ok', Boolean(data.ok));
+  container.classList.toggle('network-error', !data.ok);
+  container.append(text('strong', data.summary || '网络诊断完成'));
+  const resolver = data.resolver || {};
+  container.append(text('p', `容器 DNS：${(resolver.nameservers || []).join('、') || '未读取到 nameserver'}`, 'hint'));
+  const list = document.createElement('ul');
+  (data.checks || []).forEach(check => {
+    const address = check.ok ? (check.addresses || []).join(', ') : (check.message || '解析失败');
+    list.append(text('li', `${check.ok ? '✓' : '✕'} ${check.label || check.host} (${check.host})：${address}`));
+  });
+  container.append(list);
+  if (!data.ok) {
+    const actions = document.createElement('ol');
+    (data.remediation || []).forEach(item => actions.append(text('li', item)));
+    container.append(actions);
+  }
+}
+
+document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});if(r.dns)renderNetworkDiagnostics(r.dns);showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+document.getElementById('runNetworkDiagnostics').addEventListener('click',async()=>{try{const r=await api('/api/network/diagnostics');renderNetworkDiagnostics(r);showNotice(r.summary,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
 document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);
 document.querySelector('[data-close-metadata-review]').addEventListener('click', closeMetadataReview);

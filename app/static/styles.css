@@ -373,3 +373,17 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .source-resource-entry { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; font-size: 12px; }
 .source-resource-entry span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .catalog-source-tabs { justify-content: flex-start; width: 100%; } }
+
+.network-diagnostics {
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
+  overflow-wrap: anywhere;
+}
+.network-diagnostics ul,
+.network-diagnostics ol { margin: 0.65rem 0 0; padding-left: 1.4rem; }
+.network-diagnostics li + li { margin-top: 0.3rem; }
+.network-diagnostics.network-ok { border-color: color-mix(in srgb, #138a53 55%, var(--border)); }
+.network-diagnostics.network-error { border-color: color-mix(in srgb, #c83b3b 55%, var(--border)); }

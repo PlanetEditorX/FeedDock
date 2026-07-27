@@ -27,6 +27,28 @@ class DeploymentFileTests(unittest.TestCase):
             workflow,
         )
 
+    def test_compose_configures_external_dns_for_feeddock(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        fnos = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
+        for text in (compose, fnos):
+            self.assertIn("dns:", text)
+            self.assertIn("223.5.5.5", text)
+            self.assertIn("119.29.29.29", text)
+            self.assertIn("1.1.1.1", text)
+            self.assertIn('"timeout:2"', text)
+            self.assertIn('"attempts:2"', text)
+            self.assertIn('"rotate"', text)
+
+    def test_network_diagnostics_ui_and_api_are_present(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        self.assertIn('id="runNetworkDiagnostics"', index)
+        self.assertIn('id="networkDiagnostics"', index)
+        self.assertIn("/api/network/diagnostics", script)
+        self.assertIn("renderNetworkDiagnostics", script)
+        self.assertIn('def network_diagnostics()', main)
+
     def test_fnos_compose_has_source_discovery_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)

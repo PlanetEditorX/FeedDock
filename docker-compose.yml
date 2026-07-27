@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.17.0}
+        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.17.1}
     image: ${FEEDDOCK_IMAGE:-feeddock:local}
     container_name: feeddock
     restart: unless-stopped
@@ -13,6 +13,16 @@ services:
       FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-feeddock:local}"
     ports:
       - "${APP_PORT:-7789}:8000"
+    # Override Docker's inherited resolver. This avoids NAS/container runtimes
+    # that expose an unreachable embedded DNS server to the container.
+    dns:
+      - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
+      - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
+      - "${FEEDDOCK_DNS_TERTIARY:-1.1.1.1}"
+    dns_opt:
+      - "timeout:2"
+      - "attempts:2"
+      - "rotate"
     volumes:
       - ./data:/data
       - ./downloads:/media

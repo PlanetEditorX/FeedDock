@@ -133,6 +133,7 @@ from .security import (
 from .update_service import UpdateService
 from .system_control import terminate_process
 from .outbound import external_get
+from .network_diagnostics import diagnose_dns
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -746,13 +747,24 @@ def test_notifications(db: Session = Depends(get_db)) -> dict[str, object]:
     return {"ok": result.ok, "message": result.message, "sent": result.sent, "errors": result.errors}
 
 
+@app.get("/api/network/diagnostics", dependencies=[Depends(require_admin)])
+def network_diagnostics() -> dict[str, Any]:
+    return diagnose_dns()
+
+
 @app.post("/api/proxy/test", dependencies=[Depends(require_admin)])
 def test_proxy(db: Session = Depends(get_db)) -> dict[str, Any]:
+    dns = diagnose_dns()
     try:
         response = external_get("https://api.bgm.tv/v0/calendar", db=db, timeout=settings.request_timeout_seconds, headers={"User-Agent": settings.rss_user_agent})
-        return {"ok": response.status_code == 200, "message": f"代理连通测试 HTTP {response.status_code}"}
+        return {
+            "ok": response.status_code == 200,
+            "message": f"外部请求测试 HTTP {response.status_code}",
+            "dns": dns,
+        }
     except Exception as exc:
-        return {"ok": False, "message": f"代理连通失败：{exc}"}
+        prefix = "容器 DNS 解析失败" if not dns["ok"] else "外部请求失败"
+        return {"ok": False, "message": f"{prefix}：{exc}", "dns": dns}
 
 
 @app.get("/api/secrets/{secret_name}", dependencies=[Depends(require_admin)])

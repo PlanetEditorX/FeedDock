@@ -1,4 +1,4 @@
-# FeedDock v1.17.0 飞牛 OS 部署
+# FeedDock v1.17.1 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -162,6 +162,13 @@ environment:
 启用前请检查 Compose 的 `restart` 策略：`restart: unless-stopped` 或 `always` 可能会在“关闭”后重新拉起容器。普通部署建议保持 `false`，继续使用飞牛或 Docker 管理界面执行容器操作。
 
 从更旧版本直接升级时，v1.12.0 的订阅监控字段仍会在启动时自动增量补齐，不会删除历史订阅、条目或指纹。部署后可在网页“通知”中配置 Telegram、Bark 或 Webhook；所有通知默认关闭。
+
+## 1.17.1 DNS 修复
+
+飞牛 Docker 在部分网络中会把不可达的宿主机或嵌入式 DNS 写入容器，表现为所有外部站点同时出现 `[Errno -3] Temporary failure in name resolution`。新版 Compose 已为 `feeddock` 服务指定 223.5.5.5、119.29.29.29 和 1.1.1.1，并设置短超时和轮换。
+
+升级后必须选择“重新创建容器”，仅重启旧容器不会更新 `/etc/resolv.conf`。部署完成后可在“设置 → 代理设置 → 诊断 DNS”确认解析结果。完整步骤见 `NETWORK_TROUBLESHOOTING.md`。
+
 
 ## 1.17.0 原站目录说明
 

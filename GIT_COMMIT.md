@@ -1,49 +1,50 @@
-# FeedDock 1.17.0 Git 提交说明
+# FeedDock 1.17.1 Git 提交说明
 
-## 推荐提交标题
+## 推荐提交
 
 ```text
-feat(discovery): 使用原站目录并支持跨站订阅状态
+fix(network): 修复容器 DNS 并增加网络诊断
 ```
 
 ## 提交正文
 
 ```text
-- ANI.BT 直接读取原站季度周历和字幕组 API
-- Anime Garden 直接读取原站活跃番剧和资源 API
-- 移除非 Mikan 目录对 bangumi-data/CDN/Mikan 回退的依赖
-- 目录与详情缓存按站点隔离，失败时仅回退当前站点旧缓存
-- 为订阅增加 source_type、source_anime_id 和 canonical_key
-- 使用 Bangumi ID、站点 ID 和标题别名关联跨站番剧
-- 显示“已订阅”“Mikan 已订阅”等来源徽标
-- 增加跨站隐藏偏好并兼容旧版 Mikan 星期过滤
-- 从添加订阅菜单移除没有原生周历的 Nyaa 和 SubsPlease
-- 增加原站适配器、缓存、身份和隐藏状态测试
+- 为普通 Compose 和飞牛 Compose 配置可轮换的外部 DNS
+- 支持通过环境变量覆盖普通 Compose 的三个 DNS 地址
+- 新增容器 DNS 诊断 API 和代理设置页面诊断结果
+- 分别检查 Mikan、ANI.BT、Anime Garden 与 Bangumi 域名
+- 外部请求测试同时返回 DNS 状态，区分解析与 HTTPS/代理错误
+- 增加 DNS 失败分类、解析器读取和部署配置测试
+- 版本更新为 1.17.1
 ```
 
-## 主要文件
+## 影响范围
 
 ```text
-app/catalog_providers.py
-app/anime_catalog.py
-app/anime_identity.py
+app/network_diagnostics.py
 app/main.py
-app/models.py
-app/schemas.py
-app/static/app.js
 app/static/index.html
-app/subscription_sources.py
-tests/test_catalog_weekly_sources.py
-```
-
-## 提交命令
-
-```bash
-git add -A
-git commit -m "feat(discovery): 使用原站目录并支持跨站订阅状态" \
-  -m "ANI.BT 与 Anime Garden 改为直接请求原站，增加独立缓存、跨站订阅徽标和统一隐藏偏好。"
+app/static/app.js
+app/static/styles.css
+docker-compose.yml
+docker-compose.fnos.yml
+.env.example
+.env.fnos.example
+NETWORK_TROUBLESHOOTING.md
+tests/test_network_diagnostics.py
+tests/test_deployment_files.py
 ```
 
 ## 数据库
 
-升级自动增加三个订阅身份字段和 `anime_preferences` 表，无需手工 SQL。
+不增加或修改数据库字段，无需执行迁移。
+
+## 部署注意
+
+DNS 属于容器创建时的网络配置。应用补丁或替换 Compose 后必须执行：
+
+```bash
+docker compose up -d --force-recreate feeddock
+```
+
+仅重启旧容器或应用进程不会更新容器的 `/etc/resolv.conf`。
