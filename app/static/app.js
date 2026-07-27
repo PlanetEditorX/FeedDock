@@ -2,14 +2,80 @@ const notice = document.getElementById('notice');
 const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 const mikanSubscriptionState = window.FeedDockMikanSubscriptionState;
+const navigation = window.FeedDockNavigation;
 if (!mikanSubscriptionState) throw new Error('Mikan subscription state module is unavailable');
+if (!navigation) throw new Error('Navigation module is unavailable');
 let subscriptionsById = new Map();
+let currentSubscriptions = [];
+const selectedSubscriptionIds = new Set();
+let subscriptionManagementMode = false;
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
 let currentDownloadRoot = '/media';
 const mikanWeekdayDrafts = new Map();
 const PANEL_STATE_KEY = 'feeddock.panelState.v1';
 const MIKAN_WEEKDAY_STATE_KEY = 'feeddock.mikanWeekdayState.v1';
+
+const SUBSCRIPTION_SOURCE_PRESETS = Object.freeze({
+  anibt: { label: 'ANI.BT', rssName: 'ANI.BT', placeholder: 'https://anibt.example/rss/...' },
+  ag: { label: 'Anime Garden', rssName: 'Anime Garden', placeholder: 'https://api.animegarden.net/feed/...' },
+  other: { label: '其它 RSS', rssName: '', placeholder: 'https://example.com/feed.xml' },
+});
+
+function showAppView(view, options = {}) {
+  return navigation.showView(view, options);
+}
+
+function openSubscriptionEditor(source = 'other') {
+  resetSubscriptionForm();
+  const preset = SUBSCRIPTION_SOURCE_PRESETS[source] || SUBSCRIPTION_SOURCE_PRESETS.other;
+  document.getElementById('subscriptionFormTitle').textContent = `添加订阅 · ${preset.label}`;
+  setFormValue(subscriptionForm, 'primary_rss_name', preset.rssName);
+  subscriptionForm.elements.rss_url.placeholder = preset.placeholder;
+  showAppView('add-subscription');
+  subscriptionForm.elements.name.focus();
+}
+
+function setManagementMode(enabled) {
+  subscriptionManagementMode = Boolean(enabled);
+  document.body.classList.toggle('subscription-management-mode', subscriptionManagementMode);
+  document.getElementById('subscriptionBatchToolbar').classList.toggle('hidden', !subscriptionManagementMode);
+  document.getElementById('toggleManagementMode').textContent = subscriptionManagementMode ? '退出批量管理' : '批量管理';
+  if (!subscriptionManagementMode) selectedSubscriptionIds.clear();
+  renderSubscriptions(currentSubscriptions);
+  updateSubscriptionSelectionSummary();
+}
+
+function updateSubscriptionSelectionSummary() {
+  document.getElementById('selectedSubscriptionCount').textContent = `已选择 ${selectedSubscriptionIds.size} 项`;
+  const visible = filteredSubscriptions(currentSubscriptions);
+  const allSelected = visible.length > 0 && visible.every((sub) => selectedSubscriptionIds.has(sub.id));
+  const selectAll = document.getElementById('selectAllSubscriptions');
+  selectAll.checked = allSelected;
+  selectAll.indeterminate = !allSelected && visible.some((sub) => selectedSubscriptionIds.has(sub.id));
+}
+
+function filteredSubscriptions(subscriptions) {
+  const query = String(document.getElementById('subscriptionSearch')?.value || '').trim().toLowerCase();
+  const state = document.getElementById('subscriptionStateFilter')?.value || '';
+  return subscriptions.filter((sub) => {
+    const haystack = [sub.name, sub.canonical_title, sub.primary_rss_name, sub.rss_url].join(' ').toLowerCase();
+    if (query && !haystack.includes(query)) return false;
+    if (state === 'enabled' && !sub.enabled) return false;
+    if (state === 'disabled' && sub.enabled) return false;
+    if (state === 'error' && !sub.last_error) return false;
+    return true;
+  });
+}
+
+function subscriptionSourceLabel(sub) {
+  let host = '';
+  try { host = new URL(sub.rss_url).hostname.toLowerCase(); } catch (_) {}
+  if (host.includes('mikan')) return 'Mikan';
+  if (host.includes('anibt')) return 'ANI.BT';
+  if (host.includes('animegarden') || host.includes('animes.garden')) return 'Anime Garden';
+  return sub.primary_rss_name || '其它 RSS';
+}
 
 function showNotice(message, ok = true) {
   notice.textContent = message;
@@ -93,6 +159,7 @@ function resetSubscriptionForm() {
   document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
   document.getElementById('metadataSearchResults').className = 'metadata-results muted';
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
+  subscriptionForm.elements.rss_url.placeholder = 'https://example.com/feed.xml';
   document.getElementById('saveSubscription').textContent = '保存订阅';
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
   subscriptionPreviewBox.textContent = '尚未预览。';
@@ -158,6 +225,8 @@ async function loadAuth() {
     return;
   }
   document.getElementById('currentUser').textContent = status.username;
+  const loginUser = document.getElementById('loginSettingsUser');
+  if (loginUser) loginUser.textContent = status.username;
 }
 
 async function loadDashboard() {
@@ -396,7 +465,7 @@ function applyDiscoveryPreset(preset) {
     : '已带入 RSS，请补充规则后点击“预览规则和路径”。';
   subscriptionPreviewBox.className = 'preview-box muted';
   closeMikanModal();
-  document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showAppView('add-subscription');
   searchMetadata({ automatic: true });
   showNotice('已填入订阅表单，正在自动搜索元数据');
 }
@@ -874,27 +943,49 @@ function populateSubscriptionForm(sub) {
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   subscriptionPreviewBox.textContent = '请点击“预览规则和路径”确认修改后的结果。';
   subscriptionPreviewBox.className = 'preview-box muted';
-  document.getElementById('subscriptionEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showAppView('add-subscription');
 }
 
-async function loadSubscriptions() {
+function renderSubscriptions(data) {
   const container = document.getElementById('subscriptions');
-  const data = await api('/api/subscriptions');
-  subscriptionsById = new Map(data.map((sub) => [String(sub.id), sub]));
-  syncMikanCatalogSubscriptionState(data);
+  const visibleSubscriptions = filteredSubscriptions(data);
   container.replaceChildren();
-  if (!data.length) { container.append(text('p', '还没有订阅。', 'empty')); return; }
-  for (const sub of data) {
-    const card = document.createElement('article'); card.className = 'subscription-card metadata-subscription-card';
+  if (!data.length) {
+    const empty = document.createElement('div'); empty.className = 'empty-state';
+    empty.append(text('h3', '还没有订阅'));
+    empty.append(text('p', '可以从 Mikan 番剧目录选择，也可以直接添加其它 RSS。', 'muted'));
+    const actions = document.createElement('div'); actions.className = 'form-actions';
+    const mikan = text('button', '浏览 Mikan'); mikan.type = 'button'; mikan.addEventListener('click', () => showAppView('add-mikan'));
+    const other = text('button', '添加其它 RSS', 'secondary'); other.type = 'button'; other.addEventListener('click', () => openSubscriptionEditor('other'));
+    actions.append(mikan, other); empty.append(actions); container.append(empty);
+    updateSubscriptionSelectionSummary();
+    return;
+  }
+  if (!visibleSubscriptions.length) {
+    container.append(text('p', '没有符合当前筛选条件的订阅。', 'empty'));
+    updateSubscriptionSelectionSummary();
+    return;
+  }
+  for (const sub of visibleSubscriptions) {
+    const card = document.createElement('article');
+    card.className = `subscription-card metadata-subscription-card${selectedSubscriptionIds.has(sub.id) ? ' is-selected' : ''}`;
+    const selector = document.createElement('input'); selector.type = 'checkbox'; selector.className = 'subscription-select';
+    selector.checked = selectedSubscriptionIds.has(sub.id); selector.setAttribute('aria-label', `选择 ${sub.name}`);
+    selector.addEventListener('change', () => {
+      if (selector.checked) selectedSubscriptionIds.add(sub.id); else selectedSubscriptionIds.delete(sub.id);
+      card.classList.toggle('is-selected', selector.checked); updateSubscriptionSelectionSummary();
+    });
+    card.append(selector);
     if (sub.poster_url) {
       const img = document.createElement('img');
       img.className = 'subscription-poster'; img.src = sub.poster_url; img.loading = 'lazy'; img.decoding = 'async';
       img.alt = `${sub.canonical_title || sub.name} 海报`; card.append(img);
     }
     const content = document.createElement('div'); content.className = 'subscription-card-content';
+    content.append(text('span', subscriptionSourceLabel(sub), 'subscription-source-label'));
     const titleRow = document.createElement('div'); titleRow.className = 'subscription-title';
     titleRow.append(text('h3', sub.canonical_title || sub.name));
-    titleRow.append(text('span', sub.enabled ? '启用' : '停用', `badge ${sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
+    titleRow.append(text('span', sub.last_error ? '异常' : sub.enabled ? '启用' : '停用', `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
     if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
     const details = document.createElement('details'); details.className = 'subscription-details';
     details.append(text('summary', '订阅详情'));
@@ -913,9 +1004,19 @@ async function loadSubscriptions() {
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
-    const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
+    const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); selectedSubscriptionIds.delete(sub.id); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
     controls.append(edit, sync, toggle, remove); content.append(controls); card.append(content); container.append(card);
   }
+  updateSubscriptionSelectionSummary();
+}
+
+async function loadSubscriptions() {
+  const data = await api('/api/subscriptions');
+  currentSubscriptions = data;
+  subscriptionsById = new Map(data.map((sub) => [String(sub.id), sub]));
+  for (const id of [...selectedSubscriptionIds]) if (!data.some((sub) => sub.id === id)) selectedSubscriptionIds.delete(id);
+  syncMikanCatalogSubscriptionState(data);
+  renderSubscriptions(data);
 }
 
 async function loadItems() {
@@ -972,16 +1073,86 @@ async function loadLogs() {
   }
 }
 
+async function loadSystemStatus() {
+  const data = await api('/api/system/status');
+  document.getElementById('systemActionState').textContent = data.message;
+  document.getElementById('restartSystem').disabled = !data.restart_supported;
+  document.getElementById('shutdownSystem').disabled = !data.shutdown_supported;
+}
+
 async function reloadAll() {
   try {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), loadNotificationSettings(),
+      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), loadNotificationSettings(), loadSystemStatus(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
   }
+}
+
+function downloadJson(payload, filename) {
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportSubscriptionData(ids = []) {
+  const params = new URLSearchParams();
+  ids.forEach((id) => params.append('ids', String(id)));
+  const payload = await api(`/api/subscriptions/export${params.size ? `?${params}` : ''}`);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadJson(payload, `feeddock-subscriptions-${stamp}.json`);
+  showNotice(`已导出 ${payload.subscriptions.length} 条订阅`);
+}
+
+function closeSubscriptionImportModal() {
+  document.getElementById('subscriptionImportModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function openSubscriptionImportModal({ collection = false } = {}) {
+  const title = document.getElementById('subscriptionImportTitle');
+  const hint = document.getElementById('subscriptionImportHint');
+  title.textContent = collection ? '添加合集' : '导入订阅';
+  hint.textContent = collection
+    ? 'FeedDock 将合集作为一组订阅定义批量添加。可粘贴订阅数组，或选择 FeedDock 导出的 JSON。'
+    : '选择 FeedDock 导出的 JSON 文件，或直接粘贴 JSON。';
+  document.getElementById('subscriptionImportModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+async function importSubscriptionData() {
+  const raw = document.getElementById('subscriptionImportJson').value.trim();
+  if (!raw) throw new Error('请先选择 JSON 文件或粘贴订阅 JSON');
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (error) { throw new Error(`JSON 格式错误：${error.message}`); }
+  const subscriptions = Array.isArray(parsed) ? parsed : parsed.subscriptions;
+  if (!Array.isArray(subscriptions) || !subscriptions.length) throw new Error('JSON 中没有 subscriptions 数组');
+  const result = await api('/api/subscriptions/import', {
+    method: 'POST',
+    body: JSON.stringify({ subscriptions, conflict: document.getElementById('subscriptionImportConflict').value }),
+  });
+  closeSubscriptionImportModal();
+  document.getElementById('subscriptionImportJson').value = '';
+  document.getElementById('subscriptionImportFile').value = '';
+  selectedSubscriptionIds.clear();
+  await reloadAll();
+  showAppView('subscriptions');
+  showNotice(`导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}`);
+}
+
+async function runSubscriptionBatch(action) {
+  const ids = [...selectedSubscriptionIds];
+  if (!ids.length) { showNotice('请先选择订阅', false); return; }
+  if (action === 'delete' && !window.confirm(`确认删除选中的 ${ids.length} 条订阅及其历史记录？`)) return;
+  const result = await api('/api/subscriptions/batch', { method: 'POST', body: JSON.stringify({ ids, action }) });
+  selectedSubscriptionIds.clear();
+  await reloadAll();
+  showNotice(`批量操作完成：处理 ${result.affected} 条订阅`);
 }
 
 
@@ -1253,6 +1424,7 @@ subscriptionForm.addEventListener('submit', async (event) => {
     resetSubscriptionForm();
     showNotice(id ? '订阅已更新' : '订阅已保存');
     await reloadAll();
+    showAppView('subscriptions');
     if (!id && !saved.metadata_confirmed && !saved.metadata_review_skipped) openMetadataReview(saved);
   } catch (error) { showNotice(error.message, false); }
 });
@@ -1291,7 +1463,7 @@ document.getElementById('previewSubscription').addEventListener('click', async (
   }
 });
 
-document.getElementById('cancelSubscriptionEdit').addEventListener('click', resetSubscriptionForm);
+document.getElementById('cancelSubscriptionEdit').addEventListener('click', () => { resetSubscriptionForm(); showAppView('subscriptions'); });
 
 document.getElementById('refreshNow').addEventListener('click', async () => {
   try {
@@ -1375,7 +1547,69 @@ document.querySelector('[data-close-metadata-review]').addEventListener('click',
 document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在搜索…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
 document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称');});
 
+document.querySelectorAll('[data-subscription-source]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const source = button.dataset.subscriptionSource;
+    if (source && source !== 'mikan') openSubscriptionEditor(source);
+  });
+});
+
+document.addEventListener('feeddock:viewchange', (event) => {
+  const { view, management } = event.detail;
+  if (view === 'subscriptions') setManagementMode(management);
+  else if (subscriptionManagementMode) setManagementMode(false);
+});
+
+document.querySelector('.app-brand').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showAppView('subscriptions'); }
+});
+
+document.getElementById('subscriptionSearch').addEventListener('input', () => renderSubscriptions(currentSubscriptions));
+document.getElementById('subscriptionStateFilter').addEventListener('change', () => renderSubscriptions(currentSubscriptions));
+document.getElementById('toggleManagementMode').addEventListener('click', () => setManagementMode(!subscriptionManagementMode));
+document.getElementById('selectAllSubscriptions').addEventListener('change', (event) => {
+  filteredSubscriptions(currentSubscriptions).forEach((sub) => {
+    if (event.currentTarget.checked) selectedSubscriptionIds.add(sub.id); else selectedSubscriptionIds.delete(sub.id);
+  });
+  renderSubscriptions(currentSubscriptions);
+});
+document.getElementById('batchEnableSubscriptions').addEventListener('click', () => runSubscriptionBatch('enable'));
+document.getElementById('batchDisableSubscriptions').addEventListener('click', () => runSubscriptionBatch('disable'));
+document.getElementById('batchDeleteSubscriptions').addEventListener('click', () => runSubscriptionBatch('delete'));
+document.getElementById('batchExportSubscriptions').addEventListener('click', () => {
+  const ids = [...selectedSubscriptionIds];
+  if (!ids.length) { showNotice('请先选择需要导出的订阅', false); return; }
+  exportSubscriptionData(ids).catch((error) => showNotice(error.message, false));
+});
+document.getElementById('batchImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
+document.getElementById('exportSubscriptions').addEventListener('click', () => exportSubscriptionData().catch((error) => showNotice(error.message, false)));
+document.getElementById('openImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
+document.getElementById('openCollectionImport').addEventListener('click', () => openSubscriptionImportModal({ collection: true }));
+document.getElementById('closeSubscriptionImport').addEventListener('click', closeSubscriptionImportModal);
+document.getElementById('cancelSubscriptionImport').addEventListener('click', closeSubscriptionImportModal);
+document.querySelector('[data-close-subscription-import]').addEventListener('click', closeSubscriptionImportModal);
+document.getElementById('subscriptionImportFile').addEventListener('change', async (event) => {
+  const [file] = event.currentTarget.files;
+  if (!file) return;
+  document.getElementById('subscriptionImportJson').value = await file.text();
+});
+document.getElementById('confirmSubscriptionImport').addEventListener('click', async () => {
+  try { await importSubscriptionData(); } catch (error) { showNotice(error.message, false); }
+});
+document.getElementById('loginSettingsLogout').addEventListener('click', () => document.getElementById('logout').click());
+document.getElementById('restartSystem').addEventListener('click', async () => {
+  if (!window.confirm('确认重启 FeedDock？页面会短暂断开。')) return;
+  try { const result = await api('/api/system/restart', { method: 'POST' }); showNotice(result.message); }
+  catch (error) { showNotice(error.message, false); }
+});
+document.getElementById('shutdownSystem').addEventListener('click', async () => {
+  if (!window.confirm('确认关闭 FeedDock 服务？容器自动重启策略可能再次启动服务。')) return;
+  try { const result = await api('/api/system/shutdown', { method: 'POST' }); showNotice(result.message); }
+  catch (error) { showNotice(error.message, false); }
+});
+
 document.getElementById('statusFilter').addEventListener('change', loadItems);
+navigation.initialize();
 initializeCollapsiblePanels();
 initializePasswordToggles();
 initializeCatalogSelectors();

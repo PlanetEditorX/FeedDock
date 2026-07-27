@@ -1,3 +1,17 @@
+let returnToLoginSettings = false;
+fetch('/api/auth/status').then((response) => response.json()).then((status) => {
+  if (!status.authenticated) { window.location.replace('/login'); return; }
+  if (!status.must_change_password) {
+    returnToLoginSettings = true;
+    document.getElementById('passwordPageBadge').textContent = '登录设置';
+    document.getElementById('passwordPageBadge').className = 'badge queued';
+    document.getElementById('passwordPageTitle').textContent = '修改登录密码';
+    document.getElementById('passwordPageDescription').textContent = `当前账号：${status.username}。修改后其它旧会话将失效。`;
+    document.getElementById('passwordSubmit').textContent = '保存新密码';
+    document.getElementById('passwordPageBack').classList.remove('hidden');
+  }
+}).catch(() => {});
+
 const form = document.getElementById('passwordForm');
 const errorBox = document.getElementById('authError');
 function showError(message) { errorBox.textContent = message; errorBox.classList.remove('hidden'); }
@@ -14,6 +28,6 @@ form.addEventListener('submit', async (event) => {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) { window.location.replace('/login'); return; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-    window.location.replace('/');
+    window.location.replace(returnToLoginSettings ? '/#settings-login' : '/');
   } catch (error) { showError(error.message); } finally { button.disabled = false; }
 });

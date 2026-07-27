@@ -18,6 +18,7 @@ services:
       ADMIN_PASSWORD: "password"
       SESSION_DAYS: "7"
       COOKIE_SECURE: "false"
+      FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "false"
       POLL_INTERVAL_MINUTES: "30"
       REQUEST_TIMEOUT_SECONDS: "20"
       # INFO 或 DEBUG；也可以在网页“系统日志”板块切换

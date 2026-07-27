@@ -93,7 +93,9 @@ from .schemas import (
     ProxySettingsUpdate,
     QBittorrentSettingsUpdate,
     RssPollSettingsUpdate,
+    SubscriptionBatchRequest,
     SubscriptionCreate,
+    SubscriptionImportRequest,
     SubscriptionOut,
     SubscriptionPreviewOut,
     SubscriptionPreviewRequest,
@@ -112,6 +114,7 @@ from .security import (
     verify_password,
 )
 from .update_service import UpdateService
+from .system_control import terminate_process
 from .outbound import external_get
 
 
@@ -331,8 +334,6 @@ def change_password_page(request: Request, db: Session = Depends(get_db)) -> Res
     account = resolve_admin(request, db)
     if not account:
         return RedirectResponse("/login", status_code=303)
-    if not account.must_change_password:
-        return RedirectResponse("/", status_code=303)
     return FileResponse(STATIC_DIR / "change-password.html")
 
 
@@ -909,6 +910,85 @@ def create_subscription(
         raise
 
 
+def _subscription_export_values(subscription: Subscription) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for field_name in SubscriptionCreate.model_fields:
+        value = getattr(subscription, field_name)
+        if field_name == "air_date":
+            value = value or None
+        elif field_name == "backup_rss_url":
+            value = value or None
+        values[field_name] = value
+    return values
+
+
+@app.get("/api/subscriptions/export", dependencies=[Depends(require_admin)])
+def export_subscriptions(
+    ids: list[int] = Query(default=[]),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    query = select(Subscription).order_by(Subscription.id)
+    if ids:
+        query = query.where(Subscription.id.in_(ids))
+    subscriptions = list(db.scalars(query))
+    return {
+        "format": "feeddock-subscriptions",
+        "version": 1,
+        "app_version": settings.app_version,
+        "subscriptions": [_subscription_export_values(item) for item in subscriptions],
+    }
+
+
+@app.post("/api/subscriptions/import", dependencies=[Depends(require_admin)])
+def import_subscriptions(
+    payload: SubscriptionImportRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    created = 0
+    updated = 0
+    skipped = 0
+    try:
+        for item in payload.subscriptions:
+            rss_url = str(item.rss_url)
+            existing = db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
+            values = _subscription_values(item, db)
+            if existing is None:
+                db.add(Subscription(**values))
+                created += 1
+                continue
+            if payload.conflict == "skip":
+                skipped += 1
+                continue
+            reset_monitor_state_for_changes(existing, values)
+            for key, value in values.items():
+                setattr(existing, key, value)
+            updated += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+@app.post("/api/subscriptions/batch", dependencies=[Depends(require_admin)])
+def batch_subscriptions(
+    payload: SubscriptionBatchRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, int | str]:
+    subscriptions = list(db.scalars(select(Subscription).where(Subscription.id.in_(payload.ids))))
+    if not subscriptions:
+        raise HTTPException(status_code=404, detail="未找到所选订阅")
+    if payload.action == "delete":
+        for subscription in subscriptions:
+            db.delete(subscription)
+    else:
+        enabled = payload.action == "enable"
+        for subscription in subscriptions:
+            subscription.enabled = enabled
+    db.commit()
+    return {"action": payload.action, "affected": len(subscriptions)}
+
+
 @app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
 def skip_subscription_metadata_review(subscription_id: int, payload: MetadataReviewSkipRequest, db: Session = Depends(get_db)) -> SubscriptionOut:
     subscription = db.get(Subscription, subscription_id)
@@ -1107,6 +1187,36 @@ def normalize_torrents_now() -> dict[str, Any]:
 def test_downloader() -> dict[str, bool | str]:
     result = QBittorrentClient().test()
     return {"ok": result.ok, "message": result.message}
+
+
+@app.get("/api/system/status", dependencies=[Depends(require_admin)])
+def system_status() -> dict[str, Any]:
+    return {
+        "actions_allowed": settings.allow_system_actions,
+        "restart_supported": settings.allow_system_actions,
+        "shutdown_supported": settings.allow_system_actions,
+        "message": (
+            "系统操作已启用；容器是否重新启动由 Docker restart 策略决定"
+            if settings.allow_system_actions
+            else "系统重启与关闭默认禁用；设置 FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true 后启用"
+        ),
+    }
+
+
+@app.post("/api/system/restart", dependencies=[Depends(require_admin)])
+def restart_system(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
+    if not settings.allow_system_actions:
+        raise HTTPException(status_code=403, detail="系统操作未启用")
+    background_tasks.add_task(terminate_process, restart=True)
+    return {"ok": True, "message": "FeedDock 正在退出；容器编排器将按重启策略恢复服务"}
+
+
+@app.post("/api/system/shutdown", dependencies=[Depends(require_admin)])
+def shutdown_system(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
+    if not settings.allow_system_actions:
+        raise HTTPException(status_code=403, detail="系统操作未启用")
+    background_tasks.add_task(terminate_process, restart=False)
+    return {"ok": True, "message": "FeedDock 正在关闭；如配置自动重启，容器可能再次启动"}
 
 
 @app.get(

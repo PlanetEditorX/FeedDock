@@ -104,6 +104,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("type=raw,value=${{ steps.app_version.outputs.value }}", workflow)
         self.assertIn("--latest", workflow)
         self.assertIn("node --check app/static/mikan-subscription-state.js", workflow)
+        self.assertIn("node --check app/static/navigation.js", workflow)
 
     def test_subscription_submit_keeps_form_reference_across_await(self) -> None:
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
@@ -121,11 +122,18 @@ class DeploymentFileTests(unittest.TestCase):
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         login = (ROOT / "app/static/login.html").read_text(encoding="utf-8")
         change_password = (ROOT / "app/static/change-password.html").read_text(encoding="utf-8")
+        change_password_script = (ROOT / "app/static/change-password.js").read_text(encoding="utf-8")
 
         self.assertIn(f"/static/app.js?v={version}", index)
         self.assertIn(f"/static/mikan-subscription-state.js?v={version}", index)
+        self.assertIn(f"/static/navigation.js?v={version}", index)
+        self.assertLess(
+            index.index(f"/static/navigation.js?v={version}"),
+            index.index(f"/static/app.js?v={version}"),
+        )
         self.assertIn(f"/static/login.js?v={version}", login)
         self.assertIn(f"/static/change-password.js?v={version}", change_password)
+        self.assertIn("/#settings-login", change_password_script)
         for page in (index, login, change_password):
             self.assertIn(f"/static/styles.css?v={version}", page)
 

@@ -1,4 +1,4 @@
-# FeedDock v1.12.0 飞牛 OS 部署
+# FeedDock v1.13.0 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -9,6 +9,7 @@ environment:
   AUTOMATION_TIMEZONE: "Asia/Shanghai"
   OUTBOUND_PROXY_URL: ""
   OUTBOUND_NO_PROXY: "localhost,127.0.0.1,host.docker.internal"
+  FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "false"
 ```
 
 网页保存的设置优先于 Compose。FeedDock 不再调用 tinyMediaManager 或写本地 NFO，代理只用于外部请求，本地服务应放入不使用代理列表。
@@ -124,7 +125,7 @@ FeedDock 不再生成 NFO/图片，也不调用 tinyMediaManager。工作流程�
 → 飞牛影视/Emby/Jellyfin 等外部媒体库自行识别
 ```
 
-多视频合集不会自动猜测每个文件对应的集数。顶部“检查下载完成”可以立即执行一次检查，后台默认每 2 分钟检查一次。
+多视频合集不会自动猜测每个文件对应的集数。“下载”页面的“检查下载完成”可以立即执行一次检查，后台默认每 2 分钟检查一次。
 
 ## 7. 清理界面记录
 
@@ -142,9 +143,18 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.12.0 更新静态资源缓存参数，并在启动时为旧 SQLite 数据库增量增加订阅监控字段。迁移只执行 `ALTER TABLE ADD COLUMN`，不会删除历史订阅、条目或指纹。部署后可在网页“通知中心”配置 Telegram、Bark 或 Webhook；所有通知默认关闭。
+v1.13.0 将首页改为订阅优先的任务式控制台，新增顶部导航、批量启停/删除、订阅 JSON 导入导出和常规密码修改。本版本不增加数据库字段，从 v1.12.0 升级无需手工迁移。
 
-升级后建议执行一次“立即刷新 RSS”和“检查下载完成”，确认旧任务能够通过 qBittorrent Tag 更新完成状态。旧版本中未写入 Tag 的历史任务无法自动回补完成状态，但不影响后续新任务。
+升级后建议强制刷新一次浏览器，并确认首页只显示订阅列表。下载、设置和日志现在通过顶部菜单进入。网页“系统管理”中的重启与关闭默认不可用；需要远程控制进程时，在 Compose 中显式设置：
+
+```yaml
+environment:
+  FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "true"
+```
+
+启用前请检查 Compose 的 `restart` 策略：`restart: unless-stopped` 或 `always` 可能会在“关闭”后重新拉起容器。普通部署建议保持 `false`，继续使用飞牛或 Docker 管理界面执行容器操作。
+
+从更旧版本直接升级时，v1.12.0 的订阅监控字段仍会在启动时自动增量补齐，不会删除历史订阅、条目或指纹。部署后可在网页“通知”中配置 Telegram、Bark 或 Webhook；所有通知默认关闭。
 
 ## 9. 故障排查
 

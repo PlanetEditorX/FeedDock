@@ -79,6 +79,9 @@ class AuthFlowTests(unittest.TestCase):
             self.assertIn("qBittorrent 下载器", home.text)
             self.assertIn("Mikan 番剧目录", home.text)
 
+            password_page_after_setup = client.get("/change-password")
+            self.assertEqual(password_page_after_setup.status_code, 200)
+
             with patch("app.main.DiscoveryService") as discovery_factory:
                 discovery_factory.return_value.catalog.return_value = {
                     "provider": "mikan",

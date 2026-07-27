@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -136,6 +136,30 @@ class SubscriptionUpdate(BaseModel):
     auto_disable_when_complete: bool | None = None
     stale_days: int | None = Field(default=None, ge=0, le=3650)
     enabled: bool | None = None
+
+
+class SubscriptionBatchRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    action: Literal["enable", "disable", "delete"]
+
+    @field_validator("ids")
+    @classmethod
+    def unique_positive_ids(cls, values: list[int]) -> list[int]:
+        unique: list[int] = []
+        seen: set[int] = set()
+        for value in values:
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            unique.append(value)
+        if not unique:
+            raise ValueError("至少选择一个有效订阅")
+        return unique
+
+
+class SubscriptionImportRequest(BaseModel):
+    subscriptions: list[SubscriptionCreate] = Field(min_length=1, max_length=500)
+    conflict: Literal["skip", "update"] = "skip"
 
 
 class SubscriptionOut(BaseModel):

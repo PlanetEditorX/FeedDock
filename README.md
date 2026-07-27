@@ -1,8 +1,23 @@
 # FeedDock
 
-当前版本：`1.12.0`
+当前版本：`1.13.0`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
+
+## v1.13.0：订阅优先的任务式控制台
+
+本版本参考 ani-rss 的任务导航思路，将 FeedDock 首页重构为订阅列表，并按使用频率和风险重新组织右上角操作：
+
+- 首页只展示订阅统计、搜索、状态筛选和订阅卡片；
+- 顶部依次提供“添加、下载、刷新、管理、设置、日志”；
+- “添加”支持 Mikan、ANI.BT、Anime Garden、其它 RSS 和批量合集；
+- 下载条目、各类设置和日志进入独立视图，刷新页面后仍保留当前 Hash 路由；
+- 管理视图支持批量启动、禁用、删除，以及 JSON 导入和导出；
+- 登录密码不再仅限首次登录时修改，可随时从登录设置进入；
+- 系统重启和关闭默认禁用，必须通过环境变量显式开启；
+- 本次没有新增数据库字段，从 1.12.0 升级无需迁移。
+
+界面结构、排序依据、导入格式和安全边界见 [`UI_NAVIGATION.md`](UI_NAVIGATION.md)。
 
 ## v1.12.0：通知中心与订阅健康监控
 
@@ -206,7 +221,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.12.0
+FEEDDOCK_BUILD_VERSION=1.13.0
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password
@@ -226,9 +241,10 @@ AUTOMATION_TIMEZONE=Asia/Shanghai
 OUTBOUND_PROXY_URL=
 OUTBOUND_NO_PROXY=localhost,127.0.0.1,host.docker.internal
 LOG_LEVEL=INFO
+FEEDDOCK_ALLOW_SYSTEM_ACTIONS=false
 ```
 
-通知配置当前保存在网页数据库中，不需要写入 `.env`。
+通知配置当前保存在网页数据库中，不需要写入 `.env`。`FEEDDOCK_ALLOW_SYSTEM_ACTIONS` 默认为 `false`，仅在明确需要网页重启/关闭服务时开启。
 
 ## 数据库升级
 
@@ -241,7 +257,7 @@ LOG_LEVEL=INFO
 - `completion_notified_at`；
 - `last_missing_signature`。
 
-网页通知配置保存在 `app_settings` 表。升级不需要手工 SQL。
+网页通知配置保存在 `app_settings` 表。升级不需要手工 SQL。v1.13.0 不增加数据库字段，只新增导航、批量管理和订阅导入导出能力。
 
 ## 安全说明
 
@@ -258,12 +274,14 @@ python -m unittest discover -s tests -v
 python -m compileall -q app
 node --check app/static/app.js
 node --check app/static/mikan-subscription-state.js
+node --check app/static/navigation.js
 ```
 
 完整验证结果见 [`VALIDATION.md`](VALIDATION.md)。
 
 ## 相关文档
 
+- [`UI_NAVIGATION.md`](UI_NAVIGATION.md)：订阅优先界面、菜单排序、批量管理与导入导出；
 - [`ANI_RSS_GAP_ANALYSIS.md`](ANI_RSS_GAP_ANALYSIS.md)：上游功能差异、优先级和未采纳项；
 - [`NOTIFICATIONS_AND_MONITORING.md`](NOTIFICATIONS_AND_MONITORING.md)：通知、去重、完结与长期未更新规则；
 - [`MIKAN_SUBSCRIPTION_STATUS.md`](MIKAN_SUBSCRIPTION_STATUS.md)：Mikan 已订阅标识模块；

@@ -78,6 +78,7 @@ class Settings:
     outbound_proxy_url: str
     outbound_no_proxy: str
     log_level: str
+    allow_system_actions: bool
 
 
 def load_settings() -> Settings:
@@ -87,7 +88,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.12.0"),
+        app_version=os.getenv("APP_VERSION", "1.13.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -98,7 +99,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.12.0 (+self-hosted RSS automation)",
+            "FeedDock/1.13.0 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -143,6 +144,7 @@ def load_settings() -> Settings:
         outbound_proxy_url=os.getenv("OUTBOUND_PROXY_URL", "").strip(),
         outbound_no_proxy=os.getenv("OUTBOUND_NO_PROXY", "localhost,127.0.0.1,host.docker.internal").strip(),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        allow_system_actions=_as_bool("FEEDDOCK_ALLOW_SYSTEM_ACTIONS", False),
     )
 
 
