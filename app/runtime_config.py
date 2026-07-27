@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import SessionLocal
 from .models import AppSetting, FeedItem, Subscription
+from .media_paths import preferred_local_media_root
 
 
 QBIT_SETTING_KEYS = {
@@ -387,6 +388,10 @@ def _safe_int(value: object, default: int, minimum: int, maximum: int) -> int:
 
 
 def _environment_metadata_config() -> MetadataConfig:
+    local_root = preferred_local_media_root(
+        settings.download_path,
+        str(settings.media_local_root or "/media"),
+    )
     return MetadataConfig(
         tmdb_read_access_token=settings.tmdb_read_access_token,
         bangumi_access_token=settings.bangumi_access_token,
@@ -397,7 +402,7 @@ def _environment_metadata_config() -> MetadataConfig:
         follow_days=14,
         bangumi_ini_enabled=False,
         downloader_root=settings.download_path,
-        media_local_root=str(settings.media_local_root or settings.download_path),
+        media_local_root=local_root,
         emby_url=settings.emby_url,
         emby_api_key=settings.emby_api_key,
         tmm_url=settings.tmm_url,
@@ -410,6 +415,10 @@ def _environment_metadata_config() -> MetadataConfig:
 def _load_metadata_with_session(db: Session) -> MetadataConfig:
     fallback = _environment_metadata_config()
     qbit_root = load_qbittorrent_config(db).download_path
+    preferred_local_root = preferred_local_media_root(
+        qbit_root,
+        str(settings.media_local_root or "/media"),
+    )
     fallback = MetadataConfig(
         tmdb_read_access_token=fallback.tmdb_read_access_token,
         bangumi_access_token=fallback.bangumi_access_token,
@@ -420,7 +429,7 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         follow_days=fallback.follow_days,
         bangumi_ini_enabled=fallback.bangumi_ini_enabled,
         downloader_root=qbit_root,
-        media_local_root=str(settings.media_local_root or qbit_root),
+        media_local_root=preferred_local_root,
         emby_url=fallback.emby_url,
         emby_api_key=fallback.emby_api_key,
         tmm_url=fallback.tmm_url,
@@ -437,6 +446,21 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         return fallback
     if not rows:
         return fallback
+    stored_local_root = rows.get("media_local_root", fallback.media_local_root).strip().rstrip("/") or "/"
+    configured_local_root = preferred_local_root
+    normalized_qbit_root = qbit_root.strip().rstrip("/") or "/"
+
+    # Self-heal databases created by releases that copied qBittorrent's
+    # host-visible save root into FeedDock's local mount setting.  A common
+    # fnOS layout is qBittorrent=/vol2/1000/影视 and FeedDock=/media.  Even when
+    # MEDIA_LOCAL_ROOT is omitted from a custom Compose file, /media remains
+    # the image's canonical local mount.
+    if (
+        stored_local_root == normalized_qbit_root
+        and configured_local_root != normalized_qbit_root
+    ):
+        stored_local_root = configured_local_root
+
     return MetadataConfig(
         tmdb_read_access_token=rows.get("tmdb_read_access_token", fallback.tmdb_read_access_token),
         bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
@@ -447,7 +471,7 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         follow_days=_safe_int(rows.get("metadata_follow_days"), fallback.follow_days, 1, 3650),
         bangumi_ini_enabled=_bool_value(rows.get("metadata_bangumi_ini_enabled"), fallback.bangumi_ini_enabled),
         downloader_root=qbit_root,
-        media_local_root=(rows.get("media_local_root", fallback.media_local_root).strip().rstrip("/") or "/"),
+        media_local_root=stored_local_root,
         emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
         emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
         tmm_url=rows.get("tmm_url", fallback.tmm_url).strip().rstrip("/"),
@@ -508,7 +532,10 @@ def save_metadata_config(
     clean_tmdb_image = _validate_optional_http_url(tmdb_image_base, "TMDB 图片地址") or settings.tmdb_image_base
 
     qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
-    local_root = media_local_root.strip().rstrip("/") or qbit_root
+    local_root = media_local_root.strip().rstrip("/") or preferred_local_media_root(
+        qbit_root,
+        str(settings.media_local_root or "/media"),
+    )
     if not local_root.startswith("/"):
         raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
     if len(local_root) > 2000:

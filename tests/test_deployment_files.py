@@ -326,6 +326,12 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('EMBY_URL: ""', compose)
         self.assertIn('- "/vol2/1000/影视:/media"', compose)
 
+    def test_container_defaults_media_local_root_to_media_mount(self) -> None:
+        config = (ROOT / "app/config.py").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "docker-entrypoint.py").read_text(encoding="utf-8")
+        self.assertIn('_optional_path("MEDIA_LOCAL_ROOT", "/media")', config)
+        self.assertIn('os.getenv("MEDIA_LOCAL_ROOT", "/media")', entrypoint)
+
     def test_fnos_permissions_and_media_root_are_consistent(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

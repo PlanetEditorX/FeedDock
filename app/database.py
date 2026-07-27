@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
+from .media_paths import preferred_local_media_root
 
 
 class Base(DeclarativeBase):
@@ -228,6 +229,57 @@ def ensure_schema() -> None:
                         ),
                         {"value": configured_local},
                     )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
+
+    # Some custom Compose files mount the media library at /media but omit the
+    # MEDIA_LOCAL_ROOT environment variable.  Older releases then persisted
+    # qBittorrent's host-visible path (for example /vol2/1000/影视) as the local
+    # FeedDock path.  Repair that stale value even when the 1.17.7 migration
+    # marker already exists.
+    marker = "migration:1.17.10:default-media-local-root"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            qbit_root = str(
+                connection.execute(
+                    text("SELECT value FROM app_settings WHERE key = 'download_path'")
+                ).scalar_one_or_none()
+                or settings.download_path
+            ).strip().rstrip("/") or "/"
+            current_local = connection.execute(
+                text("SELECT value FROM app_settings WHERE key = 'media_local_root'")
+            ).scalar_one_or_none()
+            current_local_value = str(current_local or "").strip().rstrip("/")
+            configured_local = preferred_local_media_root(
+                qbit_root,
+                str(settings.media_local_root or "/media"),
+            )
+
+            if not current_local_value:
+                connection.execute(
+                    text(
+                        "INSERT INTO app_settings (key, value, updated_at) "
+                        "VALUES ('media_local_root', :value, CURRENT_TIMESTAMP)"
+                    ),
+                    {"value": configured_local},
+                )
+            elif current_local_value == qbit_root and configured_local != qbit_root:
+                connection.execute(
+                    text(
+                        "UPDATE app_settings SET value = :value, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE key = 'media_local_root'"
+                    ),
+                    {"value": configured_local},
+                )
+
             connection.execute(
                 text(
                     "INSERT INTO app_settings (key, value, updated_at) "

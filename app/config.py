@@ -20,8 +20,8 @@ def _as_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _optional_path(name: str) -> Path | None:
-    raw = os.getenv(name, "").strip()
+def _optional_path(name: str, default: str = "") -> Path | None:
+    raw = os.getenv(name, default).strip()
     if not raw:
         return None
     path = Path(raw).expanduser()
@@ -90,7 +90,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.17.9"),
+        app_version=os.getenv("APP_VERSION", "1.17.10"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -101,7 +101,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.17.9 (+self-hosted RSS automation)",
+            "FeedDock/1.17.10 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -146,7 +146,11 @@ def load_settings() -> Settings:
         bangumi_access_token=os.getenv("BANGUMI_ACCESS_TOKEN", "").strip(),
         anilist_api_url=os.getenv("ANILIST_API_URL", "https://graphql.anilist.co").strip().rstrip("/"),
         metadata_auto_sync_hours=_as_int("METADATA_AUTO_SYNC_HOURS", 24),
-        media_local_root=_optional_path("MEDIA_LOCAL_ROOT"),
+        # FeedDock's image always exposes /media as the local media mount.
+        # Custom Compose files often omit MEDIA_LOCAL_ROOT while still mounting
+        # the host library at /media, so treat /media as the effective default
+        # instead of falling back to qBittorrent's host-visible save path.
+        media_local_root=_optional_path("MEDIA_LOCAL_ROOT", "/media"),
         emby_url=os.getenv("EMBY_URL", "").strip().rstrip("/"),
         emby_api_key=os.getenv("EMBY_API_KEY", "").strip(),
         tmm_url=os.getenv("TMM_URL", "").strip().rstrip("/"),

@@ -52,7 +52,7 @@ def main() -> None:
     umask = _number("UMASK", 0o002, base=8)
     os.umask(umask)
     data_dir = Path(os.getenv("DATA_DIR", "/data"))
-    media_value = os.getenv("MEDIA_LOCAL_ROOT", "").strip()
+    media_value = os.getenv("MEDIA_LOCAL_ROOT", "/media").strip()
     media_dir = Path(media_value) if media_value else None
 
     if os.geteuid() == 0:

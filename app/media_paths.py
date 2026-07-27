@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 from pathlib import Path, PurePosixPath
 
@@ -17,6 +18,28 @@ def _absolute_posix(value: str, label: str) -> PurePosixPath:
 
 def _is_within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
+
+
+def preferred_local_media_root(downloader_root: str, configured_root: str) -> str:
+    """Choose the FeedDock-visible media root without breaking bare-metal use.
+
+    Docker deployments normally mount the library at ``/media`` while
+    qBittorrent may report an fnOS host path such as ``/vol2/1000/影视``.  Test
+    and bare-metal installations may intentionally use the same ordinary path
+    for both processes, so only prefer the configured root when it was
+    explicitly supplied, is an actual mount point, or the downloader root
+    clearly looks like a NAS/host path.
+    """
+
+    qbit_root = str(downloader_root or "").strip().rstrip("/") or "/"
+    local_root = str(configured_root or "").strip().rstrip("/") or "/media"
+    if local_root == qbit_root:
+        return local_root
+
+    explicitly_configured = bool(os.getenv("MEDIA_LOCAL_ROOT", "").strip())
+    local_is_mount = Path(local_root).expanduser().is_mount()
+    host_style_root = qbit_root.startswith(("/vol", "/volume", "/mnt", "/share"))
+    return local_root if explicitly_configured or local_is_mount or host_style_root else qbit_root
 
 
 def map_downloader_path_to_local(

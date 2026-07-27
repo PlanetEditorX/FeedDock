@@ -1,6 +1,6 @@
-# FeedDock 1.17.9 设置说明
+# FeedDock 1.17.10 设置说明
 
-FeedDock 1.17.9 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.17.10 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 

@@ -1,25 +1,32 @@
-# FeedDock 1.17.9 Git 提交说明
+# FeedDock 1.17.10 Git 提交说明
 
 ## 推荐提交
 
 ```text
-feat(library): 增加媒体去重、孤儿清理与静态更新
+fix(scraper): 自动修复容器媒体挂载路径
 ```
 
 ## 提交正文
 
 ```text
-- 下载前检查媒体目录中的精确目标文件和 SxxExx 集数标记
-- 刷新订阅时清理没有视频的 FeedDock NFO、海报和背景图
-- RSS 总开关关闭时仍允许执行本地孤儿元数据清理
-- 使用静态 update.json、条件请求和 SQLite 缓存检查新版本
-- GitHub Release API 降级为每天最多一次的备用检查
-- 在系统设置中提供在线更新入口与 Watchtower 配置提示
+- MEDIA_LOCAL_ROOT 未配置时默认使用容器内 /media
+- 修复旧数据库把 qBittorrent 宿主机路径保存为本地刮削路径的问题
+- 即使 1.17.7 迁移已经执行，也会重新修正错误路径
+- 增加运行时自修复与裸机路径兼容判断
+- 补充飞牛 /vol2 到 /media 的迁移和映射测试
 ```
 
-## 兼容性
+## 主要文件
 
-- 不增加数据库列；版本清单缓存继续使用 `app_settings`。
-- 不删除视频、字幕或任意非元数据用户文件。
-- 已存在的规范命名目标视频会始终阻止重复推送；较宽松的 `SxxExx` 匹配仍由“文件已下载自动跳过”控制。
-- 在线更新仍要求外部 Watchtower HTTP API，不向 FeedDock 容器开放 Docker Socket。
+```text
+app/config.py
+app/database.py
+app/media_paths.py
+app/runtime_config.py
+docker-entrypoint.py
+tests/test_settings_features.py
+tests/test_deployment_files.py
+MEDIA_PATH_DEFAULT_1.17.10.md
+```
+
+本次不新增数据库字段，不需要手工 SQL。

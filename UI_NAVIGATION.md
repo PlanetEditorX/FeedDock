@@ -1,4 +1,4 @@
-# FeedDock 1.17.9 界面与导航说明
+# FeedDock 1.17.10 界面与导航说明
 
 ## 设计目标
 
@@ -134,7 +134,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 {
   "format": "feeddock-subscriptions",
   "version": 1,
-  "app_version": "1.17.9",
+  "app_version": "1.17.10",
   "subscriptions": [
     {
       "name": "示例番剧",
@@ -169,7 +169,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 
 升级到 1.17.0 会自动增加订阅来源、站点番剧 ID、统一身份字段和跨站隐藏偏好表；既有订阅、条目与缓存保持不变，无需手工 SQL。
 
-静态资源使用 `v=1.17.9` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
+静态资源使用 `v=1.17.10` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
 
 ## 刷新菜单
 

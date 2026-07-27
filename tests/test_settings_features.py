@@ -121,6 +121,48 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertEqual(saved.downloader_root, "/vol2/1000/影视")
         self.assertEqual(saved.media_local_root, "/media")
 
+    def test_stale_host_media_root_self_heals_to_container_media_mount(self):
+        from app.models import AppSetting
+
+        self.db.merge(AppSetting(key="download_path", value="/vol2/1000/影视"))
+        self.db.merge(AppSetting(key="media_local_root", value="/vol2/1000/影视"))
+        self.db.commit()
+
+        loaded = load_metadata_config(self.db)
+
+        self.assertEqual(loaded.downloader_root, "/vol2/1000/影视")
+        self.assertEqual(loaded.media_local_root, "/media")
+
+    def test_empty_local_media_root_saves_container_default_not_qbit_root(self):
+        from app.models import AppSetting
+
+        self.db.merge(AppSetting(key="download_path", value="/vol2/1000/影视"))
+        self.db.commit()
+        saved = save_metadata_config(
+            self.db,
+            tmdb_read_access_token=None,
+            clear_tmdb_token=False,
+            bangumi_access_token=None,
+            clear_bangumi_token=False,
+            metadata_language="zh-CN",
+            tmdb_api_base="https://api.themoviedb.org",
+            tmdb_image_base="https://image.tmdb.org",
+            auto_scrape_enabled=True,
+            follow_days=14,
+            bangumi_ini_enabled=False,
+            media_local_root="",
+            emby_url="",
+            emby_api_key=None,
+            clear_emby_api_key=False,
+            tmm_url="",
+            tmm_api_key=None,
+            clear_tmm_api_key=False,
+            tmm_enabled=False,
+        )
+
+        self.assertEqual(saved.downloader_root, "/vol2/1000/影视")
+        self.assertEqual(saved.media_local_root, "/media")
+
     def test_preferences_persist_and_tracker_cache_is_deduplicated(self):
         saved = self.save_preferences()
         self.assertEqual(saved.page.theme_color, "green")
