@@ -1,38 +1,41 @@
-# FeedDock 1.15.0 Git 提交说明
+# FeedDock 1.16.0 Git 提交说明
 
 ## 推荐提交标题
 
 ```text
-feat(subscriptions): 增加 Mikan、ANI.BT 与 Anime Garden 站点入口
+feat(discovery): 增加多站点番剧周历与资源缓存
 ```
 
 ## 提交正文
 
 ```text
-- 将添加订阅拆分为 Mikan、ANI.BT、Anime Garden 和其它 RSS
-- 为 ANI.BT 与 Anime Garden 显示官方地址、RSS 文档和安全提示
-- 全站 RSS 仅在用户确认后填入，避免误处理大量资源
-- 新增后端订阅站点目录与 URL 来源识别模块
-- 订阅 API 返回稳定的 source_type 和 source_label
-- 自动从 Mikan/AniBT URL 提取 bangumiId 或 bgmId
-- 使用严格主机边界匹配，避免相似恶意域名伪装
-- 新增独立前端 subscription-sources 模块
-- 增加站点目录、来源检测、UI 结构和自动 ID 测试
-- 版本升级至 1.15.0
+- 让 Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 共用按星期选番入口
+- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 使用共享 bangumi-data 周历
+- 所有站点支持标题搜索、读取缓存和手动强制更新
+- 根据站点能力生成 Bangumi ID、标题过滤、分类搜索或分辨率 RSS
+- 缓存每个 RSS 预设的最近资源，并支持强制更新资源详情
+- 已订阅状态在当前站点周历中即时同步
+- 已浏览共享季度按现有缓存周期后台刷新
+- 共享周历与资源请求遵循 FeedDock 代理设置
+- 增加周历解析、RSS 生成、缓存回退和后台刷新测试
+- 版本升级至 1.16.0
 ```
 
 ## 主要文件
 
 ```text
+app/anime_catalog.py
 app/subscription_sources.py
-app/static/subscription-sources.js
+app/main.py
+app/scheduler.py
 app/static/app.js
 app/static/index.html
+app/static/navigation.js
 app/static/styles.css
-app/main.py
-app/schemas.py
+tests/test_catalog_weekly_sources.py
 tests/test_subscription_sources.py
 tests/test_deployment_files.py
+MULTI_SOURCE_WEEKLY_CATALOG.md
 SUBSCRIPTION_SOURCES.md
 README.md
 UI_NAVIGATION.md
@@ -40,12 +43,12 @@ UI_NAVIGATION.md
 
 ## 数据库
 
-本次不增加数据库字段，不需要手工迁移。`source_type` 与 `source_label` 根据现有 `rss_url` 动态生成。
+不新增表或字段。共享周历和资源详情复用现有 `mikan_cache_entries` 表。
 
 ## 提交命令
 
 ```bash
 git add .
-git commit -m "feat(subscriptions): 增加 Mikan、ANI.BT 与 Anime Garden 站点入口" \
-  -m "为不同订阅站点提供专用入口、官方 RSS 指引、安全提示和稳定来源识别。"
+git commit -m "feat(discovery): 增加多站点番剧周历与资源缓存" \
+  -m "统一 Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 的按星期选番、缓存和站点 RSS 生成流程。"
 ```

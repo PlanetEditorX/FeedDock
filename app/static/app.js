@@ -17,6 +17,7 @@ let currentDownloadRoot = '/media';
 let applicationPreferences = null;
 let subscriptionSources = subscriptionSourceState.normalizeCatalog([]);
 let activeSubscriptionSource = subscriptionSourceState.getSource(subscriptionSources, 'other');
+let activeCatalogSource = 'mikan';
 let subscriptionSortMode = 'updated';
 const mikanWeekdayDrafts = new Map();
 const PANEL_STATE_KEY = 'feeddock.panelState.v1';
@@ -54,6 +55,50 @@ async function loadSubscriptionSources() {
   renderSubscriptionSourceContext(
     currentUrl ? subscriptionSourceState.detectSource(subscriptionSources, currentUrl) : activeSubscriptionSource,
   );
+  renderCatalogSourceTabs();
+}
+
+function catalogSources() {
+  return subscriptionSources.filter((source) => ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(source.id));
+}
+
+function renderCatalogSourceTabs() {
+  const container = document.getElementById('catalogSourceTabs');
+  if (!container) return;
+  container.replaceChildren();
+  catalogSources().forEach((source) => {
+    const button = text('button', source.short_label || source.label, `small secondary${source.id === activeCatalogSource ? ' is-active' : ''}`);
+    button.type = 'button';
+    button.addEventListener('click', () => openCatalogSource(source.id, { autoLoad: true }));
+    container.append(button);
+  });
+}
+
+function renderCatalogSourceContext() {
+  const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
+  const badge = document.getElementById('catalogSourceBadge');
+  badge.textContent = source.short_label || source.label;
+  badge.className = `provider-badge ${source.id}`;
+  document.getElementById('catalogSourceTitle').textContent = `${source.label} 番剧周历`;
+  document.getElementById('catalogSourceDescription').textContent = source.id === 'mikan'
+    ? '从 Mikan 季度目录选择番剧和字幕组。'
+    : `${source.description} 周历支持本地搜索、缓存读取和强制更新。`;
+  renderCatalogSourceTabs();
+}
+
+async function openCatalogSource(sourceId, { autoLoad = false } = {}) {
+  if (!subscriptionSources.some((item) => item.id === sourceId)) await loadSubscriptionSources();
+  activeCatalogSource = ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(sourceId) ? sourceId : 'mikan';
+  currentMikanCatalogData = null;
+  mikanWeekdayDrafts.clear();
+  document.getElementById('mikanCatalog').replaceChildren();
+  renderCatalogSourceContext();
+  showAppView('add-catalog');
+  const state = document.getElementById('mikanCatalogState');
+  const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
+  state.textContent = `点击“读取缓存”加载 ${source.label} 番剧周历；“强制更新”会更新共享周历或站点目录。`;
+  state.className = 'hint';
+  if (autoLoad) await loadMikanCatalog(document.getElementById('mikanCatalogForm'), false);
 }
 
 async function openSubscriptionEditor(source = 'other') {
@@ -288,7 +333,7 @@ async function loadConfig() {
   document.getElementById('updaterState').textContent = data.updater_configured ? '已启用' : '未启用';
   const catalogState = document.getElementById('mikanCatalogState');
   if (catalogState && !document.getElementById('mikanCatalog').children.length) {
-    catalogState.textContent = `首次没有缓存时会请求一次 Mikan；之后页面只读缓存，已浏览季度默认每 ${data.mikan_cache_hours || 6} 小时后台更新一次。`;
+    catalogState.textContent = `首次没有缓存时会请求所选站点的目录数据；之后页面优先读取持久化缓存，已浏览季度默认每 ${data.mikan_cache_hours || 6} 小时后台更新一次。`;
   }
 }
 
@@ -615,6 +660,7 @@ function cacheStatusText(data) {
     force_refreshed: '刚刚强制更新',
     cache_migrated: '旧缓存已自动修复',
     legacy_cache_refresh_failed: '旧缓存修复失败，暂时使用旧数据',
+    stale_cache_refresh_failed: '更新失败，暂时使用旧缓存',
   };
   const parts = [statusLabels[data.cache_status] || '本地缓存'];
   if (data.cached_at) parts.push(`缓存时间 ${fmtDate(data.cached_at)}`);
@@ -626,11 +672,22 @@ function cacheStatusText(data) {
 
 function syncMikanCatalogSubscriptionState(subscriptions) {
   if (!currentMikanCatalogData) return 0;
-  const subscribedIds = mikanSubscriptionState.collectSubscribedBangumiIds(subscriptions);
-  const changedCount = mikanSubscriptionState.updateCatalogSubscriptionState(
-    currentMikanCatalogData,
-    subscribedIds,
-  );
+  if (activeCatalogSource === 'mikan') {
+    const subscribedIds = mikanSubscriptionState.collectSubscribedBangumiIds(subscriptions);
+    const changedCount = mikanSubscriptionState.updateCatalogSubscriptionState(currentMikanCatalogData, subscribedIds);
+    if (changedCount) renderMikanCatalog(currentMikanCatalogData);
+    return changedCount;
+  }
+  let changedCount = 0;
+  currentMikanCatalogData.rows.forEach((row) => row.items.forEach((item) => {
+    const aliases = new Set((item.aliases || [item.title]).map((value) => String(value).trim().toLowerCase()).filter(Boolean));
+    const subscribed = subscriptions.some((sub) => {
+      if (sub.source_type !== activeCatalogSource) return false;
+      if (activeCatalogSource === 'anibt' && Number(item.subject_id || 0) > 0 && Number(sub.bangumi_id || 0) === Number(item.subject_id)) return true;
+      return [sub.name, sub.reference_title, sub.manual_title].some((value) => aliases.has(String(value || '').trim().toLowerCase()));
+    });
+    if (Boolean(item.subscribed) !== subscribed) { item.subscribed = subscribed; changedCount += 1; }
+  }));
   if (changedCount) renderMikanCatalog(currentMikanCatalogData);
   return changedCount;
 }
@@ -638,93 +695,84 @@ function syncMikanCatalogSubscriptionState(subscriptions) {
 function renderMikanDetail(detail) {
   const container = document.getElementById('mikanDetailBody');
   container.replaceChildren();
-
+  const source = subscriptionSourceState.getSource(subscriptionSources, detail.provider || activeCatalogSource);
   const summary = document.createElement('div');
   summary.className = 'mikan-detail-summary';
   const summaryText = document.createElement('div');
-  summaryText.append(text('strong', `${detail.groups.length} 个字幕组 RSS`));
+  summaryText.append(text('strong', `${detail.groups.length} 个可用 RSS`));
   summaryText.append(text('span', cacheStatusText(detail), 'muted cache-meta'));
   summary.append(summaryText);
-
   const summaryActions = document.createElement('div');
   summaryActions.className = 'card-actions';
-  const refreshButton = text('button', '强制更新字幕组', 'small secondary');
+  const refreshButton = text('button', '强制更新资源', 'small secondary');
   refreshButton.type = 'button';
   refreshButton.addEventListener('click', async () => {
     if (!currentMikanDetailItem) return;
-    refreshButton.disabled = true;
-    refreshButton.textContent = '正在更新…';
-    try {
-      await openMikanDetail(currentMikanDetailItem, true);
-      showNotice('字幕组缓存已更新');
-    } catch (_) {
-      // openMikanDetail already renders the error.
-    } finally {
-      refreshButton.disabled = false;
-      refreshButton.textContent = '强制更新字幕组';
-    }
+    refreshButton.disabled = true; refreshButton.textContent = '正在更新…';
+    try { await openMikanDetail(currentMikanDetailItem, true); showNotice(`${source.label} 资源缓存已更新`); }
+    finally { refreshButton.disabled = false; refreshButton.textContent = '强制更新资源'; }
   });
   summaryActions.append(refreshButton);
-  if (detail.detail_url) summaryActions.append(externalLink('打开 Mikan 番剧页', detail.detail_url));
-  summary.append(summaryActions);
-  container.append(summary);
-
+  if (detail.detail_url) summaryActions.append(externalLink(`打开 ${source.label} 页面`, detail.detail_url));
+  summary.append(summaryActions); container.append(summary);
   if (!detail.groups.length) {
-    container.append(text('p', '没有解析到字幕组。可以打开 Mikan 番剧页，确认当前季度是否已有资源发布。', 'empty'));
+    container.append(text('p', `当前条目无法生成 ${source.label} RSS，可能缺少站点所需的番剧 ID。`, 'empty'));
     return;
   }
-
-  const list = document.createElement('div');
-  list.className = 'mikan-rss-list';
+  const list = document.createElement('div'); list.className = 'mikan-rss-list';
   for (const group of detail.groups) {
-    const row = document.createElement('article');
-    row.className = 'mikan-rss-row';
-
-    const info = document.createElement('div');
-    info.className = 'mikan-rss-info';
-    info.append(text('h3', group.name));
-    info.append(text('code', group.rss_url, 'rss-code'));
-
-    const actions = document.createElement('div');
-    actions.className = 'card-actions';
-    const subscribe = text('button', '订阅', 'small');
-    subscribe.type = 'button';
-    subscribe.addEventListener('click', () => applyDiscoveryPreset(group.preset));
-    const copy = text('button', '复制 RSS', 'small secondary');
-    copy.type = 'button';
-    copy.addEventListener('click', () => copyText(group.rss_url));
-    actions.append(subscribe, copy);
-    if (group.detail_url) actions.append(externalLink('字幕组页面', group.detail_url));
-    row.append(info, actions);
-    list.append(row);
+    const row = document.createElement('article'); row.className = 'mikan-rss-row';
+    const info = document.createElement('div'); info.className = 'mikan-rss-info';
+    info.append(text('h3', group.name)); info.append(text('code', group.rss_url, 'rss-code'));
+    if (group.preview_error) info.append(text('span', `资源预览失败：${group.preview_error}`, 'muted error-text'));
+    if (Array.isArray(group.entries) && group.entries.length) {
+      const preview = document.createElement('div'); preview.className = 'source-resource-preview';
+      group.entries.forEach((entry) => {
+        const line = document.createElement('div'); line.className = 'source-resource-entry';
+        line.append(text('span', entry.title || '未命名资源'));
+        if (entry.source_url) line.append(externalLink('详情', entry.source_url));
+        preview.append(line);
+      });
+      info.append(preview);
+    }
+    const actions = document.createElement('div'); actions.className = 'card-actions';
+    const subscribe = text('button', '订阅', 'small'); subscribe.type = 'button'; subscribe.addEventListener('click', () => applyDiscoveryPreset(group.preset));
+    const copy = text('button', '复制 RSS', 'small secondary'); copy.type = 'button'; copy.addEventListener('click', () => copyText(group.rss_url));
+    actions.append(subscribe, copy); if (group.detail_url) actions.append(externalLink('站点页面', group.detail_url));
+    row.append(info, actions); list.append(row);
   }
   container.append(list);
 }
 
 async function openMikanDetail(item, forceRefresh = false) {
   currentMikanDetailItem = item;
+  const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
+  document.getElementById('catalogDetailBadge').textContent = source.short_label || source.label;
+  document.getElementById('catalogDetailBadge').className = `provider-badge ${source.id}`;
   openMikanModal(item.title);
   try {
-    const params = new URLSearchParams({
-      base_url: item.base_url || '',
-      title: item.title || '',
-    });
-    const path = forceRefresh
-      ? `/api/discovery/mikan/${item.bangumi_id}/refresh?${params.toString()}`
-      : `/api/discovery/mikan/${item.bangumi_id}?${params.toString()}`;
-    const detail = await api(path, forceRefresh ? { method: 'POST' } : {});
+    let detail;
+    if (activeCatalogSource === 'mikan') {
+      const params = new URLSearchParams({ base_url: item.base_url || '', title: item.title || '' });
+      const path = forceRefresh ? `/api/discovery/mikan/${item.bangumi_id}/refresh?${params}` : `/api/discovery/mikan/${item.bangumi_id}?${params}`;
+      detail = await api(path, forceRefresh ? { method: 'POST' } : {});
+    } else {
+      const params = new URLSearchParams({
+        title: item.title || '', subject_id: String(item.subject_id || item.bangumi_id || 0),
+        original_title: item.title_original || '', english_title: item.title_english || '',
+        aliases: (item.aliases || []).join('\n'), force_refresh: forceRefresh ? 'true' : 'false',
+      });
+      detail = await api(`/api/discovery/catalog/${activeCatalogSource}/detail?${params}`);
+    }
     document.getElementById('mikanDetailTitle').textContent = detail.title;
-    renderMikanDetail(detail);
-    return detail;
+    renderMikanDetail(detail); return detail;
   } catch (error) {
-    const body = document.getElementById('mikanDetailBody');
-    body.replaceChildren(text('p', error.message, 'error-text'));
-    throw error;
+    document.getElementById('mikanDetailBody').replaceChildren(text('p', error.message, 'error-text')); throw error;
   }
 }
 
 function mikanWeekdayKey(data, row) {
-  return `${data.year}|${data.season}|${row.weekday}`;
+  return `${activeCatalogSource}|${data.year}|${data.season}|${row.weekday}`;
 }
 
 function getMikanWeekdayCollapsed(key) {
@@ -746,7 +794,10 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   if (item.subscribed) card.classList.add('is-subscribed');
   if (editing) card.classList.add('is-filter-editing');
   if (hiddenDraft) card.classList.add('is-filter-hidden');
-  if (!editing) card.addEventListener('click', () => openMikanDetail(item));
+  if (!editing) {
+    card.disabled = item.available === false;
+    if (item.available !== false) card.addEventListener('click', () => openMikanDetail(item));
+  }
 
   const cover = document.createElement('div');
   cover.className = 'mikan-cover';
@@ -779,7 +830,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
     'span',
-    editing ? (hiddenDraft ? '保存后隐藏' : '当前显示') : '点击查看字幕组 RSS',
+    editing ? (hiddenDraft ? '保存后隐藏' : '当前显示') : (item.action_text || (activeCatalogSource === 'mikan' ? '点击查看字幕组 RSS' : '点击查看 RSS 与资源')),
     'catalog-card-action',
   ));
   card.append(cover, info);
@@ -852,12 +903,13 @@ function renderMikanCatalog(data) {
   }
 
   const hiddenSummary = hiddenCount ? ` · 已隐藏 ${hiddenCount} 部` : '';
-  state.textContent = `${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}`;
+  const sourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
+  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${data.attribution ? ` · ${data.attribution}` : ""}`;
   state.className = 'hint';
 
   for (const row of data.rows) {
     const key = mikanWeekdayKey(data, row);
-    const editing = mikanWeekdayDrafts.has(key);
+    const editing = activeCatalogSource === 'mikan' && mikanWeekdayDrafts.has(key);
     const draft = mikanWeekdayDrafts.get(key) || new Set();
     const hiddenInRow = row.items.filter((item) => item.hidden).length;
     const visibleItems = editing ? row.items : row.items.filter((item) => !item.hidden);
@@ -916,7 +968,7 @@ function renderMikanCatalog(data) {
         }
       });
       actions.append(showAll, cancel, save);
-    } else {
+    } else if (activeCatalogSource === 'mikan') {
       const edit = text('button', '编辑过滤', 'small secondary');
       edit.type = 'button';
       edit.disabled = Boolean(data.query);
@@ -999,19 +1051,20 @@ async function loadMikanCatalog(form, forceRefresh = false) {
   loadButton.disabled = true;
   refreshButton.disabled = true;
   activeButton.textContent = forceRefresh ? '正在强制更新…' : '正在读取缓存…';
+  const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
   state.textContent = forceRefresh
-    ? `正在从 Mikan 更新 ${year} ${season}番剧目录…`
-    : `正在读取 FeedDock 中的 ${year} ${season}缓存…`;
+    ? `正在更新 ${source.label} 的 ${year} ${season}番剧周历…`
+    : `正在读取 ${source.label} 的 ${year} ${season}缓存…`;
   state.className = 'hint';
   try {
     const params = new URLSearchParams({ year, season });
     if (query) params.set('q', query);
-    const path = forceRefresh
-      ? `/api/discovery/mikan/catalog/refresh?${params.toString()}`
-      : `/api/discovery/mikan/catalog?${params.toString()}`;
+    const path = activeCatalogSource === 'mikan'
+      ? (forceRefresh ? `/api/discovery/mikan/catalog/refresh?${params}` : `/api/discovery/mikan/catalog?${params}`)
+      : (forceRefresh ? `/api/discovery/catalog/${activeCatalogSource}/refresh?${params}` : `/api/discovery/catalog/${activeCatalogSource}?${params}`);
     const data = await api(path, forceRefresh ? { method: 'POST' } : {});
     renderMikanCatalog(data);
-    if (forceRefresh) showNotice('Mikan 番剧目录缓存已更新');
+    if (forceRefresh) showNotice(`${source.label} 番剧周历缓存已更新`);
   } catch (error) {
     if (!document.getElementById('mikanCatalog').children.length) {
       document.getElementById('mikanCatalog').replaceChildren();
@@ -1056,13 +1109,15 @@ function renderSubscriptions(data) {
   if (!data.length) {
     const empty = document.createElement('div'); empty.className = 'empty-state';
     empty.append(text('h3', '还没有订阅'));
-    empty.append(text('p', '选择订阅站点后添加番剧 RSS；Mikan 提供目录，ANI.BT 与 Anime Garden 提供站点专用提示。', 'muted'));
+    empty.append(text('p', '从番剧周历选择 Mikan、ANI.BT、Anime Garden、Nyaa 或 SubsPlease，也可以手动添加其它 RSS。', 'muted'));
     const actions = document.createElement('div'); actions.className = 'form-actions';
-    const mikan = text('button', 'Mikan'); mikan.type = 'button'; mikan.addEventListener('click', () => showAppView('add-mikan'));
-    const anibt = text('button', 'ANI.BT', 'secondary'); anibt.type = 'button'; anibt.addEventListener('click', () => openSubscriptionEditor('anibt').catch((error) => showNotice(error.message, false)));
-    const ag = text('button', 'Anime Garden', 'secondary'); ag.type = 'button'; ag.addEventListener('click', () => openSubscriptionEditor('ag').catch((error) => showNotice(error.message, false)));
+    ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].forEach((sourceId, index) => {
+      const source = subscriptionSourceState.getSource(subscriptionSources, sourceId);
+      const button = text('button', source.short_label || source.label, index ? 'secondary' : '');
+      button.type = 'button'; button.addEventListener('click', () => openCatalogSource(sourceId, { autoLoad: true }).catch((error) => showNotice(error.message, false))); actions.append(button);
+    });
     const other = text('button', '其它 RSS', 'secondary'); other.type = 'button'; other.addEventListener('click', () => openSubscriptionEditor('other').catch((error) => showNotice(error.message, false)));
-    actions.append(mikan, anibt, ag, other); empty.append(actions); container.append(empty);
+    actions.append(other); empty.append(actions); container.append(empty);
     updateSubscriptionSelectionSummary();
     return;
   }
@@ -1452,7 +1507,7 @@ document.getElementById('clearMikanCatalog').addEventListener('click', () => {
   currentMikanCatalogData = null;
   mikanWeekdayDrafts.clear();
   const state = document.getElementById('mikanCatalogState');
-  state.textContent = '已清空。点击“读取缓存”加载所选季度；只有“强制更新”会访问 Mikan。';
+  state.textContent = '已清空。点击“读取缓存”加载所选季度；只有“强制更新”会访问外部周历或站点。';
   state.className = 'hint';
 });
 
@@ -1716,7 +1771,12 @@ subscriptionForm.elements.rss_url.addEventListener('change', (event) => {
 document.querySelectorAll('[data-subscription-source]').forEach((button) => {
   button.addEventListener('click', () => {
     const source = button.dataset.subscriptionSource;
-    if (source && source !== 'mikan') openSubscriptionEditor(source).catch((error) => showNotice(error.message, false));
+    if (!source) return;
+    if (['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(source)) {
+      openCatalogSource(source, { autoLoad: true }).catch((error) => showNotice(error.message, false));
+    } else {
+      openSubscriptionEditor(source).catch((error) => showNotice(error.message, false));
+    }
   });
 });
 

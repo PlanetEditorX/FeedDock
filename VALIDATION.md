@@ -1,77 +1,100 @@
-# FeedDock 1.15.0 验证报告
+# FeedDock 1.16.0 验证报告
 
 ## 结论
 
-FeedDock 1.15.0 已完成 Mikan、ANI.BT、Anime Garden（AG）和其它 RSS 四类订阅站点入口的实现与回归验证。
+FeedDock 1.16.0 已完成多站点番剧周历：Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 均可按星期浏览，并具备标题搜索、缓存读取、强制更新、资源详情缓存和已订阅标识。
 
-- **125 项 unittest 测试全部通过**；
+验证结果：
+
+- **133 项 pytest 测试通过，另有 19 个子测试通过**；
 - Python 全项目编译通过；
 - 6 个前端 JavaScript 文件语法检查通过；
 - Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
-- 主页面 119 个、登录页 3 个、改密页 7 个 HTML ID 均唯一；
-- FastAPI 应用可正常导入，运行版本为 `1.15.0`；
-- 从 1.14.0 升级不新增数据库字段，不需要手工迁移。
+- 主页面 124 个、登录页 3 个、改密页 7 个 HTML ID 均唯一；
+- FastAPI 应用可导入，运行版本为 `1.16.0`；
+- 从 1.15.0 升级不新增数据库字段；
+- 完整发布包解压回归与 Git 补丁升级回归均通过。
 
 ## 功能覆盖
 
-### 四类添加入口
+### 统一周历
 
-- Mikan：继续进入季度番剧目录，可选择番剧与字幕组；
-- ANI.BT：显示官方站点、RSS 帮助、单番剧地址示例和全站磁力流警告；
-- Anime Garden：显示官方站点、帮助入口、过滤 RSS 示例和全站资源流警告；
-- 其它 RSS：保持通用 RSS、Atom、RDF 输入模式。
+- Mikan 继续使用自身季度目录；
+- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 使用共享 `bangumi-data` 周历；
+- 月度数据解析为 Asia/Tokyo 星期和播出时间；
+- 中文、原始标题和英文标题组成搜索别名；
+- 页面显示 `bangumi-data（CC BY 4.0）` 来源说明；
+- 标题搜索在本地缓存中执行，不会产生额外外部请求。
 
-### 站点目录与识别
+### 站点 RSS 适配
 
-- 后端集中维护订阅站点目录，前端通过认证 API 获取；
-- 按 URL 主机名识别 `source_type` 和 `source_label`；
-- 主机名使用边界匹配，`anibt.net.example.com` 不会被误识别为 ANI.BT；
-- 未知站点归类为“其它 RSS”，订阅卡片仍优先保留用户填写的 RSS 名称；
-- Mikan/AniBT 地址中的 `bangumiId` 或 `bgmId` 可自动补入订阅元数据。
+- ANI.BT：按 Bangumi ID 生成全部发布、1080p 和 720p RSS；
+- Anime Garden：生成标题过滤 RSS；
+- Nyaa：生成英文字幕动画、可信发布和日文原盘 RSS；
+- SubsPlease：生成 1080p、720p、SD 和全部分辨率 Feed，并自动设置标题包含规则；
+- 不满足站点必要条件的条目会禁用，不生成伪造 RSS。
 
-### 安全默认值
+### 缓存和更新
 
-- ANI.BT 和 Anime Garden 的全站 RSS 不自动写入表单；
-- 用户点击“使用全站 RSS”时必须确认；
-- 界面明确提示先配置包含、排除或字幕组规则，降低误下载大量资源的风险；
-- 站点识别不信任用户可编辑的显示名称。
+- 共享周历复用 SQLite `mikan_cache_entries` 表；
+- 普通读取命中持久化缓存；
+- 强制更新失败时回退旧缓存并保留错误信息；
+- 已浏览季度按 `MIKAN_CACHE_HOURS` 后台刷新；
+- 失败缓存最多每小时重试一次；
+- 资源详情会读取每一个 RSS 预设，而不只读取第一个；
+- 第二次打开资源详情只读缓存；
+- 周历和 RSS 请求都传入 FeedDock 代理配置。
 
-### 前端模块化
+### 前端
 
-- 新增独立纯函数模块 `app/static/subscription-sources.js`；
-- 负责目录规范化、来源查找、URL 来源识别和默认 Feed 可用性判断；
-- 模块支持浏览器和 Node.js 测试环境；
-- GitHub Actions 已加入该脚本的 `node --check`。
+- “添加”菜单新增 Nyaa 和 SubsPlease；
+- 五个站点都进入 `#add-catalog` 周历视图；
+- 周历顶部可直接切换站点；
+- 共用年份、季度、搜索、读取缓存和强制更新控件；
+- Mikan 保留每星期隐藏过滤；
+- 非 Mikan 站点显示站点专用 RSS 和最近资源预览；
+- 保存、编辑或删除订阅后，当前周历的“已订阅”标识即时更新。
 
-## 数据库升级
+## 自动化测试
 
-1.15.0 没有新增表或字段。来源类型由订阅主 RSS URL 动态识别，因此：
+重点测试文件：
 
-- 1.14.0 数据库可直接启动；
-- 不修改历史订阅、条目、RSS 指纹或通知去重状态；
-- 不需要手工 SQL；
-- 导入导出格式保持兼容。
+```text
+tests/test_catalog_weekly_sources.py
+tests/test_subscription_sources.py
+tests/test_deployment_files.py
+tests/test_mikan_cache.py
+tests/test_mikan_subscription_state.py
+```
+
+新增测试覆盖：
+
+- 月度数据转按星期周历；
+- 中文、原始和英文标题别名；
+- Bangumi 与 Mikan ID 提取；
+- 四个共享周历站点的 RSS 预设；
+- ANI.BT 已订阅识别；
+- 本地标题搜索；
+- 首次拉取、普通缓存读取和强制更新失败回退；
+- 后台刷新已知过期季度；
+- 每个资源 RSS 预设均被读取；
+- 资源详情二次打开不重复请求；
+- 代理数据库会话传入外部请求；
+- 菜单、站点标签、通用 API 路径和静态资源版本。
 
 ## 执行命令
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests
-python -m compileall -q app tests
+python -m pytest -q
+python -m compileall -q app
 
-for file in \
-  app/static/mikan-subscription-state.js \
-  app/static/subscription-sources.js \
-  app/static/navigation.js \
-  app/static/app.js \
-  app/static/login.js \
-  app/static/change-password.js; do
+for file in app/static/*.js; do
   node --check "$file"
 done
 
 python - <<'PY'
 from pathlib import Path
 import yaml
-
 for name in (
     "docker-compose.yml",
     "docker-compose.fnos.yml",
@@ -80,35 +103,27 @@ for name in (
     yaml.safe_load(Path(name).read_text(encoding="utf-8"))
 PY
 
-PYTHONPATH=. python - <<'PY'
-from app.main import app
+python - <<'PY'
 from app.config import settings
-assert settings.app_version == "1.15.0"
+from app.main import app
+assert settings.app_version == "1.16.0"
 assert app.title == "FeedDock"
 PY
 ```
 
-## 重点测试文件
+## 旧数据库升级
 
-```text
-tests/test_subscription_sources.py
-tests/test_deployment_files.py
-tests/test_subscription_management.py
-tests/test_auth_flow.py
-```
+使用原始 1.15.0 代码创建 SQLite 数据库和历史订阅，再使用 1.16.0 的 `ensure_schema()` 打开同一数据库。验证：
 
-新增测试覆盖：
+- 历史订阅仍存在；
+- RSS URL、名称和启用状态保持不变；
+- 现有缓存表可直接写入新的 `anime_catalog` 和 `source_detail` 类型；
+- 不需要手工 SQL。
 
-- 站点目录顺序和默认配置；
-- Mikan、ANI.BT、Anime Garden 与未知 RSS 的来源识别；
-- 主机名边界与相似恶意域名；
-- `bangumiId`、`bgmId` 提取和自动写入；
-- 订阅输出中的稳定来源字段；
-- 认证后的站点目录 API；
-- 前端来源模块的 Node.js 纯函数测试；
-- 四类添加菜单、来源说明面板和全站 RSS 风险确认；
-- 静态资源加载顺序与缓存版本。
+## 外部接口核对与环境限制
 
-## 环境限制
+站点参数依据官方公开文档核对：ANI.BT 的 `bgmId` 和分辨率参数、Anime Garden 的过滤 RSS、SubsPlease 的 SD/720p/1080p/全部 Feed，以及 `bangumi-data` 的 CC BY 4.0 署名要求。
 
-当前验证聚焦于应用代码、静态界面和配置文件，没有连接真实 Mikan、ANI.BT 或 Anime Garden 服务执行外部端到端订阅拉取。站点地址和接口格式通过官方公开文档核对，应用侧通过测试替身和纯函数测试验证分类、表单行为与持久化结果。
+当前容器环境 DNS 解析被隔离，真实外部请求返回 `Temporary failure in name resolution`，因此没有在容器内执行站点端到端拉取。应用侧使用模拟响应验证 HTTP、RSS 解析、缓存、代理传递和错误回退；外部服务的实时可用性不在本报告保证范围内。
+
+当前环境也没有 Docker CLI，因此未实际构建镜像；Compose 与 Dockerfile 已完成静态检查。

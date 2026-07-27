@@ -6,8 +6,8 @@
   const DEFAULT_VIEW = 'subscriptions';
   const VIEW_META = Object.freeze({
     subscriptions: ['订阅', '查看当前订阅、运行状态与最近检查结果。'],
-    'add-mikan': ['Mikan 番剧目录', '从季度目录选择番剧和字幕组。'],
-    'add-subscription': ['添加订阅', '添加或编辑 Mikan、ANI.BT、Anime Garden 及其它 RSS。'],
+    'add-catalog': ['番剧周历', '按星期浏览稳定订阅站点，并生成站点专用 RSS。'],
+    'add-subscription': ['添加订阅', '添加或编辑站点生成的订阅，以及任意其它 RSS。'],
     downloads: ['下载', '查看最近发现、推送和完成处理的条目。'],
     'settings-page': ['页面设置', '配置主题色与订阅列表排序。'],
     'settings-scrape': ['刮削设置', '配置自动元数据同步、TMDB 与 bangumi.ini。'],

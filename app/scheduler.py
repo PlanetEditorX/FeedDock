@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from .anime_catalog import refresh_due_anime_catalogs
 from .database import SessionLocal
 from .debug_logging import log_exception
 from .mikan_cache import refresh_due_mikan_catalogs
@@ -84,6 +85,11 @@ class PollScheduler:
                 refresh_due_mikan_catalogs()
             except Exception as exc:
                 log_exception("Mikan 后台缓存刷新异常", exc, stage="scheduler.mikan-refresh")
+
+            try:
+                refresh_due_anime_catalogs()
+            except Exception as exc:
+                log_exception("多站点番剧周历后台刷新异常", exc, stage="scheduler.anime-catalog-refresh")
 
             next_rss_refresh = (last_rss_refresh or time.monotonic()) + poll_interval * 60
             next_event = min(next_rss_refresh, next_completion_check)

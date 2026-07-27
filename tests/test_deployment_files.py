@@ -37,7 +37,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "320"', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
-    def test_frontend_has_manual_mikan_catalog(self) -> None:
+    def test_frontend_has_multi_source_weekly_catalog(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         subscription_state = (ROOT / "app/static/mikan-subscription-state.js").read_text(encoding="utf-8")
@@ -48,6 +48,10 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("/api/discovery/mikan/catalog", script)
         self.assertIn("/api/discovery/mikan/catalog/refresh", script)
         self.assertIn("/api/discovery/mikan/", script)
+        self.assertIn("/api/discovery/catalog/${activeCatalogSource}", script)
+        self.assertIn('id="catalogSourceTabs"', index)
+        for source_id in ("mikan", "anibt", "ag", "nyaa", "subsplease"):
+            self.assertIn(f'data-subscription-source="{source_id}"', index)
         self.assertIn('id="forceRefreshMikanCatalog"', index)
         self.assertIn("cacheStatusText", script)
         self.assertIn("applyDiscoveryPreset", script)
@@ -62,7 +66,6 @@ class DeploymentFileTests(unittest.TestCase):
             index.index('/static/app.js?v='),
         )
         self.assertIn("result.desired_name || result.save_path", script)
-        self.assertNotIn("动漫花园", index)
         self.assertNotIn("dmhy", script.lower())
 
     def test_mikan_modal_is_hidden_until_anime_is_selected(self) -> None:
@@ -76,6 +79,7 @@ class DeploymentFileTests(unittest.TestCase):
         models = (ROOT / "app/models.py").read_text(encoding="utf-8")
         self.assertIn("class MikanCacheEntry", models)
         self.assertIn("refresh_due_mikan_catalogs", scheduler)
+        self.assertIn("refresh_due_anime_catalogs", scheduler)
         self.assertIn("force_refresh", cache_module)
         self.assertIn("mikan-image-cache", cache_module)
 

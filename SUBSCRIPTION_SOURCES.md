@@ -1,143 +1,114 @@
-# FeedDock 1.15.0 订阅站点说明
+# FeedDock 1.16.0 订阅站点说明
 
-FeedDock 的“添加”菜单将订阅入口拆分为：
+“添加 → 添加订阅”现包含：
 
 1. Mikan
 2. ANI.BT
 3. Anime Garden（AG）
-4. 其它 RSS
+4. Nyaa
+5. SubsPlease
+6. 其它 RSS
 
-站点入口不仅改变标题和占位文字，也会加载对应的官方地址、RSS 说明、安全提示和来源识别规则。
+前五个站点进入统一的“番剧周历”页面，均支持搜索、读取缓存、强制更新、按星期浏览、资源详情缓存和订阅状态标识。其它 RSS 进入通用编辑器。
+
+详细的周历和缓存设计见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md)。
 
 ## Mikan
 
-入口：`添加 → Mikan`
+Mikan 使用自身季度目录，并提供字幕组维度的 RSS：
 
-Mikan 使用 FeedDock 已有的季度番剧目录：
-
-- 按年份、季度和标题搜索番剧；
-- 查看字幕组及其 RSS；
-- 自动带入番剧名称、RSS、Bangumi ID 和字幕组名称；
-- 已经订阅的番剧显示“已订阅”；
-- 不提供“全站 RSS”快捷填充，避免一次处理大量无关条目。
-
-支持识别以下主机及其子域名：
-
-- `mikanime.tv`
-- `mikanani.me`
-- `mikanani.kas.pub`
-- `mikan.tangbai.cc`
+- 按年份、季度和标题搜索；
+- 按星期展示；
+- 读取缓存和强制更新；
+- 查看字幕组及最近发布；
+- 自动带入名称、RSS、Mikan 番剧 ID 和字幕组名称；
+- 已订阅番剧显示“已订阅”。
 
 ## ANI.BT
 
-入口：`添加 → ANI.BT`
+ANI.BT 使用共享周历，并根据 Bangumi 条目 ID 生成：
 
-表单会显示：
+- 全部发布；
+- 1080p；
+- 720p。
 
-- ANI.BT 官方站点；
-- RSS 主入口文档；
-- 推荐 URL 格式；
-- 全站磁力 RSS 的风险提示；
-- 经用户确认后填入全站 RSS 的按钮。
-
-推荐的单番剧 RSS 形式：
+RSS 形式：
 
 ```text
-https://anibt.net/rss/anime.xml?bgmId=543360&groupSlug=pre-s
+https://anibt.net/rss/anime.xml?bgmId=543360
 ```
 
-全站磁力 RSS：
+没有 Bangumi 条目 ID 时不会伪造 RSS，周历卡片会明确禁用。
 
-```text
-https://anibt.net/rss/magnets.xml
-```
+## Anime Garden
 
-全站流不会默认写入表单。点击“使用全站 RSS”时会再次确认，并提醒先配置匹配和排除规则。
-
-ANI.BT URL 中的 `bgmId` 或兼容的 `bangumiId` 会自动写入订阅的 Bangumi ID；用户仍可在保存前修改。
-
-## Anime Garden（AG）
-
-入口：`添加 → Anime Garden（AG）`
-
-表单会显示：
-
-- Anime Garden 官方站点；
-- 项目/API 说明；
-- 过滤 RSS 地址格式；
-- 未过滤全站 feed 的风险提示；
-- 经用户确认后填入全站 feed 的按钮。
-
-推荐从 Anime Garden 资源页生成带筛选条件的 RSS，例如：
+Anime Garden 使用共享周历，根据标题生成过滤 RSS：
 
 ```text
 https://api.animes.garden/feed.xml?filter=...
 ```
 
-全站 feed：
+FeedDock 不会在周历入口中使用未过滤的全站 Feed。资源详情缓存过滤后的最近条目。
+
+## Nyaa
+
+Nyaa 使用原始日文或英文标题生成动画分类 RSS，并提供：
+
+- 英文字幕动画；
+- 可信发布；
+- 日文原盘。
+
+示例形式：
 
 ```text
-https://api.animes.garden/feed.xml
+https://nyaa.si/?page=rss&q=TITLE&c=1_2&f=0
 ```
 
-全站 feed 不会默认写入表单，以免新订阅首次检查时处理大量无关资源。
+Nyaa 的标题和发布组规则变化较大，保存前建议检查资源预览，并按需要增加包含、排除或字幕组关键词。
+
+## SubsPlease
+
+SubsPlease 提供分辨率级 RSS：
+
+- 1080p；
+- 720p；
+- SD；
+- 全部分辨率。
+
+FeedDock 会自动把番剧英文标题写入包含规则，因为这些 RSS 本身不是单番剧 Feed。资源预览也会按标题别名过滤。
 
 ## 其它 RSS
 
-入口：`添加 → 其它 RSS`
+接受标准 RSS 2.0、Atom 或 RDF。FeedDock 会优先使用 enclosure、磁力链接和种子下载链接。
 
-接受标准 RSS 2.0、Atom 或 RDF 地址。FeedDock 的解析器会优先使用：
+未知站点在订阅列表中优先显示用户填写的主 RSS 名称，不会被强制覆盖成“其它 RSS”。
 
-- RSS `<enclosure url="...">`；
-- Atom `rel="enclosure"`；
-- 条目中的磁力链接或种子下载链接。
+## 来源识别
 
-未知站点在订阅列表中优先显示用户填写的“主 RSS 名称”，而不是强制显示“其它 RSS”。
+来源识别使用 URL 的真实主机名边界：
 
-## 来源识别安全性
-
-来源识别只比较 URL 的真实主机名边界：
-
-- `anibt.net` 和 `rss.anibt.net` 可识别为 ANI.BT；
+- `anibt.net` 和其子域名可识别为 ANI.BT；
 - `anibt.net.example.com` 不会被误识别；
-- 无效 URL 和未知主机统一归类为其它 RSS。
+- 无效 URL 和未知主机归类为其它 RSS。
 
-前端和后端都使用同一套来源目录语义。后端在订阅 API 中返回：
+当前 `source_type`：
 
-```json
-{
-  "source_type": "anibt",
-  "source_label": "ANI.BT"
-}
+```text
+mikan
+anibt
+ag
+nyaa
+subsplease
+other
 ```
 
-当前来源类型：`mikan`、`anibt`、`ag`、`other`。
+## 安全默认值
 
-## API
+- 全站 RSS 不会在周历模式中自动订阅；
+- 点击番剧后先展示实际 RSS、包含规则和资源预览；
+- 用户仍可在保存前修改规则、下载目录和命名设置；
+- FeedDock 不提供、存储或分发媒体内容。
 
-### 获取订阅站点目录
+## 升级
 
-```http
-GET /api/subscription-sources
-```
-
-需要管理员登录。响应包含每个站点的：
-
-- ID 和显示名称；
-- 描述；
-- RSS 名称和占位格式；
-- 官方地址和帮助地址；
-- 可选全站 RSS；
-- 允许识别的主机；
-- Mikan 专用目录视图；
-- 安全提示。
-
-## 升级说明
-
-从 1.14.0 升级到 1.15.0：
-
-- 不增加数据库字段；
-- 不修改现有订阅和条目；
-- 来源类型由主 RSS URL 动态计算；
-- 老订阅在刷新页面后自动显示新的来源标签；
-- 静态资源缓存参数升级为 `v=1.15.0`，建议升级后强制刷新一次浏览器。
+1.15.0 → 1.16.0 不需要数据库迁移。静态资源缓存参数更新为 `v=1.16.0`。

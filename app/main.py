@@ -15,6 +15,7 @@ from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
+from .anime_catalog import AnimeCatalogCacheService, decorate_catalog
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .debug_logging import (
     debug_enabled,
@@ -805,6 +806,68 @@ def get_global_rules(db: Session = Depends(get_db)) -> dict[str, str]:
 def update_global_rules(payload: GlobalRulesUpdate, db: Session = Depends(get_db)) -> dict[str, str]:
     value = set_app_setting(db, "global_exclude_rules", payload.exclude_rules.strip())
     return {"exclude_rules": value}
+
+
+@app.get("/api/discovery/catalog/{source_id}", dependencies=[Depends(require_admin)])
+def source_catalog(
+    source_id: str,
+    year: int = Query(ge=2000, le=2100),
+    season: str = Query(pattern="^(冬|春|夏|秋)$"),
+    q: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        payload = AnimeCatalogCacheService().catalog(db, year, season)
+        subscriptions = list(db.scalars(select(Subscription)))
+        return decorate_catalog(payload, source_id, subscriptions, q)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{source_id} 番剧周历读取失败：{exc}") from exc
+
+
+@app.post("/api/discovery/catalog/{source_id}/refresh", dependencies=[Depends(require_admin)])
+def refresh_source_catalog(
+    source_id: str,
+    year: int = Query(ge=2000, le=2100),
+    season: str = Query(pattern="^(冬|春|夏|秋)$"),
+    q: str = Query(default="", max_length=200),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        payload = AnimeCatalogCacheService().catalog(db, year, season, force_refresh=True)
+        subscriptions = list(db.scalars(select(Subscription)))
+        return decorate_catalog(payload, source_id, subscriptions, q)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{source_id} 番剧周历更新失败：{exc}") from exc
+
+
+@app.get("/api/discovery/catalog/{source_id}/detail", dependencies=[Depends(require_admin)])
+def source_catalog_detail(
+    source_id: str,
+    title: str = Query(min_length=1, max_length=300),
+    subject_id: int = Query(default=0, ge=0),
+    original_title: str = Query(default="", max_length=300),
+    english_title: str = Query(default="", max_length=300),
+    aliases: str = Query(default="", max_length=2000),
+    force_refresh: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    item = {
+        "title": title,
+        "title_original": original_title or title,
+        "title_english": english_title or original_title or title,
+        "subject_id": subject_id,
+        "aliases": [value.strip() for value in aliases.split("\n") if value.strip()] or [title],
+    }
+    try:
+        return AnimeCatalogCacheService().detail(db, source_id, item, force_refresh=force_refresh)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{source_id} 资源详情读取失败：{exc}") from exc
 
 
 @app.get(

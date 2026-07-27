@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.15.0}
+        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.16.0}
     image: ${FEEDDOCK_IMAGE:-feeddock:local}
     container_name: feeddock
     restart: unless-stopped

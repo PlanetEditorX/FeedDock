@@ -1,8 +1,20 @@
 # FeedDock
 
-当前版本：`1.15.0`
+当前版本：`1.16.0`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
+
+## v1.16.0：多站点番剧周历
+
+- Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 均可从“添加”进入按星期番剧列表；
+- 所有站点支持标题搜索、读取持久缓存和手动强制更新；
+- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 共享 `bangumi-data` 周历，切换站点不会重复请求季度数据；
+- 每个站点根据自身能力生成 RSS：ANI.BT 使用 Bangumi ID，Anime Garden 使用标题过滤，Nyaa 使用分类搜索，SubsPlease 使用分辨率 Feed 与包含规则；
+- 打开番剧后会缓存每个 RSS 预设的最近资源，支持单独强制更新；
+- 已浏览季度会按现有缓存周期后台更新，并遵循 FeedDock 代理设置；
+- 没有站点所需标识的番剧会明确禁用，而不是生成无效订阅。
+
+详细说明见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md) 和 [`SUBSCRIPTION_SOURCES.md`](SUBSCRIPTION_SOURCES.md)。
 
 ## v1.15.0：订阅站点入口
 
@@ -62,7 +74,8 @@ FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它�
 
 ### 订阅与发现
 
-- Mikan 季度番剧目录、标题搜索、持久缓存和本地 WebP 封面；
+- Mikan、ANI.BT、Anime Garden、Nyaa、SubsPlease 按星期番剧目录、标题搜索和持久缓存；
+- Mikan 保留原生字幕组目录和本地 WebP 封面，其它站点由统一周历生成站点专用 RSS；
 - 目录中标记 `✓ 已订阅`，保存、编辑、删除订阅后即时同步；
 - 主 RSS 与备用 RSS；
 - 包含、排除、全局排除规则；
@@ -95,7 +108,7 @@ FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它�
 ## 工作流程
 
 ```text
-Mikan / RSS
+多站点番剧周历 / RSS
     ↓
 标题、规则和集数解析
     ↓
@@ -247,7 +260,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.15.0
+FEEDDOCK_BUILD_VERSION=1.16.0
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password
