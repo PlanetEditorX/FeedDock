@@ -1,77 +1,65 @@
-# FeedDock 1.17.1 验证报告
+# FeedDock 1.17.2 验证报告
 
-## 修复目标
+验证日期：2026-07-27
 
-处理多个原站同时出现以下错误的部署问题：
+## 功能验证
 
-```text
-[Errno -3] Temporary failure in name resolution
-```
+已验证以下行为：
 
-该错误表示容器无法完成 DNS 解析，不属于 Mikan、ANI.BT 或 Anime Garden 的目录解析错误。
-
-## 实现验证
-
-- `docker-compose.yml` 为 FeedDock 服务设置三个可覆盖 DNS；
-- `docker-compose.fnos.yml` 为飞牛部署设置三个默认 DNS；
-- 配置 `timeout:2`、`attempts:2`、`rotate`；
-- 新增 `/api/network/diagnostics` 管理员接口；
-- 诊断读取容器 `/etc/resolv.conf` 中的 nameserver 与 options；
-- 分别解析 Mikan 主域名、Mikan 备用域名、ANI.BT、Anime Garden 和 Bangumi；
-- DNS 异常分类为 `dns`，不会混同为站点解析错误；
-- “测试外部请求”同时附带 DNS 结果；
-- 网页代理设置新增“诊断 DNS”和结构化结果展示；
-- 不返回 resolver search 域，避免暴露私有基础设施名称；
-- 不使用固定站点 IP，避免 HTTPS SNI、证书和 CDN 失效。
+- 新建订阅提交成功后，后台只刷新该订阅一次；
+- 停用的新订阅不会发起 RSS 请求，并记录跳过日志；
+- 点击“刷新全部订阅”前显示“是否刷新全部订阅？”确认框；
+- 手动刷新记录开始、逐订阅检查和最终汇总；
+- 下载器推送记录准备、重试、成功、最终失败；
+- 达到并发限制时记录等待并发空位；
+- 启用统一下载时间时记录等待定时推送；
+- 目标文件已存在时记录跳过推送；
+- 网页日志和文件日志同时获得 RSS/下载器日志；
+- 推送日志不包含完整 magnet、Torrent URL 或 RSS 私密参数；
+- 日志页面不再显示“500 错误可按提示中的请求编号定位”。
 
 ## 自动化测试
 
-执行：
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-结果：
-
 ```text
-Ran 140 tests
+Ran 143 tests
 OK
 ```
 
-新增覆盖：
+其中新增覆盖：
 
-- `/etc/resolv.conf` nameserver/options 解析；
-- IPv4/IPv6 地址去重；
-- `socket.gaierror(-3)` 分类；
-- 所有目标同时失败时的容器 DNS 指引；
-- 普通 Compose 和飞牛 Compose 的 DNS 配置；
-- 网络诊断前端入口与 API 路由。
+- 创建订阅后调度首次刷新；
+- 首次刷新解析 RSS 并推送 qBittorrent；
+- 推送成功日志；
+- 日志脱敏；
+- 刷新确认弹窗；
+- 500 提示移除；
+- 发布文件版本与静态资源缓存参数。
 
-## 静态验证
+## 静态检查
 
-- Python 全项目 `compileall` 通过；
-- 所有前端 JavaScript 文件 `node --check` 通过；
-- `docker-compose.yml` YAML 解析通过；
-- `docker-compose.fnos.yml` YAML 解析通过；
-- GitHub Actions 工作流 YAML 解析通过；
-- 主页面共 126 个 HTML ID，全部唯一；
-- 运行版本为 `1.17.1`。
+- `python -m compileall -q app tests`：通过；
+- 所有 `app/static/*.js` 执行 `node --check`：通过；
+- `docker-compose.yml`：YAML 解析通过；
+- `docker-compose.fnos.yml`：YAML 解析通过；
+- `.github/workflows/docker-publish.yml`：YAML 解析通过；
+- `index.html`：126 个唯一 ID；
+- `login.html`：3 个唯一 ID；
+- `change-password.html`：7 个唯一 ID；
+- 运行版本：`1.17.2`；
+- 静态资源缓存参数：`v=1.17.2`。
 
-## 故障复现
+## 旧数据库兼容
 
-当前隔离执行环境无法解析外部域名。运行新诊断时得到：
+使用 FeedDock 1.17.1 创建 SQLite 数据库和订阅，再由 1.17.2 执行 `ensure_schema()`：
 
 ```text
-容器无法解析任何外部站点域名，请修复 Docker DNS 或配置可用代理
+migration ok 1 migration demo
 ```
 
-Mikan 三个地址、ANI.BT、Anime Garden 和 Bangumi 均被独立标记为 DNS 失败，与用户报告的故障模式一致。
+本次不增加数据库字段，历史订阅和启用状态保持完整。
 
-## 未执行项目
+## 外部服务边界
 
-当前环境没有 Docker CLI，无法实际重新创建容器并验证写入后的 `/etc/resolv.conf`。Compose 字段已依据规范进行 YAML 与结构测试；部署后仍需在目标 NAS 上执行 `--force-recreate` 并使用网页诊断确认。
+当前环境没有 Docker CLI，也没有可连接的真实 qBittorrent、Mikan、ANI.BT 或 Anime Garden 服务，因此未执行真实容器构建及外部端到端下载。
 
-## 数据兼容
-
-本版本不修改数据库模型。1.17.0 的订阅、RSS 指纹、缓存、隐藏偏好和下载记录均可直接使用。
+qBittorrent 推送行为通过适配器模拟验证，覆盖 Web API 成功、失败重试、并发等待和日志输出。

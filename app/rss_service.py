@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
-from .debug_logging import format_exception_details
+from .debug_logging import format_exception_details, log_event
 from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .naming import is_video_file, media_folder_name, naming_context, render_desired_name
@@ -225,7 +225,35 @@ def fingerprint_for(entry: Any, title: str, download_url: str) -> str:
 
 
 def add_log(db: Session, level: str, message: str, details: str = "") -> None:
-    db.add(SystemLog(level=level.upper(), message=message, details=details[:50000]))
+    normalized = level.upper()
+    safe_details = details[:50000]
+    log_event(normalized, message, safe_details, persist=False)
+    db.add(SystemLog(level=normalized, message=message, details=safe_details))
+
+
+def _download_log_details(
+    item: FeedItem,
+    subscription: Subscription,
+    *,
+    save_path: str = "",
+    desired_name: str = "",
+    extra: str = "",
+) -> str:
+    """Build a useful log message without exposing private RSS passkeys."""
+
+    values = [
+        f"订阅 ID：{subscription.id}",
+        f"条目 ID：{item.id}",
+        f"集数：{item.episode or '未识别'}",
+        f"标题：{item.title}",
+        f"保存位置：{save_path or item.save_path or '未确定'}",
+        f"任务标签：{item.qbit_tag or '未生成'}",
+    ]
+    if desired_name or item.desired_name:
+        values.append(f"任务名称：{desired_name or item.desired_name}")
+    if extra:
+        values.append(extra)
+    return "\n".join(values)
 
 
 def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
@@ -404,12 +432,27 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
     item.scrape_status = "pending" if load_metadata_config(db).bangumi_ini_enabled else "skipped"
     item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+    add_log(
+        db,
+        "INFO",
+        f"准备推送到下载器：{subscription.name}",
+        _download_log_details(
+            item, subscription, save_path=save_path, desired_name=desired_name,
+            extra=f"下载器：qBittorrent；最多尝试 {preferences.download.retry_count + 1} 次",
+        ),
+    )
 
     if _existing_video_matches(item, subscription, db):
         item.status = "skipped"
         item.reason = "目标目录中已存在同名视频文件"
         item.rename_status = "skipped"
         item.rename_message = item.reason
+        add_log(
+            db,
+            "INFO",
+            f"跳过下载器推送：{subscription.name}",
+            _download_log_details(item, subscription, extra=item.reason),
+        )
         return True, item.reason
 
     client = QBittorrentClient(timeout=preferences.rss.timeout_seconds)
@@ -420,6 +463,12 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
             item.reason = f"等待下载并发空位（{active}/{preferences.download.concurrent_limit}）"
             item.rename_status = "pending"
             item.rename_message = item.reason
+            add_log(
+                db,
+                "INFO",
+                f"下载任务等待并发空位：{subscription.name}",
+                _download_log_details(item, subscription, extra=item.reason),
+            )
             return True, item.reason
         if not ok:
             add_log(db, "WARNING", "读取下载并发数失败，继续尝试推送", message)
@@ -441,6 +490,15 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         if result.ok:
             break
         if attempt + 1 < attempts:
+            add_log(
+                db,
+                "WARNING",
+                f"下载器推送失败，准备重试：{subscription.name}",
+                _download_log_details(
+                    item, subscription,
+                    extra=f"第 {attempt + 1}/{attempts} 次尝试失败：{result.message}",
+                ),
+            )
             time.sleep(min(1.0, 0.2 * (attempt + 1)))
     assert result is not None
     if result.ok:
@@ -448,6 +506,15 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         item.reason = result.message
         item.rename_status = "pending"
         item.rename_message = "等待 qBittorrent 获取文件列表并完成下载"
+        add_log(
+            db,
+            "INFO",
+            f"已推送到下载器：{subscription.name}",
+            _download_log_details(
+                item, subscription,
+                extra=f"结果：{result.message}；实际尝试 {attempt + 1} 次",
+            ),
+        )
         send_notification(
             db,
             "download_started",
@@ -461,6 +528,12 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         item.reason = f"{result.message}（已尝试 {attempts} 次）"
         item.rename_status = "error"
         item.rename_message = item.reason
+        add_log(
+            db,
+            "ERROR",
+            f"最终未能推送到下载器：{subscription.name}",
+            _download_log_details(item, subscription, extra=item.reason),
+        )
         send_notification(
             db,
             "rss_error",
@@ -516,8 +589,17 @@ def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500,
 
 def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
     stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
+    add_log(
+        db,
+        "INFO",
+        f"开始检查订阅：{subscription.name}",
+        f"订阅 ID：{subscription.id}\nRSS 来源：{subscription.primary_rss_name or '主 RSS'}",
+    )
+    db.commit()
     preferences = load_application_preferences(db)
     if not preferences.rss.enabled:
+        add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭")
+        db.commit()
         return stats
     _refresh_total_episodes_if_due(db, subscription)
     _sync_metadata_if_due(db, subscription)
@@ -657,6 +739,12 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             item.rename_status = "pending"
             item.rename_message = "等待定时推送"
             item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+            add_log(
+                db,
+                "INFO",
+                f"下载任务等待定时推送：{subscription.name}",
+                _download_log_details(item, subscription, extra=item.reason),
+            )
         else:
             ok, _ = _push_feed_item(db, item, subscription)
             if item.status == "skipped":
@@ -684,14 +772,77 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     return stats
 
 
+def refresh_subscription(
+    subscription_id: int,
+    *,
+    trigger: str = "manual",
+) -> dict[str, int | bool | str]:
+    """Refresh one subscription, used after creation and by future targeted actions."""
+
+    acquired = _refresh_lock.acquire(timeout=300)
+    if not acquired:
+        with SessionLocal() as db:
+            add_log(
+                db,
+                "WARNING",
+                "新订阅自动刷新等待超时",
+                f"订阅 ID：{subscription_id}；触发来源：{trigger}",
+            )
+            db.commit()
+        return {"ok": False, "message": "等待现有刷新任务超时", "subscription_id": subscription_id}
+
+    try:
+        with SessionLocal() as db:
+            subscription = db.get(Subscription, subscription_id)
+            if not subscription:
+                return {"ok": False, "message": "订阅不存在", "subscription_id": subscription_id}
+            if not subscription.enabled:
+                add_log(
+                    db,
+                    "INFO",
+                    f"跳过新订阅自动刷新：{subscription.name}",
+                    "订阅当前为停用状态",
+                )
+                db.commit()
+                return {"ok": True, "message": "订阅已停用，未执行刷新", "subscription_id": subscription_id}
+            add_log(
+                db,
+                "INFO",
+                f"新订阅自动刷新开始：{subscription.name}",
+                f"订阅 ID：{subscription.id}；触发来源：{trigger}",
+            )
+            db.commit()
+            result = process_subscription(db, subscription)
+            add_log(
+                db,
+                "INFO" if not result["errors"] else "WARNING",
+                f"新订阅自动刷新完成：{subscription.name}",
+                (
+                    f"新增 {result['new']}，推送 {result['queued']}，"
+                    f"跳过 {result['skipped']}，错误 {result['errors']}"
+                ),
+            )
+            db.commit()
+            return {"ok": not bool(result["errors"]), "message": "新订阅自动刷新完成", **result}
+    finally:
+        _refresh_lock.release()
+
+
 def refresh_all() -> dict[str, int | bool | str]:
     if not _refresh_lock.acquire(blocking=False):
+        with SessionLocal() as db:
+            add_log(db, "WARNING", "刷新全部订阅未启动", "已有刷新任务正在运行")
+            db.commit()
         return {"ok": False, "message": "已有刷新任务正在运行", "subscriptions": 0, "queued": 0}
 
     totals = {"subscriptions": 0, "new": 0, "queued": 0, "skipped": 0, "errors": 0}
     try:
         with SessionLocal() as db:
+            add_log(db, "INFO", "开始刷新全部订阅", "正在读取所有启用订阅")
+            db.commit()
             if not load_application_preferences(db).rss.enabled:
+                add_log(db, "WARNING", "刷新全部订阅已跳过", "RSS 开关已关闭")
+                db.commit()
                 return {"ok": True, "message": "RSS 开关已关闭", **totals}
             subscriptions = list(
                 db.scalars(select(Subscription).where(Subscription.enabled.is_(True)).order_by(Subscription.id))
@@ -701,12 +852,24 @@ def refresh_all() -> dict[str, int | bool | str]:
                 result = process_subscription(db, subscription)
                 for key in ("new", "queued", "skipped", "errors"):
                     totals[key] += result[key]
+            add_log(
+                db,
+                "INFO" if not totals["errors"] else "WARNING",
+                "刷新全部订阅完成",
+                (
+                    f"订阅 {totals['subscriptions']}，新增 {totals['new']}，"
+                    f"推送 {totals['queued']}，跳过 {totals['skipped']}，错误 {totals['errors']}"
+                ),
+            )
+            db.commit()
         try:
             from .postprocess import normalize_pending_items
 
             normalize_pending_items(limit=50)
-        except Exception:
-            pass
+        except Exception as exc:
+            with SessionLocal() as db:
+                add_log(db, "WARNING", "刷新后的下载完成检查失败", str(exc))
+                db.commit()
         return {"ok": True, "message": "刷新完成", **totals}
     finally:
         _refresh_lock.release()

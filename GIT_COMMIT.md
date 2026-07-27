@@ -1,50 +1,37 @@
-# FeedDock 1.17.1 Git 提交说明
+# FeedDock 1.17.2 Git 提交说明
 
 ## 推荐提交
 
 ```text
-fix(network): 修复容器 DNS 并增加网络诊断
+fix(rss): 新订阅自动刷新并记录下载器推送日志
 ```
 
 ## 提交正文
 
 ```text
-- 为普通 Compose 和飞牛 Compose 配置可轮换的外部 DNS
-- 支持通过环境变量覆盖普通 Compose 的三个 DNS 地址
-- 新增容器 DNS 诊断 API 和代理设置页面诊断结果
-- 分别检查 Mikan、ANI.BT、Anime Garden 与 Bangumi 域名
-- 外部请求测试同时返回 DNS 状态，区分解析与 HTTPS/代理错误
-- 增加 DNS 失败分类、解析器读取和部署配置测试
-- 版本更新为 1.17.1
+- 新增订阅保存后自动检查该订阅一次
+- 刷新全部订阅前增加确认弹窗
+- 记录刷新开始、逐订阅检查和最终汇总
+- 记录下载器准备、重试、成功、失败与等待状态
+- 同时写入网页系统日志和文件日志
+- 避免在日志中输出完整 RSS、Torrent 或 magnet 地址
+- 移除日志页的 500 请求编号提示
+- 版本更新为 1.17.2
 ```
 
-## 影响范围
+## 主要文件
 
 ```text
-app/network_diagnostics.py
 app/main.py
-app/static/index.html
+app/rss_service.py
 app/static/app.js
-app/static/styles.css
-docker-compose.yml
-docker-compose.fnos.yml
-.env.example
-.env.fnos.example
-NETWORK_TROUBLESHOOTING.md
-tests/test_network_diagnostics.py
+tests/test_auth_flow.py
 tests/test_deployment_files.py
+tests/test_rss_service.py
+tests/test_settings_features.py
+DOWNLOAD_REFRESH_LOGGING.md
 ```
 
 ## 数据库
 
-不增加或修改数据库字段，无需执行迁移。
-
-## 部署注意
-
-DNS 属于容器创建时的网络配置。应用补丁或替换 Compose 后必须执行：
-
-```bash
-docker compose up -d --force-recreate feeddock
-```
-
-仅重启旧容器或应用进程不会更新容器的 `/etc/resolv.conf`。
+本次不增加数据库字段，不需要执行手工迁移。

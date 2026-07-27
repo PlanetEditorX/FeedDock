@@ -53,6 +53,7 @@ from .rss_service import (
     dispatch_scheduled_downloads,
     preview_subscription,
     refresh_all,
+    refresh_subscription,
     retry_item,
 )
 from .runtime_config import (
@@ -1148,6 +1149,7 @@ def preview_subscription_route(
 def create_subscription(
     payload: SubscriptionCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
     request.state.debug_context = {
@@ -1165,8 +1167,15 @@ def create_subscription(
         db.commit()
         request.state.debug_stage = "subscription.refresh"
         db.refresh(subscription)
+        output = _subscription_out(db, subscription)
+        request.state.debug_stage = "subscription.schedule-initial-refresh"
+        background_tasks.add_task(
+            refresh_subscription,
+            subscription.id,
+            trigger="subscription-created",
+        )
         request.state.debug_stage = "subscription.serialize"
-        return _subscription_out(db, subscription)
+        return output
     except Exception:
         db.rollback()
         raise

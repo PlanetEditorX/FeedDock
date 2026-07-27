@@ -1288,7 +1288,7 @@ async function loadLogSettings() {
   const select = document.getElementById('logLevelSetting');
   if (select) select.value = settings.level || 'INFO';
   const path = document.getElementById('logFilePath');
-  if (path) path.textContent = `文件日志：${settings.file || '/data/logs/feeddock.log'}；500 错误可按提示中的请求编号在详细内容中定位。`;
+  if (path) path.textContent = `文件日志：${settings.file || '/data/logs/feeddock.log'}`;
 }
 
 async function loadLogs() {
@@ -1668,7 +1668,7 @@ subscriptionForm.addEventListener('submit', async (event) => {
     const saved = await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
     formElement.reset();
     resetSubscriptionForm();
-    showNotice(id ? '订阅已更新' : '订阅已保存');
+    showNotice(id ? '订阅已更新' : '订阅已保存，正在自动刷新一次');
     await reloadAll();
     showAppView('subscriptions');
     if (!id && !saved.metadata_confirmed && !saved.metadata_review_skipped) openMetadataReview(saved);
@@ -1712,9 +1712,10 @@ document.getElementById('previewSubscription').addEventListener('click', async (
 document.getElementById('cancelSubscriptionEdit').addEventListener('click', () => { resetSubscriptionForm(); showAppView('subscriptions'); });
 
 document.getElementById('refreshNow').addEventListener('click', async () => {
+  if (!window.confirm('是否刷新全部订阅？')) return;
   try {
     const result = await api('/api/actions/refresh', { method: 'POST' });
-    showNotice(result.message);
+    showNotice(`${result.message}，可在日志中查看检查与下载器推送进度`);
     window.setTimeout(reloadAll, 2500);
   } catch (error) { showNotice(error.message, false); }
 });

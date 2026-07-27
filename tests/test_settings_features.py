@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import Base
 from app.downloader import DownloaderResult, QBittorrentClient
 from app.media_sidecar import write_bangumi_ini
-from app.models import FeedItem, Subscription
+from app.models import FeedItem, Subscription, SystemLog
 from app.rss_service import _existing_video_matches, _push_feed_item, dispatch_scheduled_downloads
 from app.settings_config import (
     load_application_preferences,
@@ -205,6 +205,37 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertEqual(result["queued"], 0)
         self.assertEqual(result["waiting"], 1)
         self.assertEqual(result["errors"], 0)
+
+
+    def test_successful_push_writes_downloader_logs(self):
+        sub = Subscription(name="Demo", rss_url="https://example.test/rss", rename_enabled=False)
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="logged-push",
+            title="Demo - 01 [1080p]",
+            download_url="magnet:?xt=urn:btih:logged",
+            episode="1",
+        )
+        self.db.add(item)
+        self.db.flush()
+        self.save_preferences(concurrent_limit=0, retry_count=1)
+        fake = SimpleNamespace(
+            add_url=lambda *_args, **_kwargs: DownloaderResult(True, "任务已推送到 qBittorrent")
+        )
+        with patch("app.rss_service.QBittorrentClient", return_value=fake):
+            ok, message = _push_feed_item(self.db, item, sub)
+        self.db.commit()
+
+        self.assertTrue(ok)
+        self.assertIn("已推送", message)
+        messages = [row.message for row in self.db.query(SystemLog).order_by(SystemLog.id)]
+        self.assertIn("准备推送到下载器：Demo", messages)
+        self.assertIn("已推送到下载器：Demo", messages)
+        details = "\n".join(row.details for row in self.db.query(SystemLog))
+        self.assertIn("任务标签：feeddock-item-", details)
+        self.assertNotIn("magnet:?", details)
 
     def test_push_waits_when_concurrent_limit_is_full(self):
         sub = Subscription(name="Demo", rss_url="https://example.test/rss", rename_enabled=False)

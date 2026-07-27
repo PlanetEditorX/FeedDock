@@ -214,18 +214,24 @@ class AuthFlowTests(unittest.TestCase):
                 self.assertEqual(forced_detail.status_code, 200, forced_detail.text)
                 self.assertEqual(discovery_factory.return_value.mikan_detail.call_count, 2)
 
-            created_subscription = client.post(
-                "/api/subscriptions",
-                json={
-                    "name": "Frontend regression feed",
-                    "rss_url": "https://example.test/feed.xml",
-                    "include_keywords": "1080p, 简体",
-                    "exclude_keywords": "合集, 720p",
-                    "episode_regex": "",
-                    "save_path_template": "{base}/{subscription}",
-                    "enabled": True,
-                },
-            )
+            with patch("app.main.refresh_subscription") as initial_refresh:
+                created_subscription = client.post(
+                    "/api/subscriptions",
+                    json={
+                        "name": "Frontend regression feed",
+                        "rss_url": "https://example.test/feed.xml",
+                        "include_keywords": "1080p, 简体",
+                        "exclude_keywords": "合集, 720p",
+                        "episode_regex": "",
+                        "save_path_template": "{base}/{subscription}",
+                        "enabled": True,
+                    },
+                )
+                initial_refresh.assert_called_once()
+                self.assertEqual(
+                    initial_refresh.call_args.kwargs,
+                    {"trigger": "subscription-created"},
+                )
             self.assertEqual(created_subscription.status_code, 200)
             self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
             self.assertFalse(created_subscription.json()["scrape_enabled"])
@@ -277,7 +283,9 @@ class AuthFlowTests(unittest.TestCase):
                 "/media/金牌得主 (2026) [tmdbid=123456]/Season 02",
             )
 
-            advanced = client.post("/api/subscriptions", json=advanced_payload)
+            with patch("app.main.refresh_subscription") as initial_refresh:
+                advanced = client.post("/api/subscriptions", json=advanced_payload)
+                initial_refresh.assert_called_once()
             self.assertEqual(advanced.status_code, 200, advanced.text)
             self.assertEqual(advanced.json()["season"], 2)
             self.assertEqual(advanced.json()["include_keywords"], "")

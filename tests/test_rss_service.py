@@ -2,11 +2,12 @@ import unittest
 from unittest.mock import ANY, patch
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.rss_parser import parse_feed
+from app.downloader import DownloaderResult
 from app.database import Base
-from app.models import Subscription
+from app.models import FeedItem, Subscription, SystemLog
 from app.rss_service import (
     apply_episode_offset,
     extract_download_url,
@@ -14,6 +15,7 @@ from app.rss_service import (
     parse_episode,
     preview_subscription,
     process_subscription,
+    refresh_subscription,
     render_save_path,
 )
 
@@ -117,6 +119,58 @@ class RSSServiceTests(unittest.TestCase):
     def test_path_traversal_is_confined(self):
         sub = Subscription(name="Demo", rss_url="https://example.com/feed.xml", save_path_template="{base}/../../etc")
         self.assertEqual(render_save_path(sub, "1"), "/media/Demo/Season 01")
+
+
+    def test_new_subscription_refresh_pushes_and_logs(self):
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        factory = sessionmaker(bind=engine)
+        with factory() as db:
+            subscription = Subscription(
+                name="Auto refresh demo",
+                rss_url="https://example.test/feed.xml",
+                rename_enabled=False,
+            )
+            db.add(subscription)
+            db.commit()
+            subscription_id = subscription.id
+
+        entries = [{
+            "id": "auto-1",
+            "title": "Auto refresh demo - 01 [1080p]",
+            "link": "https://example.test/post/1",
+            "enclosures": [{
+                "href": "https://example.test/1.torrent",
+                "type": "application/x-bittorrent",
+            }],
+        }]
+        fake_qbit = type("FakeQbit", (), {
+            "add_url": lambda self, *_args, **_kwargs: DownloaderResult(
+                True, "任务已推送到 qBittorrent"
+            )
+        })()
+        with (
+            patch("app.rss_service.SessionLocal", factory),
+            patch("app.rss_service._refresh_total_episodes_if_due"),
+            patch("app.rss_service._sync_metadata_if_due"),
+            patch("app.rss_service._load_subscription_entries", return_value=(entries, "测试 RSS")),
+            patch("app.rss_service.evaluate_missing_episodes"),
+            patch("app.rss_service.evaluate_stale_subscription"),
+            patch("app.rss_service.evaluate_subscription_completion"),
+            patch("app.rss_service.QBittorrentClient", return_value=fake_qbit),
+        ):
+            result = refresh_subscription(subscription_id, trigger="subscription-created")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["queued"], 1)
+        with factory() as db:
+            item = db.query(FeedItem).one()
+            self.assertEqual(item.status, "queued")
+            messages = [row.message for row in db.query(SystemLog).order_by(SystemLog.id)]
+            self.assertIn("新订阅自动刷新开始：Auto refresh demo", messages)
+            self.assertIn("已推送到下载器：Auto refresh demo", messages)
+            self.assertIn("新订阅自动刷新完成：Auto refresh demo", messages)
+        engine.dispose()
 
     def test_rss_refresh_rechecks_completion_for_historical_completed_items(self):
         engine = create_engine("sqlite+pysqlite:///:memory:")
