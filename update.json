@@ -1,6 +1,6 @@
 {
-  "version": "1.17.11",
-  "release_url": "https://github.com/planeteditorx/feeddock/releases/tag/v1.17.11",
+  "version": "1.17.12",
+  "release_url": "https://github.com/planeteditorx/feeddock/releases/tag/v1.17.12",
   "published_at": "2026-07-27T00:00:00Z",
   "image": "ghcr.io/planeteditorx/feeddock:latest"
 }

@@ -1,11 +1,22 @@
 # FeedDock
 
-当前版本：`1.17.11`
+当前版本：`1.17.12`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名、把任务推送到 qBittorrent，并在下载完成后向媒体目录写入标准 NFO、海报和背景图。飞牛影视、Emby、Jellyfin 等媒体服务器仍负责扫描媒体目录并建立自身索引。
 
 使用前请阅读 [`DISCLAIMER.md`](DISCLAIMER.md)。FeedDock 不提供、托管或审核第三方种子与媒体内容；使用者应自行确认来源、授权和用途合法。
 
+
+## v1.17.12：配置备份与跨站 RSS 恢复
+
+- 新增全系统 JSON 备份与恢复，覆盖网页有效配置、全部订阅和番剧隐藏偏好；
+- 敏感值默认不导出，可选择包含 qBittorrent 密码、API Token、代理与通知私密地址；
+- 继续支持仅订阅导入导出，格式升级为 v2 并加入导出时间；
+- “更新 RSS”会按当前站点番剧 ID、Bangumi ID 和多个标题别名搜索 Mikan、ANI.BT、Anime Garden；
+- 所有匹配字幕组 RSS 可填为主源、备用源，或直接保存并检查当前订阅；
+- `主 RSS 没有条目` 在 INFO 日志中改为可操作提示，不再显示内部 Traceback。
+
+详见 [`SYSTEM_BACKUP_AND_RSS_RECOVERY.md`](SYSTEM_BACKUP_AND_RSS_RECOVERY.md) 和 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
 
 ## v1.17.11：免责声明与 RSS 快速更新
 
@@ -355,7 +366,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.11
+FEEDDOCK_BUILD_VERSION=1.17.12
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

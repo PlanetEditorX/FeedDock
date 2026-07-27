@@ -180,6 +180,23 @@ class SubscriptionImportRequest(BaseModel):
     conflict: Literal["skip", "update"] = "skip"
 
 
+
+
+class SystemBackupImportRequest(BaseModel):
+    backup: dict[str, Any]
+    mode: Literal["merge", "replace"] = "merge"
+    subscription_conflict: Literal["skip", "update"] = "update"
+
+
+class RssCandidateSearchRequest(BaseModel):
+    query: str = Field(default="", max_length=300)
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, value: str) -> str:
+        return value.strip()
+
+
 class SubscriptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

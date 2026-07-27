@@ -16,6 +16,13 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .anime_catalog import AnimeCatalogCacheService, decorate_catalog
+from .backup_service import (
+    export_subscriptions_payload,
+    export_system_backup,
+    import_anime_preferences,
+    import_app_settings,
+    validate_system_backup,
+)
 from .anime_identity import backfill_subscription_identities, build_subscription_index, decorate_item, normalize_title, prepare_subscription_identity
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .debug_logging import (
@@ -49,6 +56,7 @@ from .subscription_sources import (
     subscription_source_catalog,
     subscription_source_label,
 )
+from .rss_candidates import search_subscription_rss_candidates
 from .rss_service import (
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
@@ -111,6 +119,7 @@ from .schemas import (
     MikanWeekdayFilterUpdate,
     ProxySettingsUpdate,
     QBittorrentSettingsUpdate,
+    RssCandidateSearchRequest,
     RssPollSettingsUpdate,
     SubscriptionBatchRequest,
     SubscriptionCreate,
@@ -119,6 +128,7 @@ from .schemas import (
     SubscriptionPreviewOut,
     SubscriptionPreviewRequest,
     SubscriptionUpdate,
+    SystemBackupImportRequest,
     UpdateStatusOut,
 )
 from .security import (
@@ -1182,16 +1192,38 @@ def create_subscription(
         raise
 
 
-def _subscription_export_values(subscription: Subscription) -> dict[str, Any]:
-    values: dict[str, Any] = {}
-    for field_name in SubscriptionCreate.model_fields:
-        value = getattr(subscription, field_name)
-        if field_name == "air_date":
-            value = value or None
-        elif field_name == "backup_rss_url":
-            value = value or None
-        values[field_name] = value
-    return values
+def _import_subscription_definitions(
+    db: Session,
+    subscriptions: list[SubscriptionCreate],
+    *,
+    conflict: str = "skip",
+    replace: bool = False,
+) -> dict[str, int]:
+    created = 0
+    updated = 0
+    skipped = 0
+    if replace:
+        db.execute(delete(FeedItem))
+        db.execute(delete(Subscription))
+        db.flush()
+
+    for item in subscriptions:
+        rss_url = str(item.rss_url)
+        existing = None if replace else db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
+        values = _subscription_values(item, db, existing=existing)
+        _validate_auto_skip_rename_requirement(db, values, existing=existing)
+        if existing is None:
+            db.add(Subscription(**values))
+            created += 1
+            continue
+        if conflict == "skip":
+            skipped += 1
+            continue
+        reset_monitor_state_for_changes(existing, values)
+        for key, value in values.items():
+            setattr(existing, key, value)
+        updated += 1
+    return {"created": created, "updated": updated, "skipped": skipped}
 
 
 @app.get("/api/subscriptions/export", dependencies=[Depends(require_admin)])
@@ -1199,16 +1231,7 @@ def export_subscriptions(
     ids: list[int] = Query(default=[]),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    query = select(Subscription).order_by(Subscription.id)
-    if ids:
-        query = query.where(Subscription.id.in_(ids))
-    subscriptions = list(db.scalars(query))
-    return {
-        "format": "feeddock-subscriptions",
-        "version": 1,
-        "app_version": settings.app_version,
-        "subscriptions": [_subscription_export_values(item) for item in subscriptions],
-    }
+    return export_subscriptions_payload(db, ids=ids)
 
 
 @app.post("/api/subscriptions/import", dependencies=[Depends(require_admin)])
@@ -1216,31 +1239,76 @@ def import_subscriptions(
     payload: SubscriptionImportRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
-    created = 0
-    updated = 0
-    skipped = 0
     try:
-        for item in payload.subscriptions:
-            rss_url = str(item.rss_url)
-            existing = db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
-            values = _subscription_values(item, db, existing=existing)
-            _validate_auto_skip_rename_requirement(db, values, existing=existing)
-            if existing is None:
-                db.add(Subscription(**values))
-                created += 1
-                continue
-            if payload.conflict == "skip":
-                skipped += 1
-                continue
-            reset_monitor_state_for_changes(existing, values)
-            for key, value in values.items():
-                setattr(existing, key, value)
-            updated += 1
+        result = _import_subscription_definitions(
+            db,
+            payload.subscriptions,
+            conflict=payload.conflict,
+        )
         db.commit()
+        return result
     except Exception:
         db.rollback()
         raise
-    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+@app.get("/api/system/backup/export", dependencies=[Depends(require_admin)])
+def export_full_system_backup(
+    include_secrets: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return export_system_backup(db, include_secrets=include_secrets)
+
+
+@app.post("/api/system/backup/import", dependencies=[Depends(require_admin)])
+def import_full_system_backup(
+    payload: SystemBackupImportRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        backup = validate_system_backup(payload.backup)
+        replace = payload.mode == "replace"
+        settings_count = import_app_settings(
+            db,
+            backup.get("settings", {}),
+            replace=replace,
+            preserve_sensitive=not bool(backup.get("secrets_included")),
+        )
+        preference_count = import_anime_preferences(
+            db,
+            backup.get("anime_preferences", []),
+            replace=replace,
+        )
+        subscriptions = [
+            SubscriptionCreate.model_validate(item)
+            for item in backup.get("subscriptions", [])
+        ]
+        subscription_result = _import_subscription_definitions(
+            db,
+            subscriptions,
+            conflict=payload.subscription_conflict,
+            replace=replace,
+        )
+        db.commit()
+        backfill_subscription_identities(db)
+        return {
+            "ok": True,
+            "mode": payload.mode,
+            "settings": settings_count,
+            "anime_preferences": preference_count,
+            **subscription_result,
+            "message": (
+                f"系统配置已导入：{settings_count} 项设置，"
+                f"订阅新增 {subscription_result['created']}、更新 {subscription_result['updated']}、"
+                f"跳过 {subscription_result['skipped']}"
+            ),
+        }
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @app.post("/api/subscriptions/batch", dependencies=[Depends(require_admin)])
@@ -1315,6 +1383,34 @@ def update_subscription(
     except Exception:
         db.rollback()
         raise
+
+
+@app.post("/api/subscriptions/{subscription_id}/rss-candidates", dependencies=[Depends(require_admin)])
+def search_subscription_rss(
+    subscription_id: int,
+    payload: RssCandidateSearchRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    try:
+        result = search_subscription_rss_candidates(
+            db,
+            subscription,
+            query=payload.query,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"RSS 候选搜索失败：{exc}") from exc
+    if not result.get("candidates") and result.get("errors"):
+        result["message"] = "没有找到可用 RSS；部分站点读取失败，请查看站点错误后重试"
+    elif not result.get("candidates"):
+        result["message"] = "没有找到相关 RSS，请尝试修改搜索词"
+    else:
+        result["message"] = f"已找到 {len(result['candidates'])} 个相关 RSS"
+    return result
 
 
 @app.post("/api/subscriptions/{subscription_id}/refresh", dependencies=[Depends(require_admin)])

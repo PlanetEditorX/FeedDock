@@ -1,4 +1,4 @@
-# FeedDock 1.17.11 界面与导航说明
+# FeedDock 1.17.12 界面与导航说明
 
 ## 设计目标
 
@@ -133,8 +133,8 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 ```json
 {
   "format": "feeddock-subscriptions",
-  "version": 1,
-  "app_version": "1.17.11",
+  "version": 2,
+  "app_version": "1.17.12",
   "subscriptions": [
     {
       "name": "示例番剧",
@@ -169,7 +169,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 
 升级到 1.17.0 会自动增加订阅来源、站点番剧 ID、统一身份字段和跨站隐藏偏好表；既有订阅、条目与缓存保持不变，无需手工 SQL。
 
-静态资源使用 `v=1.17.11` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
+静态资源使用 `v=1.17.12` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
 
 ## 刷新菜单
 
@@ -181,3 +181,8 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 ## 1.17.11 RSS 快速更新与免责声明
 
 订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
+
+
+## 1.17.12 配置备份与 RSS 候选窗口
+
+系统管理新增“配置备份与恢复”，可导出有效网页配置、全部订阅和隐藏偏好。订阅卡片“更新 RSS”会打开独立候选窗口，按 Mikan、ANI.BT、Anime Garden 分组展示字幕组 RSS。

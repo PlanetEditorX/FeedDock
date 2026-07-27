@@ -1,6 +1,6 @@
-# FeedDock 1.17.11 设置说明
+# FeedDock 1.17.12 设置说明
 
-FeedDock 1.17.11 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.17.12 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 
@@ -178,3 +178,10 @@ Tracker 缓存存入 SQLite。功能不会删除任务已有 Tracker，也不会
 ## 1.17.11 RSS 快速更新与免责声明
 
 订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
+
+
+## 1.17.12 配置备份与恢复
+
+系统备份导出网页有效设置、订阅和番剧隐藏偏好。敏感值默认省略；勾选后可包含下载器密码、API Token、代理与通知私密值。Compose 的端口、卷、DNS、容器权限和 Watchtower 仍需在 Compose 文件中维护。
+
+导入支持合并和替换。不含敏感值的备份以替换模式导入时，会保留当前实例已有的敏感配置。

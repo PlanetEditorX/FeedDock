@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
-from .debug_logging import format_exception_details, log_event
+from .debug_logging import debug_enabled, format_exception_details, log_event
 from .downloader import DownloaderResult, QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .media_paths import map_downloader_path_to_local
@@ -331,10 +331,34 @@ def _load_subscription_entries(subscription: Subscription, db: Session | None = 
     if subscription.backup_rss_url:
         try:
             entries = _fetch_entries(subscription.backup_rss_url, db)
-            return entries, subscription.backup_rss_name or "备用 RSS"
+            if entries:
+                return entries, subscription.backup_rss_name or "备用 RSS"
+            raise ValueError("备用 RSS 没有条目")
         except Exception as backup_error:
             raise RuntimeError(f"主 RSS 失败：{primary_error}；备用 RSS 失败：{backup_error}") from backup_error
     raise RuntimeError(str(primary_error or "RSS 获取失败"))
+
+
+def _rss_load_error_details(subscription: Subscription, exc: Exception) -> str:
+    if debug_enabled():
+        return format_exception_details(
+            exc,
+            stage="rss.load",
+            context={
+                "subscription_id": subscription.id,
+                "subscription_name": subscription.name,
+                "source_type": subscription.source_type,
+                "has_backup_rss": bool(subscription.backup_rss_url),
+            },
+        )
+    message = str(exc).strip() or "RSS 获取失败"
+    advice = "请在订阅卡片点击“更新 RSS”，按当前番剧信息重新搜索 Mikan、ANI.BT 与 Anime Garden。"
+    return (
+        f"订阅 ID：{subscription.id}\n"
+        f"订阅名称：{subscription.name}\n"
+        f"错误：{message}\n"
+        f"处理建议：{advice}"
+    )
 
 
 def _before_air_date(published_at: datetime | None, air_date: str) -> bool:
@@ -757,21 +781,15 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         entries, source_name = _load_subscription_entries(subscription, db)
     except Exception as exc:
         subscription.last_checked_at = datetime.now(timezone.utc)
-        subscription.last_error = str(exc)[:1000]
+        error_message = str(exc).strip() or "RSS 获取失败"
+        if "没有条目" in error_message:
+            error_message = f"{error_message}；请点击“更新 RSS”重新搜索字幕组"
+        subscription.last_error = error_message[:1000]
         add_log(
             db,
             "ERROR",
             f"订阅检查失败：{subscription.name}",
-            format_exception_details(
-                exc,
-                stage="rss.load",
-                context={
-                    "subscription_id": subscription.id,
-                    "subscription_name": subscription.name,
-                    "rss_url": subscription.rss_url,
-                    "backup_rss_url": subscription.backup_rss_url,
-                },
-            ),
+            _rss_load_error_details(subscription, exc),
         )
         send_notification(
             db,

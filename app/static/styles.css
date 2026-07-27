@@ -399,3 +399,16 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .legal-terms { display: grid; gap: .35rem; margin-top: .8rem; }
 .legal-terms h3 { margin: .65rem 0 0; font-size: 1rem; }
 .legal-terms p { margin: 0; color: var(--muted); line-height: 1.65; }
+
+/* 1.17.12: portable backups and cross-site RSS replacement */
+.rss-candidate-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: end; padding: 0 1.25rem 1rem; }
+.rss-candidate-search label { min-width: 0; }
+.rss-candidate-search + .hint { margin: 0 1.25rem 1rem; }
+.rss-candidate-source { display: grid; gap: .65rem; }
+.rss-candidate-source + .rss-candidate-source { margin-top: 1rem; }
+.rss-candidate-source h3 { margin: 0; font-size: 1rem; }
+.rss-candidate-errors { border: 1px solid var(--line); border-radius: 10px; padding: .65rem .8rem; }
+.rss-candidate-errors summary { cursor: pointer; font-weight: 700; }
+.rss-candidate-errors pre { margin: .65rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mikan-rss-row.is-current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+@media (max-width: 760px) { .rss-candidate-search { grid-template-columns: 1fr; } }

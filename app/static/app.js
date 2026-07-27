@@ -13,6 +13,7 @@ const selectedSubscriptionIds = new Set();
 let subscriptionManagementMode = false;
 let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
+let rssCandidateSubscription = null;
 let currentDownloadRoot = '/media';
 let applicationPreferences = null;
 let subscriptionSources = subscriptionSourceState.normalizeCatalog([]);
@@ -249,6 +250,7 @@ function resetSubscriptionForm() {
   renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, 'other'));
   document.getElementById('saveSubscription').textContent = '保存订阅';
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
+  document.getElementById('searchRssCandidates').classList.add('hidden');
   document.getElementById('saveRssOnly').classList.add('hidden');
   document.getElementById('saveRssAndRefresh').classList.add('hidden');
   subscriptionForm.elements.rss_url.closest('details').open = false;
@@ -1176,6 +1178,7 @@ function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   document.getElementById('subscriptionFormTitle').textContent = `编辑订阅：${sub.name}`;
   document.getElementById('saveSubscription').textContent = '保存修改';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
+  document.getElementById('searchRssCandidates').classList.remove('hidden');
   document.getElementById('saveRssOnly').classList.remove('hidden');
   document.getElementById('saveRssAndRefresh').classList.remove('hidden');
   const rssDetails = subscriptionForm.elements.rss_url.closest('details');
@@ -1254,7 +1257,7 @@ function renderSubscriptions(data) {
     content.append(details);
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
-    const updateRss = text('button', '更新 RSS', 'secondary'); updateRss.addEventListener('click', () => populateSubscriptionForm(sub, { focusRss: true }));
+    const updateRss = text('button', '更新 RSS', 'secondary'); updateRss.addEventListener('click', () => { populateSubscriptionForm(sub, { focusRss: true }); openRssCandidateSearch(sub).catch((error) => showNotice(error.message, false)); });
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
     const scrape = text('button', '刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape`, { method: 'POST' }); showNotice(`${result.message}，共 ${result.items} 个已完成条目`); window.setTimeout(reloadAll, 2500); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
@@ -1404,6 +1407,48 @@ async function importSubscriptionData() {
   await reloadAll();
   showAppView('subscriptions');
   showNotice(`导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}`);
+}
+
+async function exportSystemBackup() {
+  const includeSecrets = document.getElementById('backupIncludeSecrets').checked;
+  if (includeSecrets && !window.confirm('备份将包含密码、Token、代理和通知私密地址。确认继续导出吗？')) return;
+  const payload = await api(`/api/system/backup/export?include_secrets=${includeSecrets ? 'true' : 'false'}`);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadJson(payload, `feeddock-system-backup-${stamp}.json`);
+  showNotice(`系统备份已导出：${payload.subscriptions.length} 条订阅，${Object.keys(payload.settings || {}).length} 项设置`);
+}
+
+function closeSystemBackupImportModal() {
+  document.getElementById('systemBackupImportModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function openSystemBackupImportModal() {
+  document.getElementById('systemBackupImportModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+async function importSystemBackup() {
+  const raw = document.getElementById('systemBackupImportJson').value.trim();
+  if (!raw) throw new Error('请先选择系统备份文件或粘贴备份 JSON');
+  let backup;
+  try { backup = JSON.parse(raw); } catch (error) { throw new Error(`JSON 格式错误：${error.message}`); }
+  const mode = document.getElementById('systemBackupImportMode').value;
+  if (mode === 'replace' && !window.confirm('替换模式会删除当前网页设置、订阅及其下载历史，再导入备份内容。媒体文件不会删除。确认继续吗？')) return;
+  const result = await api('/api/system/backup/import', {
+    method: 'POST',
+    body: JSON.stringify({
+      backup,
+      mode,
+      subscription_conflict: document.getElementById('systemBackupSubscriptionConflict').value,
+    }),
+  });
+  closeSystemBackupImportModal();
+  document.getElementById('systemBackupImportJson').value = '';
+  document.getElementById('systemBackupImportFile').value = '';
+  selectedSubscriptionIds.clear();
+  await reloadAll();
+  showNotice(result.message || '系统配置导入完成');
 }
 
 async function runSubscriptionBatch(action) {
@@ -1672,6 +1717,140 @@ document.getElementById('globalRulesForm').addEventListener('submit', async (eve
     showNotice('全局规则已保存');
   } catch (error) { showNotice(error.message, false); }
 });
+
+function closeRssCandidateModal() {
+  document.getElementById('rssCandidateModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+}
+
+function rssCandidatePatch(candidate) {
+  const patch = {
+    primary_rss_name: candidate.rss_name || `${candidate.source_label} · ${candidate.group_name}`,
+    rss_url: candidate.rss_url,
+    source_type: candidate.source_id,
+    source_anime_id: candidate.source_anime_id || '',
+  };
+  if (candidate.canonical_key) patch.canonical_key = candidate.canonical_key;
+  if (Number(candidate.bangumi_id || 0) > 0) patch.bangumi_id = Number(candidate.bangumi_id);
+  return patch;
+}
+
+function applyRssCandidateToForm(candidate, target = 'primary') {
+  if (target === 'backup') {
+    setFormValue(subscriptionForm, 'backup_rss_name', candidate.rss_name || `${candidate.source_label} · ${candidate.group_name}`);
+    setFormValue(subscriptionForm, 'backup_rss_url', candidate.rss_url);
+    showNotice('已填入备用 RSS，请保存订阅');
+    return;
+  }
+  const patch = rssCandidatePatch(candidate);
+  Object.entries(patch).forEach(([key, value]) => setFormValue(subscriptionForm, key, value));
+  renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, candidate.source_id));
+  showNotice('已填入主 RSS，请保存或立即检查');
+}
+
+async function saveRssCandidateAndRefresh(candidate) {
+  if (!rssCandidateSubscription) throw new Error('未选择需要更新的订阅');
+  const id = rssCandidateSubscription.id;
+  const saved = await api(`/api/subscriptions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(rssCandidatePatch(candidate)),
+  });
+  rssCandidateSubscription = saved;
+  populateSubscriptionForm(saved, { focusRss: true });
+  const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+  closeRssCandidateModal();
+  await loadSubscriptions();
+  showNotice(result.message || 'RSS 已更新，当前订阅检查已启动');
+}
+
+function renderRssCandidates(payload) {
+  const container = document.getElementById('rssCandidateResults');
+  container.replaceChildren();
+  const state = document.getElementById('rssCandidateState');
+  state.textContent = payload.message || `找到 ${(payload.candidates || []).length} 个候选 RSS`;
+  state.className = (payload.candidates || []).length ? 'hint' : 'hint error-text';
+  if (Array.isArray(payload.errors) && payload.errors.length) {
+    const details = document.createElement('details');
+    details.className = 'rss-candidate-errors';
+    details.append(text('summary', `${payload.errors.length} 个站点读取提示`));
+    details.append(text('pre', payload.errors.join('\n')));
+    container.append(details);
+  }
+  if (!Array.isArray(payload.candidates) || !payload.candidates.length) {
+    container.append(text('p', '没有找到相关 RSS。可修改搜索词，或稍后重试暂时不可用的站点。', 'empty'));
+    return;
+  }
+  const grouped = new Map();
+  payload.candidates.forEach((candidate) => {
+    if (!grouped.has(candidate.source_id)) grouped.set(candidate.source_id, []);
+    grouped.get(candidate.source_id).push(candidate);
+  });
+  grouped.forEach((rows) => {
+    const sourceSection = document.createElement('section');
+    sourceSection.className = 'rss-candidate-source';
+    sourceSection.append(text('h3', `${rows[0].source_label} · ${rows.length} 个 RSS`));
+    rows.forEach((candidate) => {
+      const row = document.createElement('article');
+      row.className = `mikan-rss-row${candidate.current ? ' is-current' : ''}`;
+      const info = document.createElement('div');
+      info.className = 'mikan-rss-info';
+      const title = `${candidate.anime_title} · ${candidate.group_name}`;
+      info.append(text('strong', candidate.current ? `${title}（当前）` : title));
+      info.append(text('code', candidate.rss_url, 'rss-code'));
+      info.append(text('span', `${candidate.match_reason}${candidate.recent_count ? ` · 最近资源 ${candidate.recent_count} 条` : ''}`, 'muted'));
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      const primary = text('button', '填入主 RSS', 'small secondary');
+      primary.type = 'button'; primary.addEventListener('click', () => applyRssCandidateToForm(candidate, 'primary'));
+      const backup = text('button', '填入备用 RSS', 'small secondary');
+      backup.type = 'button'; backup.addEventListener('click', () => applyRssCandidateToForm(candidate, 'backup'));
+      const save = text('button', '保存并检查', 'small');
+      save.type = 'button'; save.addEventListener('click', async () => {
+        save.disabled = true;
+        try { await saveRssCandidateAndRefresh(candidate); } catch (error) { showNotice(error.message, false); } finally { save.disabled = false; }
+      });
+      actions.append(primary, backup, save);
+      if (candidate.detail_url) actions.append(externalLink('来源页面', candidate.detail_url));
+      row.append(info, actions);
+      sourceSection.append(row);
+    });
+    container.append(sourceSection);
+  });
+}
+
+async function runRssCandidateSearch() {
+  if (!rssCandidateSubscription) throw new Error('请先选择需要更新 RSS 的订阅');
+  const button = document.getElementById('runRssCandidateSearch');
+  const state = document.getElementById('rssCandidateState');
+  const container = document.getElementById('rssCandidateResults');
+  button.disabled = true;
+  state.textContent = '正在按当前番剧身份搜索 Mikan、ANI.BT 和 Anime Garden…';
+  state.className = 'hint';
+  container.replaceChildren(text('p', '正在读取各站番剧与字幕组信息…', 'muted'));
+  try {
+    const payload = await api(`/api/subscriptions/${rssCandidateSubscription.id}/rss-candidates`, {
+      method: 'POST',
+      body: JSON.stringify({ query: document.getElementById('rssCandidateQuery').value.trim() }),
+    });
+    renderRssCandidates(payload);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openRssCandidateSearch(subscription = null) {
+  const id = Number(subscription?.id || subscriptionForm.elements.subscription_id.value || 0);
+  const selected = subscription || currentSubscriptions.find((row) => row.id === id);
+  if (!selected) throw new Error('请先保存订阅，再搜索可用 RSS');
+  rssCandidateSubscription = selected;
+  document.getElementById('rssCandidateTitle').textContent = `更新 RSS：${selected.name}`;
+  document.getElementById('rssCandidateQuery').value = selected.reference_title || selected.tmdb_title || selected.name || '';
+  document.getElementById('rssCandidateResults').replaceChildren();
+  document.getElementById('rssCandidateState').textContent = '将优先使用 Bangumi ID、当前站点番剧 ID，再按标题搜索全部支持站点。';
+  document.getElementById('rssCandidateModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  await runRssCandidateSearch();
+}
 
 function quickRssPayload() {
   const rssInput = subscriptionForm.elements.rss_url;
@@ -1991,6 +2170,28 @@ document.getElementById('subscriptionImportFile').addEventListener('change', asy
 });
 document.getElementById('confirmSubscriptionImport').addEventListener('click', async () => {
   try { await importSubscriptionData(); } catch (error) { showNotice(error.message, false); }
+});
+document.getElementById('exportSystemBackup').addEventListener('click', () => exportSystemBackup().catch((error) => showNotice(error.message, false)));
+document.getElementById('openSystemBackupImport').addEventListener('click', openSystemBackupImportModal);
+document.getElementById('systemExportSubscriptions').addEventListener('click', () => exportSubscriptionData().catch((error) => showNotice(error.message, false)));
+document.getElementById('systemImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
+document.getElementById('closeSystemBackupImport').addEventListener('click', closeSystemBackupImportModal);
+document.getElementById('cancelSystemBackupImport').addEventListener('click', closeSystemBackupImportModal);
+document.querySelector('[data-close-system-backup-import]').addEventListener('click', closeSystemBackupImportModal);
+document.getElementById('systemBackupImportFile').addEventListener('change', async (event) => {
+  const [file] = event.currentTarget.files;
+  if (!file) return;
+  document.getElementById('systemBackupImportJson').value = await file.text();
+});
+document.getElementById('confirmSystemBackupImport').addEventListener('click', async () => {
+  try { await importSystemBackup(); } catch (error) { showNotice(error.message, false); }
+});
+document.getElementById('searchRssCandidates').addEventListener('click', () => openRssCandidateSearch().catch((error) => showNotice(error.message, false)));
+document.getElementById('closeRssCandidate').addEventListener('click', closeRssCandidateModal);
+document.querySelector('[data-close-rss-candidate]').addEventListener('click', closeRssCandidateModal);
+document.getElementById('runRssCandidateSearch').addEventListener('click', () => runRssCandidateSearch().catch((error) => showNotice(error.message, false)));
+document.getElementById('rssCandidateQuery').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); runRssCandidateSearch().catch((error) => showNotice(error.message, false)); }
 });
 document.getElementById('loginSettingsLogout').addEventListener('click', () => document.getElementById('logout').click());
 document.getElementById('restartSystem').addEventListener('click', async () => {
