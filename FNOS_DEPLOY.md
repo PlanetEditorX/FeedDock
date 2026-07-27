@@ -1,4 +1,4 @@
-# FeedDock v1.14.0 飞牛 OS 部署
+# FeedDock v1.15.0 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -150,7 +150,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.14.0 新增主题与排序、自动元数据同步、`bangumi.ini`、下载重试/并发/做种时长、RSS 总开关与自动跳过、Bangumi 完结停用和 Tracker 缓存。启动时会自动增加评分、总集数检查时间和 Tracker 状态字段，不需要手工 SQL。
+v1.15.0 将“添加订阅”明确拆分为 Mikan、ANI.BT、Anime Garden（AG）和其它 RSS。ANI.BT 与 Anime Garden 会显示官方站点、RSS 帮助和全站资源流风险提示；全站 RSS 默认不自动填入。从 1.14.0 升级不新增数据库字段，不需要手工 SQL。
 
 升级后建议强制刷新一次浏览器，并确认首页只显示订阅列表。下载、设置和日志现在通过顶部菜单进入。网页“系统管理”中的重启与关闭默认不可用；需要远程控制进程时，在 Compose 中显式设置：
 

@@ -3,8 +3,10 @@ const subscriptionForm = document.getElementById('subscriptionForm');
 const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 const mikanSubscriptionState = window.FeedDockMikanSubscriptionState;
 const navigation = window.FeedDockNavigation;
+const subscriptionSourceState = window.FeedDockSubscriptionSources;
 if (!mikanSubscriptionState) throw new Error('Mikan subscription state module is unavailable');
 if (!navigation) throw new Error('Navigation module is unavailable');
+if (!subscriptionSourceState) throw new Error('Subscription source module is unavailable');
 let subscriptionsById = new Map();
 let currentSubscriptions = [];
 const selectedSubscriptionIds = new Set();
@@ -13,27 +15,54 @@ let currentMikanDetailItem = null;
 let currentMikanCatalogData = null;
 let currentDownloadRoot = '/media';
 let applicationPreferences = null;
+let subscriptionSources = subscriptionSourceState.normalizeCatalog([]);
+let activeSubscriptionSource = subscriptionSourceState.getSource(subscriptionSources, 'other');
 let subscriptionSortMode = 'updated';
 const mikanWeekdayDrafts = new Map();
 const PANEL_STATE_KEY = 'feeddock.panelState.v1';
 const MIKAN_WEEKDAY_STATE_KEY = 'feeddock.mikanWeekdayState.v1';
 
-const SUBSCRIPTION_SOURCE_PRESETS = Object.freeze({
-  anibt: { label: 'ANI.BT', rssName: 'ANI.BT', placeholder: 'https://anibt.example/rss/...' },
-  ag: { label: 'Anime Garden', rssName: 'Anime Garden', placeholder: 'https://api.animegarden.net/feed/...' },
-  other: { label: '其它 RSS', rssName: '', placeholder: 'https://example.com/feed.xml' },
-});
-
 function showAppView(view, options = {}) {
   return navigation.showView(view, options);
 }
 
-function openSubscriptionEditor(source = 'other') {
+function setSourceLink(element, url) {
+  const value = String(url || '').trim();
+  element.classList.toggle('hidden', !value);
+  if (value) element.href = value;
+  else element.removeAttribute('href');
+}
+
+function renderSubscriptionSourceContext(source) {
+  activeSubscriptionSource = subscriptionSourceState.normalizeSource(source);
+  const context = document.getElementById('subscriptionSourceContext');
+  context.dataset.source = activeSubscriptionSource.id;
+  document.getElementById('subscriptionSourceBadge').textContent = activeSubscriptionSource.short_label || activeSubscriptionSource.label;
+  document.getElementById('subscriptionSourceName').textContent = activeSubscriptionSource.label;
+  document.getElementById('subscriptionSourceDescription').textContent = activeSubscriptionSource.description;
+  document.getElementById('subscriptionSourceCaution').textContent = activeSubscriptionSource.caution || '';
+  setSourceLink(document.getElementById('subscriptionSourceOfficial'), activeSubscriptionSource.official_url);
+  setSourceLink(document.getElementById('subscriptionSourceHelp'), activeSubscriptionSource.help_url);
+  document.getElementById('useDefaultSourceFeed').classList.toggle('hidden', !subscriptionSourceState.canUseDefaultFeed(activeSubscriptionSource));
+  subscriptionForm.elements.rss_url.placeholder = activeSubscriptionSource.placeholder || 'https://example.com/feed.xml';
+}
+
+async function loadSubscriptionSources() {
+  const payload = await api('/api/subscription-sources');
+  subscriptionSources = subscriptionSourceState.normalizeCatalog(payload);
+  const currentUrl = subscriptionForm.elements.rss_url.value.trim();
+  renderSubscriptionSourceContext(
+    currentUrl ? subscriptionSourceState.detectSource(subscriptionSources, currentUrl) : activeSubscriptionSource,
+  );
+}
+
+async function openSubscriptionEditor(source = 'other') {
+  if (!subscriptionSources.some((item) => item.id === source)) await loadSubscriptionSources();
   resetSubscriptionForm();
-  const preset = SUBSCRIPTION_SOURCE_PRESETS[source] || SUBSCRIPTION_SOURCE_PRESETS.other;
+  const preset = subscriptionSourceState.getSource(subscriptionSources, source);
+  renderSubscriptionSourceContext(preset);
   document.getElementById('subscriptionFormTitle').textContent = `添加订阅 · ${preset.label}`;
-  setFormValue(subscriptionForm, 'primary_rss_name', preset.rssName);
-  subscriptionForm.elements.rss_url.placeholder = preset.placeholder;
+  setFormValue(subscriptionForm, 'primary_rss_name', preset.rss_name);
   showAppView('add-subscription');
   subscriptionForm.elements.name.focus();
 }
@@ -81,12 +110,10 @@ function filteredSubscriptions(subscriptions) {
 
 
 function subscriptionSourceLabel(sub) {
-  let host = '';
-  try { host = new URL(sub.rss_url).hostname.toLowerCase(); } catch (_) {}
-  if (host.includes('mikan')) return 'Mikan';
-  if (host.includes('anibt')) return 'ANI.BT';
-  if (host.includes('animegarden') || host.includes('animes.garden')) return 'Anime Garden';
-  return sub.primary_rss_name || '其它 RSS';
+  if (sub.source_type === 'other') return sub.primary_rss_name || sub.source_label || '其它 RSS';
+  if (sub.source_label) return sub.source_label;
+  const detected = subscriptionSourceState.detectSource(subscriptionSources, sub.rss_url);
+  return detected.id === 'other' ? (sub.primary_rss_name || detected.label) : detected.label;
 }
 
 function showNotice(message, ok = true) {
@@ -171,7 +198,7 @@ function resetSubscriptionForm() {
   document.getElementById('metadataSearchResults').textContent = '尚未搜索。';
   document.getElementById('metadataSearchResults').className = 'metadata-results muted';
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
-  subscriptionForm.elements.rss_url.placeholder = 'https://example.com/feed.xml';
+  renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, 'other'));
   document.getElementById('saveSubscription').textContent = '保存订阅';
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
   subscriptionPreviewBox.textContent = '尚未预览。';
@@ -1013,6 +1040,7 @@ function populateSubscriptionForm(sub) {
   syncMetadataSearchQuery({ force: true });
   setFormValue(subscriptionForm, 'subscription_id', sub.id);
   setFormValue(subscriptionForm, 'sample_title', sub.reference_title || sub.name);
+  renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, sub.source_type || 'other'));
   document.getElementById('subscriptionFormTitle').textContent = `编辑订阅：${sub.name}`;
   document.getElementById('saveSubscription').textContent = '保存修改';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
@@ -1028,11 +1056,13 @@ function renderSubscriptions(data) {
   if (!data.length) {
     const empty = document.createElement('div'); empty.className = 'empty-state';
     empty.append(text('h3', '还没有订阅'));
-    empty.append(text('p', '可以从 Mikan 番剧目录选择，也可以直接添加其它 RSS。', 'muted'));
+    empty.append(text('p', '选择订阅站点后添加番剧 RSS；Mikan 提供目录，ANI.BT 与 Anime Garden 提供站点专用提示。', 'muted'));
     const actions = document.createElement('div'); actions.className = 'form-actions';
-    const mikan = text('button', '浏览 Mikan'); mikan.type = 'button'; mikan.addEventListener('click', () => showAppView('add-mikan'));
-    const other = text('button', '添加其它 RSS', 'secondary'); other.type = 'button'; other.addEventListener('click', () => openSubscriptionEditor('other'));
-    actions.append(mikan, other); empty.append(actions); container.append(empty);
+    const mikan = text('button', 'Mikan'); mikan.type = 'button'; mikan.addEventListener('click', () => showAppView('add-mikan'));
+    const anibt = text('button', 'ANI.BT', 'secondary'); anibt.type = 'button'; anibt.addEventListener('click', () => openSubscriptionEditor('anibt').catch((error) => showNotice(error.message, false)));
+    const ag = text('button', 'Anime Garden', 'secondary'); ag.type = 'button'; ag.addEventListener('click', () => openSubscriptionEditor('ag').catch((error) => showNotice(error.message, false)));
+    const other = text('button', '其它 RSS', 'secondary'); other.type = 'button'; other.addEventListener('click', () => openSubscriptionEditor('other').catch((error) => showNotice(error.message, false)));
+    actions.append(mikan, anibt, ag, other); empty.append(actions); container.append(empty);
     updateSubscriptionSelectionSummary();
     return;
   }
@@ -1168,7 +1198,7 @@ async function reloadAll() {
   try {
     await loadAuth();
     await Promise.all([
-      loadDashboard(), loadConfig(), loadApplicationSettings(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
+      loadDashboard(), loadConfig(), loadApplicationSettings(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(), loadSubscriptionSources(),
       loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), loadNotificationSettings(), loadSystemStatus(),
     ]);
   } catch (error) {
@@ -1666,10 +1696,27 @@ document.querySelector('[data-close-metadata-review]').addEventListener('click',
 document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在搜索…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
 document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称');});
 
+document.getElementById('useDefaultSourceFeed').addEventListener('click', () => {
+  if (!activeSubscriptionSource.default_feed_url) return;
+  const message = `${activeSubscriptionSource.label} 的全站 RSS 可能包含大量条目，确认填入后请配置“匹配/排除”规则。继续吗？`;
+  if (!window.confirm(message)) return;
+  setFormValue(subscriptionForm, 'rss_url', activeSubscriptionSource.default_feed_url);
+  if (!subscriptionForm.elements.primary_rss_name.value.trim()) setFormValue(subscriptionForm, 'primary_rss_name', activeSubscriptionSource.rss_name);
+  showNotice(`已填入 ${activeSubscriptionSource.label} 全站 RSS，请先设置过滤规则再保存`, false);
+});
+
+subscriptionForm.elements.rss_url.addEventListener('change', (event) => {
+  const detected = subscriptionSourceState.detectSource(subscriptionSources, event.currentTarget.value);
+  renderSubscriptionSourceContext(detected);
+  if (detected.id !== 'other' && !subscriptionForm.elements.primary_rss_name.value.trim()) {
+    setFormValue(subscriptionForm, 'primary_rss_name', detected.rss_name);
+  }
+});
+
 document.querySelectorAll('[data-subscription-source]').forEach((button) => {
   button.addEventListener('click', () => {
     const source = button.dataset.subscriptionSource;
-    if (source && source !== 'mikan') openSubscriptionEditor(source);
+    if (source && source !== 'mikan') openSubscriptionEditor(source).catch((error) => showNotice(error.message, false));
   });
 });
 

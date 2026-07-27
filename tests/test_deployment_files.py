@@ -104,6 +104,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("type=raw,value=${{ steps.app_version.outputs.value }}", workflow)
         self.assertIn("--latest", workflow)
         self.assertIn("node --check app/static/mikan-subscription-state.js", workflow)
+        self.assertIn("node --check app/static/subscription-sources.js", workflow)
         self.assertIn("node --check app/static/navigation.js", workflow)
 
     def test_subscription_submit_keeps_form_reference_across_await(self) -> None:
@@ -126,7 +127,12 @@ class DeploymentFileTests(unittest.TestCase):
 
         self.assertIn(f"/static/app.js?v={version}", index)
         self.assertIn(f"/static/mikan-subscription-state.js?v={version}", index)
+        self.assertIn(f"/static/subscription-sources.js?v={version}", index)
         self.assertIn(f"/static/navigation.js?v={version}", index)
+        self.assertLess(
+            index.index(f"/static/subscription-sources.js?v={version}"),
+            index.index(f"/static/app.js?v={version}"),
+        )
         self.assertLess(
             index.index(f"/static/navigation.js?v={version}"),
             index.index(f"/static/app.js?v={version}"),

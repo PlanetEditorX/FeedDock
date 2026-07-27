@@ -1,6 +1,6 @@
-# FeedDock 1.14.0 设置说明
+# FeedDock 1.15.0 设置说明
 
-FeedDock 1.14.0 将 ani-rss 中适合当前架构的页面、刮削、下载、RSS 和 Tracker 策略接入现有 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.15.0 延续 1.14.0 的设置体系，并将 ani-rss 中适合当前架构的页面、刮削、下载、RSS 和 Tracker 策略接入现有 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 

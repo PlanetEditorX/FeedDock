@@ -1,89 +1,70 @@
-# FeedDock 1.14.0 验证报告
+# FeedDock 1.15.0 验证报告
 
 ## 结论
 
-FeedDock 1.14.0 已完成页面、刮削、下载、RSS 和 Tracker 设置的实现与回归验证。
+FeedDock 1.15.0 已完成 Mikan、ANI.BT、Anime Garden（AG）和其它 RSS 四类订阅站点入口的实现与回归验证。
 
-- **117 项 pytest 测试全部通过，另有 6 个 unittest subtests 通过**；
+- **125 项 unittest 测试全部通过**；
 - Python 全项目编译通过；
-- 5 个前端 JavaScript 文件语法检查通过；
+- 6 个前端 JavaScript 文件语法检查通过；
 - Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
-- 主页面 111 个 HTML ID 均唯一；
-- FastAPI 应用可正常导入，运行版本为 `1.14.0`；
-- `git diff --check` 通过；
-- 真实 1.13.0 SQLite 数据库增量升级通过，历史订阅和 RSS 指纹保留。
+- 主页面 119 个、登录页 3 个、改密页 7 个 HTML ID 均唯一；
+- FastAPI 应用可正常导入，运行版本为 `1.15.0`；
+- 从 1.14.0 升级不新增数据库字段，不需要手工迁移。
 
 ## 功能覆盖
 
-### 页面设置
+### 四类添加入口
 
-- 五种主题色写入服务器并同步浏览器本地缓存；
-- 订阅支持按评分、拼音和更新时间排序；
-- 元数据评分持久化并在订阅卡片显示；
-- 页面加载前应用主题，避免明显闪烁。
+- Mikan：继续进入季度番剧目录，可选择番剧与字幕组；
+- ANI.BT：显示官方站点、RSS 帮助、单番剧地址示例和全站磁力流警告；
+- Anime Garden：显示官方站点、帮助入口、过滤 RSS 示例和全站资源流警告；
+- 其它 RSS：保持通用 RSS、Atom、RDF 输入模式。
 
-### 刮削设置
+### 站点目录与识别
 
-- 全局自动元数据同步和 14 天追更窗口；
-- TMDB API 与图片根地址可配置，并兼容带或不带 `/3`、`/t/p`；
-- TMDB 同时支持 32 位 v3 API Key 和 v4 Read Access Token；
-- 下载完成后安全生成 `bangumi.ini`；
-- 开启功能时，符合条件的历史完成任务进入一次性补写队列；
-- 写入目录必须位于统一媒体根目录内部。
+- 后端集中维护订阅站点目录，前端通过认证 API 获取；
+- 按 URL 主机名识别 `source_type` 和 `source_label`；
+- 主机名使用边界匹配，`anibt.net.example.com` 不会被误识别为 ANI.BT；
+- 未知站点归类为“其它 RSS”，订阅卡片仍优先保留用户填写的 RSS 名称；
+- Mikan/AniBT 地址中的 `bangumiId` 或 `bgmId` 可自动补入订阅元数据。
 
-### 下载设置
+### 安全默认值
 
-- qBittorrent 创建任务失败重试；
-- 同时下载限制和后台空位重试；
-- 并发等待与成功推送分开统计；
-- 单任务做种时长传递到 qBittorrent；
-- 所有任务继续使用唯一 `feeddock-item-{id}` Tag 跟踪。
+- ANI.BT 和 Anime Garden 的全站 RSS 不自动写入表单；
+- 用户点击“使用全站 RSS”时必须确认；
+- 界面明确提示先配置包含、排除或字幕组规则，降低误下载大量资源的风险；
+- 站点识别不信任用户可编辑的显示名称。
 
-### RSS 设置
+### 前端模块化
 
-- 全局 RSS 开关；
-- 轮询间隔和请求超时；
-- 规范目标文件已存在时自动跳过；
-- 自动跳过对自动重命名和统一路径映射进行前后端双重约束；
-- 创建、编辑、导入和批量启用均不能绕过该约束；
-- 根据 Bangumi 总集数判断整季完成并自动停用；
-- `.5` 特别篇不计入整数正片完成条件。
+- 新增独立纯函数模块 `app/static/subscription-sources.js`；
+- 负责目录规范化、来源查找、URL 来源识别和默认 Feed 可用性判断；
+- 模块支持浏览器和 Node.js 测试环境；
+- GitHub Actions 已加入该脚本的 `node --check`。
 
-### Trackers
+## 数据库升级
 
-- 更新地址校验；
-- Tracker 文本协议过滤、去重和数量限制；
-- SQLite 缓存和更新时间；
-- qBittorrent 返回任务哈希后追加 Tracker；
-- Tracker 处理状态持久化，失败不会撤销下载任务。
+1.15.0 没有新增表或字段。来源类型由订阅主 RSS URL 动态识别，因此：
 
-## 数据库迁移
-
-使用基线 Git 提交 `ee05b33` 创建真实 1.13.0 SQLite 数据库，写入一条订阅和一条带历史指纹的下载条目，再由 1.14.0 执行 `ensure_schema()`。
-
-确认新增列：
-
-```text
-subscriptions.metadata_rating
-subscriptions.total_episodes_checked_at
-feed_items.trackers_status
-feed_items.trackers_message
-feed_items.trackers_applied_at
-```
-
-迁移后确认：
-
-- 历史订阅名称仍为“迁移测试”；
-- 历史 RSS 指纹仍为 `legacy-fingerprint`；
-- 不删除或重建原表。
+- 1.14.0 数据库可直接启动；
+- 不修改历史订阅、条目、RSS 指纹或通知去重状态；
+- 不需要手工 SQL；
+- 导入导出格式保持兼容。
 
 ## 执行命令
 
 ```bash
-PYTHONPATH=. pytest -q
+PYTHONPATH=. python -m unittest discover -s tests
 python -m compileall -q app tests
 
-for file in app/static/*.js; do
+for file in \
+  app/static/mikan-subscription-state.js \
+  app/static/subscription-sources.js \
+  app/static/navigation.js \
+  app/static/app.js \
+  app/static/login.js \
+  app/static/change-password.js; do
   node --check "$file"
 done
 
@@ -102,40 +83,32 @@ PY
 PYTHONPATH=. python - <<'PY'
 from app.main import app
 from app.config import settings
-assert settings.app_version == "1.14.0"
+assert settings.app_version == "1.15.0"
 assert app.title == "FeedDock"
 PY
-
-git diff --check
 ```
 
 ## 重点测试文件
 
 ```text
-tests/test_settings_features.py
+tests/test_subscription_sources.py
 tests/test_deployment_files.py
 tests/test_subscription_management.py
-tests/test_metadata_naming.py
-tests/test_rss_service.py
-tests/test_subscription_monitor.py
+tests/test_auth_flow.py
 ```
 
 新增测试覆盖：
 
-- 设置持久化和默认值；
-- Tracker 过滤、去重与缓存；
-- 自动跳过对重命名的依赖；
-- 批量启用时的服务端约束；
-- qBittorrent 做种时长参数；
-- 并发满时等待与统计；
-- 目标文件存在时跳过；
-- 全局完结自动停用；
-- `bangumi.ini` 写入位置和历史补写；
-- TMDB v3 API Key 与 v4 Token 认证方式；
-- 前端设置字段和后端执行入口的端到端静态连线。
+- 站点目录顺序和默认配置；
+- Mikan、ANI.BT、Anime Garden 与未知 RSS 的来源识别；
+- 主机名边界与相似恶意域名；
+- `bangumiId`、`bgmId` 提取和自动写入；
+- 订阅输出中的稳定来源字段；
+- 认证后的站点目录 API；
+- 前端来源模块的 Node.js 纯函数测试；
+- 四类添加菜单、来源说明面板和全站 RSS 风险确认；
+- 静态资源加载顺序与缓存版本。
 
 ## 环境限制
 
-当前环境没有 Docker CLI，因此未实际构建或启动容器。也没有连接真实 qBittorrent、TMDB、Bangumi 或 Tracker 服务；外部交互使用测试替身验证请求参数、状态更新和错误隔离。
-
-Chromium 可执行文件存在，但沙箱策略限制本地 HTTP 浏览器联调。本次界面通过 HTML 结构、Hash 路由测试、脚本语法检查和后端 API 测试验证。部署后仍建议执行一次主题切换、设置保存、Tracker 手动更新和 qBittorrent 推送的浏览器冒烟测试。
+当前验证聚焦于应用代码、静态界面和配置文件，没有连接真实 Mikan、ANI.BT 或 Anime Garden 服务执行外部端到端订阅拉取。站点地址和接口格式通过官方公开文档核对，应用侧通过测试替身和纯函数测试验证分类、表单行为与持久化结果。

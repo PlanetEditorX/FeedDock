@@ -191,6 +191,8 @@ class SubscriptionOut(BaseModel):
     metadata_review_skipped: bool
     primary_rss_name: str
     rss_url: str
+    source_type: str = "other"
+    source_label: str = "其它 RSS"
     backup_rss_name: str
     backup_rss_url: str
     include_keywords: str

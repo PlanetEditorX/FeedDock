@@ -86,6 +86,7 @@ jobs:
       - name: Validate frontend JavaScript syntax
         run: |
           node --check app/static/mikan-subscription-state.js
+          node --check app/static/subscription-sources.js
           node --check app/static/navigation.js
           node --check app/static/app.js
           node --check app/static/login.js

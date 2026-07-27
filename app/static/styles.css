@@ -269,7 +269,7 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .log-error { border-left: 3px solid var(--danger); padding-left: .65rem; }
 .log-debug { opacity: .92; }
 
-/* v1.14.0 task-oriented navigation inspired by ani-rss information hierarchy */
+/* Task-oriented navigation and subscription-source entry styles. */
 .topbar { padding-top: 12px; padding-bottom: 12px; gap: 18px; }
 .app-brand { flex: 0 0 auto; cursor: pointer; }
 .app-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 8px; }
@@ -349,3 +349,18 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .setting-details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
 .setting-details summary { color: var(--accent); cursor: pointer; font-weight: 700; }
 .setting-details p { margin: 9px 0 0; color: var(--muted); }
+
+/* v1.15.0 subscription source integrations */
+.subscription-source-context { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.subscription-source-heading { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.subscription-source-heading h3 { margin: 0 0 5px; font-size: 17px; }
+.subscription-source-heading p { margin: 0; color: var(--muted); line-height: 1.5; }
+.subscription-source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
+.subscription-source-context > .hint { flex-basis: 100%; margin: 0; }
+.subscription-source-context[data-source="anibt"] .provider-badge { color: #9b8cff; }
+.subscription-source-context[data-source="ag"] .provider-badge { color: #54d7a2; }
+.subscription-source-context[data-source="other"] .provider-badge { color: var(--muted); }
+@media (max-width: 760px) {
+  .subscription-source-context { align-items: stretch; flex-direction: column; }
+  .subscription-source-actions { justify-content: flex-start; }
+}

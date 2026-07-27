@@ -40,6 +40,12 @@ from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
 from .subscription_monitor import reset_monitor_state_for_changes
+from .subscription_sources import (
+    classify_subscription_source,
+    subscription_source_catalog,
+    subscription_source_label,
+    extract_source_bangumi_id,
+)
 from .rss_service import (
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
@@ -181,6 +187,10 @@ def _subscription_values(
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
+    if "rss_url" in values and not values.get("bangumi_id"):
+        detected_bangumi_id = extract_source_bangumi_id(values.get("rss_url"))
+        if detected_bangumi_id:
+            values["bangumi_id"] = detected_bangumi_id
     if db is not None:
         # qBittorrent, FeedDock scraping, and subscription rendering must use
         # one identical container path. Customize only the folder template.
@@ -229,6 +239,8 @@ def _apply_mikan_hidden_filters(
 
 def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
     output = SubscriptionOut.model_validate(subscription)
+    output.source_type = classify_subscription_source(subscription.rss_url)
+    output.source_label = subscription_source_label(subscription.rss_url)
     output.canonical_title = canonical_title(subscription)
     output.media_folder = media_folder_name(subscription)
     if subscription.missing_detection:
@@ -961,6 +973,11 @@ def dashboard(db: Session = Depends(get_db)) -> dict[str, int]:
         "errors": int(statuses.get("error", 0)),
         "items": sum(int(value) for value in statuses.values()),
     }
+
+
+@app.get("/api/subscription-sources", dependencies=[Depends(require_admin)])
+def list_subscription_sources() -> dict[str, Any]:
+    return {"sources": subscription_source_catalog()}
 
 
 @app.get("/api/subscriptions", response_model=list[SubscriptionOut], dependencies=[Depends(require_admin)])
