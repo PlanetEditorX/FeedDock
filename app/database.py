@@ -141,9 +141,9 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
-    # Upgrade the previous built-in directory template to media_folder. The
-    # latter includes [tmdbid=...] after metadata confirmation, while custom
-    # user templates are intentionally preserved.
+    # Upgrade the previous built-in directory template to ``media_folder``.
+    # The folder-name policy can evolve centrally while custom user templates
+    # remain intentionally preserved.
     marker = "migration:1.11.1:media-folder-paths"
     with engine.begin() as connection:
         existing = connection.execute(

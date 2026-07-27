@@ -1,4 +1,4 @@
-# FeedDock v1.17.5 飞牛 OS 部署
+# FeedDock v1.17.6 飞牛 OS 部署
 
 ## 新增可选配置
 

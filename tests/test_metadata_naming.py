@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
-from app.naming import media_folder_name, remote_to_local_path, render_desired_name
+from app.naming import media_folder_name, naming_context, remote_to_local_path, render_desired_name
 from app.scraper import ScrapeResult, scrape_completed_item, scrape_subscription, trigger_tmm_scrape
 
 
@@ -113,7 +113,8 @@ class MetadataNamingTests(unittest.TestCase):
 
     def test_emby_folder_and_episode_name(self):
         sub = self.subscription()
-        self.assertEqual(media_folder_name(sub), "金牌得主 (2025) [tmdbid=123]")
+        self.assertEqual(media_folder_name(sub), "金牌得主 (2025)")
+        self.assertEqual(naming_context(sub, "3")["tmdb_id"], 123)
         self.assertEqual(render_desired_name(sub, "3"), "金牌得主 - S02E03")
 
     def test_manual_title_has_priority_and_path_mapping_is_confined(self):
@@ -290,7 +291,7 @@ class MetadataNamingTests(unittest.TestCase):
 
     def test_local_scraper_writes_nfo_and_artwork(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "金牌得主 (2025) [tmdbid=123]"
+            root = Path(tmp) / "金牌得主 (2025)"
             season = root / "Season 02"
             season.mkdir(parents=True)
             video = season / "金牌得主 - S02E03.mkv"

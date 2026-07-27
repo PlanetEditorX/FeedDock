@@ -81,7 +81,7 @@ class RSSServiceTests(unittest.TestCase):
         self.assertTrue(result["matched"])
         self.assertEqual(result["parsed_episode"], "14")
         self.assertEqual(result["adjusted_episode"], "1")
-        self.assertEqual(result["save_path"], "/media/金牌得主 (2025) [tmdbid=123]/Season 02")
+        self.assertEqual(result["save_path"], "/media/金牌得主 (2025)/Season 02")
 
     def test_regex_and_global_exclusion(self):
         self.assertFalse(match_title("Demo 01-02 1080p", "", r"\d-\d", "")[0])
@@ -113,7 +113,7 @@ class RSSServiceTests(unittest.TestCase):
         self.assertTrue(result["desired_name"].endswith("S01E01"))
         self.assertEqual(
             result["save_path"],
-            "/media/从0位居民开始的边境领主大人 (2026) [tmdbid=296437]/Season 01",
+            "/media/从0位居民开始的边境领主大人 (2026)/Season 01",
         )
 
     def test_path_traversal_is_confined(self):

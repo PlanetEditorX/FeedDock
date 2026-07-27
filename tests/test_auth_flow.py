@@ -280,7 +280,7 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(preview.json()["adjusted_episode"], "1")
             self.assertEqual(
                 preview.json()["save_path"],
-                "/media/金牌得主 (2026) [tmdbid=123456]/Season 02",
+                "/media/金牌得主 (2026)/Season 02",
             )
 
             with patch("app.main.refresh_subscription") as initial_refresh:

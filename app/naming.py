@@ -77,9 +77,9 @@ def media_folder_name(subscription: Subscription) -> str:
     base = _without_duplicate_year(title, year)
     if year:
         base = f"{base} ({year})"
-    tmdb_id = int(_value(subscription, "tmdb_id", 0) or 0)
-    if tmdb_id:
-        base = f"{base} [tmdbid={tmdb_id}]"
+    # Keep the default media directory human-readable. Provider IDs belong in
+    # NFO metadata, not in the filesystem name. Custom templates can still use
+    # ``{tmdb_id}`` through ``naming_context`` when explicitly requested.
     return safe_segment(base)
 
 
