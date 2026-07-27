@@ -1,65 +1,38 @@
-# FeedDock 1.17.2 验证报告
-
-验证日期：2026-07-27
+# FeedDock 1.17.3 验证报告
 
 ## 功能验证
 
-已验证以下行为：
-
-- 新建订阅提交成功后，后台只刷新该订阅一次；
-- 停用的新订阅不会发起 RSS 请求，并记录跳过日志；
-- 点击“刷新全部订阅”前显示“是否刷新全部订阅？”确认框；
-- 手动刷新记录开始、逐订阅检查和最终汇总；
-- 下载器推送记录准备、重试、成功、最终失败；
-- 达到并发限制时记录等待并发空位；
-- 启用统一下载时间时记录等待定时推送；
-- 目标文件已存在时记录跳过推送；
-- 网页日志和文件日志同时获得 RSS/下载器日志；
-- 推送日志不包含完整 magnet、Torrent URL 或 RSS 私密参数；
-- 日志页面不再显示“500 错误可按提示中的请求编号定位”。
+- “刷新全部订阅”点击后直接执行，不再显示二次确认；
+- qBittorrent 返回 `Ok.` 但标签回查为空时判定失败；
+- 标签回查成功时保存实际任务名称、状态和哈希；
+- HTTP/HTTPS `.torrent` 由 FeedDock 下载后以原始文件上传；
+- Magnet 继续通过 URL 添加，并执行相同标签回查；
+- 历史 `queued` 记录超过两分钟仍找不到任务时转为可重试错误；
+- 日志不包含完整 magnet、Torrent URL 或 passkey。
 
 ## 自动化测试
 
-```text
-Ran 143 tests
-OK
-```
-
-其中新增覆盖：
-
-- 创建订阅后调度首次刷新；
-- 首次刷新解析 RSS 并推送 qBittorrent；
-- 推送成功日志；
-- 日志脱敏；
-- 刷新确认弹窗；
-- 500 提示移除；
-- 发布文件版本与静态资源缓存参数。
+- Python `unittest`：147 项通过；
+- 覆盖 qBittorrent `Ok.` 假成功、任务标签回查、原始 Torrent 文件上传；
+- 覆盖新订阅首次刷新、推送日志、失败重试和并发等待；
+- 覆盖旧版假成功任务自动转为可重试错误；
+- 覆盖登录、订阅管理、原站番剧目录、跨站状态、通知、设置和数据库兼容。
 
 ## 静态检查
 
-- `python -m compileall -q app tests`：通过；
-- 所有 `app/static/*.js` 执行 `node --check`：通过；
-- `docker-compose.yml`：YAML 解析通过；
-- `docker-compose.fnos.yml`：YAML 解析通过；
-- `.github/workflows/docker-publish.yml`：YAML 解析通过；
-- `index.html`：126 个唯一 ID；
-- `login.html`：3 个唯一 ID；
-- `change-password.html`：7 个唯一 ID；
-- 运行版本：`1.17.2`；
-- 静态资源缓存参数：`v=1.17.2`。
-
-## 旧数据库兼容
-
-使用 FeedDock 1.17.1 创建 SQLite 数据库和订阅，再由 1.17.2 执行 `ensure_schema()`：
-
-```text
-migration ok 1 migration demo
-```
-
-本次不增加数据库字段，历史订阅和启用状态保持完整。
+- Python 全项目编译通过；
+- 6 个 JavaScript 文件通过 `node --check`；
+- Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
+- 主页面 126 个 HTML ID 均唯一；
+- 运行版本和静态资源缓存参数均为 `1.17.3`；
+- `git diff --check` 通过。
 
 ## 外部服务边界
 
-当前环境没有 Docker CLI，也没有可连接的真实 qBittorrent、Mikan、ANI.BT 或 Anime Garden 服务，因此未执行真实容器构建及外部端到端下载。
+当前环境未连接用户的真实 qBittorrent 和私有 RSS 站点。qBittorrent WebUI API 行为通过本地模拟服务验证，包含登录、添加、按标签查询任务、保存哈希和未查到任务的失败路径。
 
-qBittorrent 推送行为通过适配器模拟验证，覆盖 Web API 成功、失败重试、并发等待和日志输出。
+官方 qBittorrent WebUI API 支持通过 `torrents` 字段上传原始 Torrent 文件，也支持使用 `tag` 参数查询任务列表。FeedDock 1.17.3 同时使用这两项能力确认任务真实存在。
+
+## 数据库
+
+不新增数据库字段，不需要手工迁移。现有 `feed_items.torrent_hash` 用于保存 qBittorrent 回查得到的任务哈希。

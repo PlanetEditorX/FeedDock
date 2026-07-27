@@ -146,7 +146,8 @@ class RSSServiceTests(unittest.TestCase):
         }]
         fake_qbit = type("FakeQbit", (), {
             "add_url": lambda self, *_args, **_kwargs: DownloaderResult(
-                True, "任务已推送到 qBittorrent"
+                True, "qBittorrent 已确认任务：Auto refresh demo",
+                torrent_hash="auto-hash", verified=True,
             )
         })()
         with (
@@ -168,7 +169,7 @@ class RSSServiceTests(unittest.TestCase):
             self.assertEqual(item.status, "queued")
             messages = [row.message for row in db.query(SystemLog).order_by(SystemLog.id)]
             self.assertIn("新订阅自动刷新开始：Auto refresh demo", messages)
-            self.assertIn("已推送到下载器：Auto refresh demo", messages)
+            self.assertIn("qBittorrent 已确认任务：Auto refresh demo", messages)
             self.assertIn("新订阅自动刷新完成：Auto refresh demo", messages)
         engine.dispose()
 

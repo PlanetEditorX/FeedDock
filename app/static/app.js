@@ -1712,7 +1712,6 @@ document.getElementById('previewSubscription').addEventListener('click', async (
 document.getElementById('cancelSubscriptionEdit').addEventListener('click', () => { resetSubscriptionForm(); showAppView('subscriptions'); });
 
 document.getElementById('refreshNow').addEventListener('click', async () => {
-  if (!window.confirm('是否刷新全部订阅？')) return;
   try {
     const result = await api('/api/actions/refresh', { method: 'POST' });
     showNotice(`${result.message}，可在日志中查看检查与下载器推送进度`);

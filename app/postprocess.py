@@ -74,6 +74,32 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             item.rename_status = result.state
             item.rename_message = result.message[:2000]
             item.download_progress = max(0, min(100, int(result.progress or 0)))
+
+            created_at = item.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            missing_task_expired = (
+                result.state == "pending"
+                and result.message == "等待 qBittorrent 建立任务"
+                and (datetime.now(timezone.utc) - created_at).total_seconds() >= 120
+            )
+            if missing_task_expired:
+                item.status = "error"
+                item.reason = "qBittorrent 中未找到已记录的任务，请点击重试下载"
+                item.rename_status = "error"
+                item.rename_message = item.reason
+                session.add(
+                    SystemLog(
+                        level="ERROR",
+                        message="qBittorrent 中未找到已记录任务",
+                        details=(
+                            f"条目 ID：{item.id}\n任务标签：{item.qbit_tag}\n"
+                            f"标题：{item.title}\n处理：已标记为错误，可重新推送"
+                        ),
+                    )
+                )
+                stats["errors"] += 1
+                continue
             if result.torrent_hash:
                 item.torrent_hash = result.torrent_hash
                 tracker_policy = load_application_preferences(session).trackers

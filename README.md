@@ -1,20 +1,20 @@
 # FeedDock
 
-当前版本：`1.17.2`
+当前版本：`1.17.3`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
 
-## v1.17.2：订阅首次刷新与下载器推送日志
+## v1.17.3：qBittorrent 任务确认与种子文件直传
 
-- 新增订阅保存成功后，自动在后台检查该订阅一次；
-- 点击“刷新全部订阅”前显示确认弹窗，避免误触发全部 RSS 请求；
-- 手动刷新记录开始、逐订阅检查和最终汇总日志；
-- 下载器推送记录准备、重试、成功、失败、等待并发空位和等待定时推送；
-- 推送日志同时写入网页系统日志与 `/data/logs/feeddock.log`；
-- 日志不会记录完整 magnet 或带私密参数的 RSS 下载地址；
-- 日志页面移除“500 错误可按请求编号定位”的冗余提示。
+- “刷新全部订阅”点击后直接执行，不再显示二次确认；
+- qBittorrent 添加接口返回 `Ok.` 后，必须按唯一任务标签回查任务列表；
+- 只有查到实际任务名称、状态和哈希后，才记录“qBittorrent 已确认任务”；
+- HTTP/HTTPS `.torrent` 由 FeedDock 使用当前代理下载并上传原始文件，不再让 qBittorrent 自行抓取远程 URL；
+- 添加接口成功但任务列表不可见时，条目进入错误状态并可重试；
+- 旧版假成功记录若持续找不到 qBittorrent 任务，会自动转为可重试错误；
+- 日志保存任务标签、实际任务名称、状态和哈希，不输出 magnet、Torrent URL 或 passkey。
 
-详细执行链见 [`DOWNLOAD_REFRESH_LOGGING.md`](DOWNLOAD_REFRESH_LOGGING.md)。
+详细说明见 [`QBITTORRENT_PUSH_VERIFICATION.md`](QBITTORRENT_PUSH_VERIFICATION.md)。
 
 ## v1.17.1：容器 DNS 修复与网络诊断
 
@@ -286,7 +286,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.2
+FEEDDOCK_BUILD_VERSION=1.17.3
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

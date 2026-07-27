@@ -1,37 +1,24 @@
-# FeedDock 1.17.2 Git 提交说明
+# FeedDock 1.17.3 Git 提交说明
 
-## 推荐提交
+## 提交标题
 
 ```text
-fix(rss): 新订阅自动刷新并记录下载器推送日志
+fix(qbittorrent): 回查实际任务并直传种子文件
 ```
 
 ## 提交正文
 
 ```text
-- 新增订阅保存后自动检查该订阅一次
-- 刷新全部订阅前增加确认弹窗
-- 记录刷新开始、逐订阅检查和最终汇总
-- 记录下载器准备、重试、成功、失败与等待状态
-- 同时写入网页系统日志和文件日志
-- 避免在日志中输出完整 RSS、Torrent 或 magnet 地址
-- 移除日志页的 500 请求编号提示
-- 版本更新为 1.17.2
-```
-
-## 主要文件
-
-```text
-app/main.py
-app/rss_service.py
-app/static/app.js
-tests/test_auth_flow.py
-tests/test_deployment_files.py
-tests/test_rss_service.py
-tests/test_settings_features.py
-DOWNLOAD_REFRESH_LOGGING.md
+- 移除刷新全部订阅的二次确认
+- qBittorrent 添加成功后按唯一标签回查任务列表
+- 只有查询到实际任务后才记录推送成功
+- HTTP/HTTPS Torrent 由 FeedDock 下载后上传原始文件
+- 保存 qBittorrent 返回的任务哈希、名称和状态
+- 未找到任务时进入错误状态并允许重试
+- 自动修复旧版长期找不到任务的假成功记录
+- 增加假成功、种子上传、任务回查和历史恢复测试
 ```
 
 ## 数据库
 
-本次不增加数据库字段，不需要执行手工迁移。
+不新增数据库字段，无需手工迁移。现有 `torrent_hash` 字段用于保存回查确认的任务哈希。

@@ -28,6 +28,13 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         if self.path == "/api/v2/app/version":
             self._write(200, b"5.0.4")
             return
+        if self.path.startswith("/api/v2/torrents/info"):
+            self._write(
+                200,
+                b'[{"hash":"demo-hash","name":"Demo","state":"downloading","added_on":1}]',
+                "application/json",
+            )
+            return
         if self.path == "/repos/rate/limited/releases/latest":
             self._write(
                 403,
@@ -91,8 +98,12 @@ class IntegrationTests(unittest.TestCase):
         result = client.test()
         self.assertTrue(result.ok, result.message)
         self.assertIn("127.0.0.1", result.message)
-        added = client.add_url("magnet:?xt=urn:btih:DEMO", "/downloads/rss/Demo")
+        added = client.add_url(
+            "magnet:?xt=urn:btih:DEMO", "/downloads/rss/Demo", tags="feeddock-item-demo"
+        )
         self.assertTrue(added.ok, added.message)
+        self.assertTrue(added.verified)
+        self.assertEqual(added.torrent_hash, "demo-hash")
 
     def test_saved_web_settings_are_used_by_default_client(self):
         Base.metadata.create_all(bind=engine)

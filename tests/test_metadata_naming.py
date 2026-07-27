@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -235,6 +236,41 @@ class MetadataNamingTests(unittest.TestCase):
             self.assertIn("已移除", item.scrape_message)
             self.assertIsNotNone(item.completed_at)
             self.assertIsNone(item.scraped_at)
+
+    def test_missing_legacy_qbittorrent_task_becomes_retryable_error(self):
+        engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as db:
+            sub = Subscription(name="Legacy push", rss_url="https://example.com/rss")
+            db.add(sub)
+            db.flush()
+            item = FeedItem(
+                subscription_id=sub.id,
+                fingerprint="legacy-missing",
+                title="Legacy push - 03",
+                download_url="magnet:?xt=urn:btih:legacy",
+                status="queued",
+                qbit_tag="feeddock-item-legacy",
+                rename_status="pending",
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            )
+            db.add(item)
+            db.commit()
+
+            fake_qbit = SimpleNamespace(
+                normalize_single_video=lambda **_: TorrentNormalizeResult(
+                    False, "pending", "等待 qBittorrent 建立任务"
+                )
+            )
+            from app.postprocess import normalize_pending_items
+            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit):
+                result = normalize_pending_items(db)
+
+            db.refresh(item)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(item.status, "error")
+            self.assertIn("重试下载", item.reason)
 
     def test_local_scraper_is_disabled_without_writing_nfo(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -10,6 +10,7 @@ import threading
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import SessionLocal
 from .debug_logging import format_exception_details, log_event
-from .downloader import QBittorrentClient
+from .downloader import DownloaderResult, QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
 from .naming import is_video_file, media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
@@ -42,6 +43,49 @@ _DEFAULT_EPISODE_PATTERNS = (
     re.compile(r"-\s*0*(\d{1,4}(?:\.5)?)(?:\s*(?:v\d+)?\s*(?:\[|\(|$))", re.IGNORECASE),
     re.compile(r"\[\s*0*(\d{1,4}(?:\.5)?)\s*\]"),
 )
+_MAX_TORRENT_FILE_BYTES = 20 * 1024 * 1024
+
+
+def _torrent_filename(url: str, content_disposition: str = "") -> str:
+    match = re.search(r"filename\*?=(?:UTF-8\'\')?[\"']?([^\"';]+)", content_disposition or "", re.IGNORECASE)
+    value = unquote(match.group(1).strip()) if match else posixpath.basename(urlparse(url).path)
+    value = value.strip() or "feeddock.torrent"
+    if not value.casefold().endswith(".torrent"):
+        value += ".torrent"
+    return value
+
+
+def _download_torrent_file(
+    url: str,
+    db: Session,
+    *,
+    timeout: int,
+    source_url: str = "",
+) -> tuple[bytes, str]:
+    host = urlparse(url).hostname or "未知站点"
+    headers = {
+        "User-Agent": settings.rss_user_agent,
+        "Accept": "application/x-bittorrent, application/octet-stream, */*",
+    }
+    if source_url.startswith(("http://", "https://")):
+        headers["Referer"] = source_url
+    try:
+        response = external_get(url, db=db, headers=headers, timeout=timeout)
+        response.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(f"FeedDock 从 {host} 下载种子文件失败：{type(exc).__name__}") from exc
+
+    content = response.content
+    if not content:
+        raise RuntimeError(f"{host} 返回了空种子文件")
+    if len(content) > _MAX_TORRENT_FILE_BYTES:
+        raise RuntimeError(f"{host} 返回的种子文件超过 20 MiB 限制")
+    if not content.startswith(b"d") or b"4:info" not in content:
+        content_type = str(response.headers.get("content-type") or "").split(";", 1)[0]
+        raise RuntimeError(f"{host} 返回的内容不是有效的 BitTorrent 种子（{content_type or '未知类型'}）")
+    return content, _torrent_filename(url, str(response.headers.get("content-disposition") or ""))
+
+
 _LEGACY_DEFAULT_SAVE_PATH_TEMPLATES = {
     "{base}/{subscription}/Season {season}",
     "{base}/{subscription}/Season {season:02}",
@@ -475,18 +519,43 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
 
     attempts = preferences.download.retry_count + 1
     result = None
+    parsed_download = urlparse(item.download_url)
+    torrent_payload: bytes | None = None
+    torrent_filename = ""
     for attempt in range(attempts):
         try:
-            result = client.add_url(
-                item.download_url,
-                save_path,
-                rename=desired_name,
-                tags=item.qbit_tag,
-                seeding_minutes=preferences.download.seeding_minutes,
-            )
+            if parsed_download.scheme in {"http", "https"} and hasattr(client, "add_torrent"):
+                if torrent_payload is None:
+                    torrent_payload, torrent_filename = _download_torrent_file(
+                        item.download_url,
+                        db,
+                        timeout=preferences.rss.timeout_seconds,
+                        source_url=item.source_url,
+                    )
+                result = client.add_torrent(
+                    torrent_payload,
+                    torrent_filename,
+                    save_path,
+                    rename=desired_name,
+                    tags=item.qbit_tag,
+                    seeding_minutes=preferences.download.seeding_minutes,
+                )
+            else:
+                result = client.add_url(
+                    item.download_url,
+                    save_path,
+                    rename=desired_name,
+                    tags=item.qbit_tag,
+                    seeding_minutes=preferences.download.seeding_minutes,
+                )
         except TypeError:
             # Compatibility with third-party downloader test doubles and older adapters.
             result = client.add_url(item.download_url, save_path, rename=desired_name, tags=item.qbit_tag)
+        except Exception as exc:
+            result = DownloaderResult(False, str(exc))
+            torrent_payload = None
+        if result.ok and not getattr(result, "verified", True):
+            result = DownloaderResult(False, "qBittorrent 未返回可验证的任务记录")
         if result.ok:
             break
         if attempt + 1 < attempts:
@@ -504,22 +573,26 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     if result.ok:
         item.status = "queued"
         item.reason = result.message
+        item.torrent_hash = result.torrent_hash or item.torrent_hash
         item.rename_status = "pending"
         item.rename_message = "等待 qBittorrent 获取文件列表并完成下载"
         add_log(
             db,
             "INFO",
-            f"已推送到下载器：{subscription.name}",
+            f"qBittorrent 已确认任务：{subscription.name}",
             _download_log_details(
                 item, subscription,
-                extra=f"结果：{result.message}；实际尝试 {attempt + 1} 次",
+                extra=(
+                    f"结果：{result.message}；实际尝试 {attempt + 1} 次"
+                    + (f"；任务哈希：{result.torrent_hash}" if result.torrent_hash else "")
+                ),
             ),
         )
         send_notification(
             db,
             "download_started",
             f"开始下载：{subscription.name}",
-            f"第 {item.episode or '?'} 集已推送到 qBittorrent。\n{item.title}",
+            f"第 {item.episode or '?'} 集已在 qBittorrent 中确认。\n{item.title}",
             subscription=subscription,
             item=item,
         )

@@ -30,11 +30,21 @@ class _FakeHttpResponse:
     status_code = 200
     text = "Ok."
 
+    def __init__(self, payload=None):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
 
 class _FakeQbitHttpClient:
-    def __init__(self) -> None:
+    def __init__(self, torrents=None) -> None:
         self.add_files = None
         self.posts = []
+        self.torrents = torrents if torrents is not None else []
 
     def __enter__(self): return self
     def __exit__(self, *_args): return False
@@ -44,6 +54,11 @@ class _FakeQbitHttpClient:
         if path.endswith("torrents/add"):
             self.add_files = files
         return _FakeHttpResponse()
+
+    def get(self, path, params=None):
+        if path.endswith("torrents/info"):
+            return _FakeHttpResponse(self.torrents)
+        return _FakeHttpResponse([])
 
 
 class ApplicationSettingsTests(unittest.TestCase):
@@ -91,12 +106,47 @@ class ApplicationSettingsTests(unittest.TestCase):
             self.save_preferences(auto_skip_existing=True)
 
     def test_qbittorrent_add_includes_seeding_limit(self):
-        fake = _FakeQbitHttpClient()
+        fake = _FakeQbitHttpClient([{"hash": "demo-hash", "name": "Demo", "state": "downloading"}])
         client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
         with patch.object(client, "_client", return_value=fake), patch.object(client, "_login", return_value=DownloaderResult(True, "ok")):
-            result = client.add_url("magnet:?xt=urn:btih:demo", "/media/Demo", seeding_minutes=120)
+            result = client.add_url(
+                "magnet:?xt=urn:btih:demo", "/media/Demo",
+                tags="feeddock-item-demo", seeding_minutes=120,
+            )
         self.assertTrue(result.ok)
+        self.assertTrue(result.verified)
+        self.assertEqual(result.torrent_hash, "demo-hash")
         self.assertEqual(fake.add_files["seedingTimeLimit"][1], "120")
+
+    def test_qbittorrent_uploads_raw_torrent_file_and_verifies_it(self):
+        fake = _FakeQbitHttpClient([{"hash": "file-hash", "name": "Episode 03", "state": "downloading"}])
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with patch.object(client, "_client", return_value=fake), patch.object(client, "_login", return_value=DownloaderResult(True, "ok")):
+            result = client.add_torrent(
+                b"d4:infod4:name4:demoee",
+                "episode-03.torrent",
+                "/media/Demo",
+                tags="feeddock-item-file",
+            )
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.verified)
+        self.assertEqual(result.torrent_hash, "file-hash")
+        self.assertIn("torrents", fake.add_files)
+        self.assertEqual(fake.add_files["torrents"][0], "episode-03.torrent")
+
+    def test_qbittorrent_ok_without_visible_task_is_failure(self):
+        fake = _FakeQbitHttpClient([])
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with (
+            patch.object(client, "_client", return_value=fake),
+            patch.object(client, "_login", return_value=DownloaderResult(True, "ok")),
+            patch("app.downloader.time.sleep"),
+        ):
+            result = client.add_url(
+                "magnet:?xt=urn:btih:missing", "/media/Demo", tags="feeddock-item-missing"
+            )
+        self.assertFalse(result.ok)
+        self.assertIn("未在任务列表中找到", result.message)
 
     def test_existing_video_auto_skip_uses_normalized_target_name(self):
         with tempfile.TemporaryDirectory() as root:
@@ -222,20 +272,58 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.db.flush()
         self.save_preferences(concurrent_limit=0, retry_count=1)
         fake = SimpleNamespace(
-            add_url=lambda *_args, **_kwargs: DownloaderResult(True, "任务已推送到 qBittorrent")
+            add_url=lambda *_args, **_kwargs: DownloaderResult(True, "qBittorrent 已确认任务：Demo", torrent_hash="hash-demo", verified=True)
         )
         with patch("app.rss_service.QBittorrentClient", return_value=fake):
             ok, message = _push_feed_item(self.db, item, sub)
         self.db.commit()
 
         self.assertTrue(ok)
-        self.assertIn("已推送", message)
+        self.assertIn("已确认", message)
         messages = [row.message for row in self.db.query(SystemLog).order_by(SystemLog.id)]
         self.assertIn("准备推送到下载器：Demo", messages)
-        self.assertIn("已推送到下载器：Demo", messages)
+        self.assertIn("qBittorrent 已确认任务：Demo", messages)
         details = "\n".join(row.details for row in self.db.query(SystemLog))
         self.assertIn("任务标签：feeddock-item-", details)
         self.assertNotIn("magnet:?", details)
+
+    def test_http_torrent_is_downloaded_by_feeddock_and_uploaded_to_qbittorrent(self):
+        sub = Subscription(name="HTTP torrent", rss_url="https://example.test/rss", rename_enabled=False)
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="http-torrent",
+            title="HTTP torrent - 01",
+            source_url="https://example.test/post/1",
+            download_url="https://example.test/files/1.torrent?passkey=secret",
+            episode="1",
+        )
+        self.db.add(item)
+        self.db.flush()
+        self.save_preferences(concurrent_limit=0, retry_count=0)
+        calls = []
+        fake = SimpleNamespace(
+            add_torrent=lambda content, filename, *_args, **_kwargs: (
+                calls.append((content, filename, _kwargs))
+                or DownloaderResult(
+                    True, "qBittorrent 已确认任务：HTTP torrent",
+                    torrent_hash="torrent-hash", verified=True,
+                )
+            )
+        )
+        with (
+            patch("app.rss_service.QBittorrentClient", return_value=fake),
+            patch(
+                "app.rss_service._download_torrent_file",
+                return_value=(b"d4:infod4:name4:demoee", "episode-01.torrent"),
+            ),
+        ):
+            ok, message = _push_feed_item(self.db, item, sub)
+        self.assertTrue(ok, message)
+        self.assertEqual(calls[0][1], "episode-01.torrent")
+        self.assertEqual(item.torrent_hash, "torrent-hash")
+        self.assertNotIn("passkey", message)
 
     def test_push_waits_when_concurrent_limit_is_full(self):
         sub = Subscription(name="Demo", rss_url="https://example.test/rss", rename_enabled=False)

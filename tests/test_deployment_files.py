@@ -143,14 +143,14 @@ class DeploymentFileTests(unittest.TestCase):
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
-        self.assertIn("window.confirm('是否刷新全部订阅？')", script)
+        self.assertNotIn("window.confirm('是否刷新全部订阅？')", script)
         self.assertIn("订阅已保存，正在自动刷新一次", script)
         self.assertNotIn("500 错误可按提示中的请求编号", script)
         self.assertIn("background_tasks.add_task", main)
         self.assertIn('trigger="subscription-created"', main)
         self.assertIn("def refresh_subscription(", rss_service)
         self.assertIn("准备推送到下载器", rss_service)
-        self.assertIn("已推送到下载器", rss_service)
+        self.assertIn("qBittorrent 已确认任务", rss_service)
         self.assertIn("刷新全部订阅完成", rss_service)
 
     def test_subscription_submit_keeps_form_reference_across_await(self) -> None:

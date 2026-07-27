@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import posixpath
+import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -16,6 +17,9 @@ from .runtime_config import load_qbittorrent_config
 class DownloaderResult:
     ok: bool
     message: str
+    torrent_hash: str = ""
+    torrent_name: str = ""
+    verified: bool = False
 
 
 @dataclass(slots=True)
@@ -106,6 +110,109 @@ class QBittorrentClient:
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"连接失败：{exc}")
 
+    @staticmethod
+    def _add_form_fields(
+        *,
+        save_path: str,
+        category: str,
+        rename: str,
+        tags_value: str,
+        seeding_minutes: int,
+    ) -> dict[str, str]:
+        fields = {
+            "savepath": save_path,
+            "category": category,
+            "paused": "false",
+        }
+        if rename:
+            fields["rename"] = safe_segment(rename)
+        if tags_value:
+            fields["tags"] = tags_value
+        if seeding_minutes >= 0:
+            fields["seedingTimeLimit"] = str(seeding_minutes)
+        return fields
+
+    @staticmethod
+    def _response_error(response: httpx.Response) -> str:
+        if response.status_code != 200:
+            return f"添加任务失败：HTTP {response.status_code}"
+        body = response.text.strip()
+        if body not in {"Ok.", ""}:
+            return f"添加任务失败：{body}"
+        return ""
+
+    def _verify_added_torrent(
+        self,
+        client: httpx.Client,
+        *,
+        tag: str,
+        attempts: int = 10,
+        interval: float = 0.3,
+    ) -> DownloaderResult:
+        if not tag:
+            return DownloaderResult(
+                True,
+                "qBittorrent 已接受添加请求，但缺少任务标签，无法确认任务是否建立",
+                verified=False,
+            )
+
+        last_error = ""
+        for attempt in range(max(1, attempts)):
+            try:
+                response = client.get(
+                    "api/v2/torrents/info",
+                    params={"tag": tag, "sort": "added_on", "reverse": "true"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, list):
+                    last_error = "qBittorrent 返回了无效的任务列表"
+                elif payload:
+                    torrent = payload[0]
+                    torrent_hash = str(torrent.get("hash") or "").strip()
+                    torrent_name = str(torrent.get("name") or "").strip()
+                    state = str(torrent.get("state") or "").strip()
+                    message = "qBittorrent 已确认任务"
+                    if torrent_name:
+                        message += f"：{torrent_name}"
+                    if state:
+                        message += f"；状态：{state}"
+                    return DownloaderResult(
+                        True,
+                        message,
+                        torrent_hash=torrent_hash,
+                        torrent_name=torrent_name,
+                        verified=True,
+                    )
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                last_error = str(exc)
+            if attempt + 1 < attempts:
+                time.sleep(interval)
+
+        detail = f"；回查错误：{last_error}" if last_error else ""
+        return DownloaderResult(
+            False,
+            "qBittorrent 添加接口返回成功，但未在任务列表中找到新任务"
+            f"（标签：{tag}）{detail}",
+            verified=False,
+        )
+
+    def _finish_add(
+        self,
+        client: httpx.Client,
+        response: httpx.Response,
+        *,
+        tag: str,
+        rename: str,
+    ) -> DownloaderResult:
+        error = self._response_error(response)
+        if error:
+            return DownloaderResult(False, error)
+        verified = self._verify_added_torrent(client, tag=tag)
+        if verified.ok and rename and not verified.torrent_name:
+            verified.message += f"；请求名称：{safe_segment(rename)}"
+        return verified
+
     def add_url(
         self,
         url: str,
@@ -128,29 +235,68 @@ class QBittorrentClient:
                 login = self._login(client)
                 if not login.ok:
                     return login
-
-                files: dict[str, tuple[None, str]] = {
-                    "urls": (None, url),
-                    "savepath": (None, save_path),
-                    "category": (None, category or self.category),
-                    "paused": (None, "false"),
-                }
-                if rename:
-                    files["rename"] = (None, safe_segment(rename))
-                if tags_value:
-                    files["tags"] = (None, tags_value)
-                if seeding_minutes >= 0:
-                    files["seedingTimeLimit"] = (None, str(seeding_minutes))
+                fields = self._add_form_fields(
+                    save_path=save_path,
+                    category=category or self.category,
+                    rename=rename,
+                    tags_value=tags_value,
+                    seeding_minutes=seeding_minutes,
+                )
+                files = {key: (None, value) for key, value in fields.items()}
+                files["urls"] = (None, url)
                 response = client.post("api/v2/torrents/add", files=files)
-                if response.status_code != 200:
-                    return DownloaderResult(False, f"添加任务失败：HTTP {response.status_code}")
-                body = response.text.strip()
-                if body not in {"Ok.", ""}:
-                    return DownloaderResult(False, f"添加任务失败：{body}")
-                message = "任务已推送到 qBittorrent"
-                if rename:
-                    message += f"；任务名称：{safe_segment(rename)}"
-                return DownloaderResult(True, message)
+                return self._finish_add(
+                    client, response, tag=tags_value.split(",", 1)[0].strip(), rename=rename
+                )
+        except httpx.HTTPError as exc:
+            return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
+
+    def add_torrent(
+        self,
+        content: bytes,
+        filename: str,
+        save_path: str,
+        category: str | None = None,
+        *,
+        rename: str = "",
+        tags: str | Iterable[str] = "",
+        seeding_minutes: int = -1,
+    ) -> DownloaderResult:
+        error = self._configuration_error()
+        if error:
+            return DownloaderResult(False, error)
+        if not content:
+            return DownloaderResult(False, "种子文件内容为空")
+        if isinstance(tags, str):
+            tags_value = tags.strip()
+        else:
+            tags_value = ",".join(value.strip() for value in tags if value.strip())
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return login
+                data = self._add_form_fields(
+                    save_path=save_path,
+                    category=category or self.category,
+                    rename=rename,
+                    tags_value=tags_value,
+                    seeding_minutes=seeding_minutes,
+                )
+                response = client.post(
+                    "api/v2/torrents/add",
+                    data=data,
+                    files={
+                        "torrents": (
+                            safe_segment(filename or "feeddock.torrent"),
+                            content,
+                            "application/x-bittorrent",
+                        )
+                    },
+                )
+                return self._finish_add(
+                    client, response, tag=tags_value.split(",", 1)[0].strip(), rename=rename
+                )
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
 
