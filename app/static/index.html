@@ -7,7 +7,7 @@
 <title>FeedDock</title>
 <link href="/static/feeddock-icon.png" rel="icon" type="image/png"/>
 <script>try{document.documentElement.dataset.themeColor=localStorage.getItem("feeddock-theme-color")||"blue"}catch(_){}</script>
-<link href="/static/styles.css?v=1.17.6" rel="stylesheet"/>
+<link href="/static/styles.css?v=1.17.7" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
@@ -85,7 +85,7 @@
 <label class="checkbox-label"><input name="clear_password" type="checkbox"/>清除已经保存的密码</label>
 <div class="form-actions wide"><button type="submit">保存配置</button><button class="secondary" id="saveAndTestDownloader" type="button">保存并测试连接</button><button class="secondary" id="restoreDownloaderConfig" type="button">恢复 Compose 默认</button></div>
 </form>
-<p class="hint panel-body">qBittorrent 与 FeedDock 必须把同一个宿主机媒体目录挂载为同一个容器路径，推荐统一使用 <code>/media</code>。</p>
+<p class="hint panel-body">qBittorrent 与 FeedDock 必须访问同一个宿主机媒体目录，但容器内路径可以不同。qBittorrent 保存根目录在这里配置；FeedDock 自己看到的路径在“刮削设置”中配置。</p>
 </section>
 <section class="panel hidden" data-app-view="settings-scrape" data-panel-id="metadata-settings">
 <div class="panel-head"><div><h2>刮削设置</h2><p id="metadataConfigState">同步外部元数据，并在下载完成后写入 NFO、海报和背景图。</p></div></div>
@@ -100,17 +100,17 @@
 <label class="wide">Bangumi Access Token（公开查询通常可留空）<input autocomplete="new-password" name="bangumi_access_token" placeholder="留空保留已保存 Token" type="password"/></label>
 <label class="checkbox-label"><input name="clear_bangumi_token" type="checkbox"/>清除 Bangumi Token</label>
 <label>元数据语言<input name="metadata_language" placeholder="zh-CN" value="zh-CN"/></label>
-<label>本地媒体挂载目录（与 qBittorrent 自动同步）<input name="media_local_root" placeholder="/media" readonly="" required=""/></label>
+<label>FeedDock 本地媒体挂载目录<input name="media_local_root" placeholder="/media" required=""/><small>填写 FeedDock 容器中实际可见的挂载路径。可与 qBittorrent 保存根目录不同。</small></label>
 <div class="form-actions wide"><button type="submit">保存元数据配置</button><button class="secondary" id="restoreMetadataSettings" type="button">恢复 Compose 默认</button></div>
 </form>
-<p class="hint panel-body">下载完成后自动刮削会先同步标题、评分、简介、海报和总集数，再在媒体目录写入 tvshow.nfo、season.nfo、剧集同名 NFO、poster 与 fanart。路径必须与 qBittorrent 使用同一个容器挂载。启用 bangumi.ini 后还会写入 Bangumi ID。</p>
+<p class="hint panel-body">下载完成后自动刮削会先同步标题、评分、简介、海报和总集数，再在媒体目录写入 tvshow.nfo、season.nfo、剧集同名 NFO、poster 与 fanart。qBittorrent 保存根目录和 FeedDock 本地挂载目录可以不同，但必须映射到同一个宿主机目录，例如 qBittorrent 使用 /vol2/1000/影视，FeedDock 使用 /media。启用 bangumi.ini 后还会写入 Bangumi ID。</p>
 </section>
 <section class="panel hidden" data-app-view="settings-rss" data-panel-id="automation-settings"><div class="panel-head"><div><h2>RSS 设置</h2><p>控制 RSS 读取、超时、自动跳过和完结停用；下载完成状态每 2 分钟检查一次。</p></div></div><div class="panel-body"><form class="form-grid" id="automationSettingsForm">
 <label class="checkbox-label wide"><input name="rss_enabled" type="checkbox" checked=""/>启用 RSS 自动检查</label>
 <label>RSS 间隔（分钟）<input max="1440" min="5" name="rss_poll_interval_minutes" required="" type="number" value="30"/></label>
 <label>RSS 超时（秒）<input max="300" min="5" name="rss_timeout_seconds" required="" type="number" value="20"/></label>
 <label class="checkbox-label wide"><input name="auto_skip_existing" type="checkbox"/>文件已下载自动跳过</label>
-<p class="hint wide">此选项必须为全部启用订阅开启“自动重命名”。下载工具与 FeedDock Docker 必须将同一目录挂载为一致路径，否则无法可靠判断文件是否已存在。</p>
+<p class="hint wide">此选项必须为全部启用订阅开启“自动重命名”。下载工具与 FeedDock Docker 必须访问同一宿主机目录；容器内路径不同会按下载根目录与本地挂载根目录自动映射。</p>
 <details class="setting-details wide"><summary>详细说明</summary><p>FeedDock 只检查计算出的目标季度目录，并按规范文件名进行完整匹配，不递归扫描整个媒体库。启用后，新增、编辑、导入或批量启用关闭了自动重命名的订阅都会被后端拒绝。</p></details>
 <label class="checkbox-label wide"><input name="auto_disable_complete" type="checkbox"/>根据 Bangumi 获取总集数；全部集数下载完成后自动禁用订阅</label>
 <label class="checkbox-label"><input name="download_enabled" type="checkbox"/>下载任务等待统一时间再推送</label>
@@ -206,7 +206,7 @@
 <details class="subscription-advanced"><summary>集数规则</summary><div class="advanced-section-body form-grid"><label class="wide">参考 RSS 标题<input name="sample_title" placeholder="粘贴真实标题用于预览"/></label><label>自定义集数正则<input name="episode_regex" placeholder="例如：\d+(\.5)?"/></label><label>捕获组<input max="20" min="0" name="episode_group" type="number" value="0"/></label><label>集数偏移<input max="10000" min="-10000" name="episode_offset" type="number" value="0"/></label><label>总集数<input max="10000" min="0" name="total_episodes" type="number" value="0"/></label><label>集数来源<input name="total_episodes_source" placeholder="TMDB/Bangumi/手动" readonly=""/></label><label class="checkbox-label"><input name="total_episodes_locked" type="checkbox"/>锁定总集数，禁止自动覆盖</label></div></details>
 <details class="subscription-advanced"><summary>规范命名与下载</summary><div class="advanced-section-body form-grid">
 <label class="wide">保存路径模板<input name="save_path_template" required="" value="{base}/{media_folder}/Season {season:02}"/></label>
-<label class="wide">统一下载根目录（与 qBittorrent 自动同步）<input name="custom_download_path" placeholder="/media" readonly=""/></label>
+<label class="wide">qBittorrent 下载根目录<input name="custom_download_path" placeholder="/media" readonly=""/></label>
 <label class="wide">文件名模板<input name="file_name_template" required="" value="{title} - S{season:02}E{episode:02}"/></label>
 <label class="checkbox-label"><input checked="" name="rename_enabled" type="checkbox"/>下载后通过 qBittorrent 规范化文件名</label>
 <label class="checkbox-label"><input name="missing_detection" type="checkbox"/>遗漏检测</label><label class="checkbox-label"><input name="only_latest" type="checkbox"/>只下载最新集</label><label class="checkbox-label"><input name="auto_disable_when_complete" type="checkbox"/>全部下载完成后自动停用</label><label>连续未更新告警（天，0 关闭）<input max="3650" min="0" name="stale_days" type="number" value="0"/></label><label class="checkbox-label"><input checked="" name="enabled" type="checkbox"/>启用订阅</label>
@@ -226,8 +226,8 @@
 <div class="import-body"><p class="muted" id="subscriptionImportHint">选择 FeedDock 导出的 JSON 文件，或直接粘贴 JSON。</p><label>JSON 文件<input accept="application/json,.json" id="subscriptionImportFile" type="file"/></label><label>订阅 JSON<textarea id="subscriptionImportJson" placeholder='{"subscriptions":[{"name":"示例","rss_url":"https://example.com/feed.xml"}]}' rows="14"></textarea></label><label>RSS 地址冲突<select id="subscriptionImportConflict"><option value="skip">跳过已有订阅</option><option value="update">更新已有订阅</option></select></label><div class="form-actions"><button id="confirmSubscriptionImport" type="button">开始导入</button><button class="secondary" id="cancelSubscriptionImport" type="button">取消</button></div></div></section>
 </div><div aria-labelledby="metadataReviewTitle" aria-modal="true" class="modal hidden" id="metadataReviewModal" role="dialog"><div class="modal-backdrop" data-close-metadata-review=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMetadataReview" type="button">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"/></label><button id="reviewSearch" type="button">搜索</button><button class="secondary" id="reviewSkip" type="button">完全跳过</button></div><div class="metadata-results muted" id="reviewResults">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
 <div aria-labelledby="mikanDetailTitle" aria-modal="true" class="modal hidden" id="mikanDetailModal" role="dialog"><div class="modal-backdrop" data-close-mikan-modal=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan" id="catalogDetailBadge">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMikanModal" type="button">×</button></div><div class="mikan-detail-body" id="mikanDetailBody"></div></section></div>
-<script defer="" src="/static/mikan-subscription-state.js?v=1.17.6"></script>
-<script defer="" src="/static/subscription-sources.js?v=1.17.6"></script>
-<script defer="" src="/static/navigation.js?v=1.17.6"></script><script defer="" src="/static/app.js?v=1.17.6"></script>
+<script defer="" src="/static/mikan-subscription-state.js?v=1.17.7"></script>
+<script defer="" src="/static/subscription-sources.js?v=1.17.7"></script>
+<script defer="" src="/static/navigation.js?v=1.17.7"></script><script defer="" src="/static/app.js?v=1.17.7"></script>
 </body>
 </html>

@@ -325,7 +325,8 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
         self.assertIn('chown -R 0:0 /app /data /media', dockerfile)
         self.assertIn('_number("PUID", 0)', entrypoint)
-        self.assertIn('name="media_local_root" placeholder="/media" readonly', index)
+        self.assertIn('name="media_local_root" placeholder="/media" required', index)
+        self.assertIn('可与 qBittorrent 保存根目录不同', index)
         self.assertIn('name="custom_download_path" placeholder="/media" readonly', index)
         self.assertIn("currentDownloadRoot = '/media'", script)
 
@@ -336,6 +337,8 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('id="clearSystemLogs"', index)
         self.assertIn("className = 'subscription-poster'", script)
         self.assertIn('sub.metadata_overview', script)
+        self.assertIn("text('button', '刮削'", script)
+        self.assertIn('/api/subscriptions/${sub.id}/scrape', script)
         self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', false)", script)
         self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 

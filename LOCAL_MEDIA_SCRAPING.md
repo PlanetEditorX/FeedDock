@@ -1,21 +1,22 @@
-# FeedDock 1.17.6 本地媒体库刮削
+# FeedDock 1.17.7 本地媒体库刮削
 
 ## 为什么 1.17.4 没有文件
 
 1.17.4 的“自动刮削”只调用元数据服务，并将结果保存在 SQLite 的订阅字段中。旧 `app/scraper.py` 明确返回“已移除本地 NFO/图片刮削”，因此媒体目录不会出现 NFO、海报或背景图。
 
-1.17.6 恢复了受媒体根目录约束的本地旁车文件写入。
+1.17.5 恢复了受媒体根目录约束的本地旁车文件写入；1.17.7 增加 qBittorrent 路径到 FeedDock 本地挂载路径的映射。
 
 ## 路径要求
 
-qBittorrent 和 FeedDock 必须将同一个宿主机目录挂载为相同容器路径。例如：
+qBittorrent 和 FeedDock 必须访问同一个宿主机目录，但容器内路径可以不同。例如：
 
 ```yaml
-volumes:
-  - /vol1/1000/Media:/media
+qBittorrent 下载根目录：/vol2/1000/影视
+FeedDock volumes：/vol2/1000/影视:/media
+FeedDock 本地媒体挂载目录：/media
 ```
 
-并在下载设置中使用 `/media` 作为统一根目录。FeedDock 不接受将 qBittorrent 的 `/downloads` 映射到 FeedDock 的 `/media` 之类不一致路径，因为无法可靠确认实际文件位置。
+FeedDock 会保留 qBittorrent 根目录下面的相对路径并拼接到 `/media`。例如 `/vol2/1000/影视/Show/Season 01` 会映射为 `/media/Show/Season 01`。映射后仍执行根目录越界保护。
 
 ## 自动流程
 
@@ -38,6 +39,8 @@ qBittorrent 下载完成
 ```
 
 任务会遍历 FeedDock 中所有带 `completed_at` 的下载条目。清理过页面历史的条目仍保留去重记录并可以补写。
+
+每张订阅卡片也提供“刮削”按钮，只处理当前订阅的已完成条目。
 
 ## 媒体服务器扫描
 

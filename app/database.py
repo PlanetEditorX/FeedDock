@@ -193,6 +193,49 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+    # Releases through 1.17.6 forced qBittorrent's save root and FeedDock's
+    # local media mount to the same literal path.  On fnOS the qBittorrent
+    # path may be a host-style path such as /vol2/1000/影视 while FeedDock sees
+    # the same directory at /media.  Restore the Compose-local mount once when
+    # the old forced value is still present.
+    marker = "migration:1.17.7:separate-media-paths"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            qbit_root = connection.execute(
+                text("SELECT value FROM app_settings WHERE key = 'download_path'")
+            ).scalar_one_or_none() or settings.download_path
+            current_local = connection.execute(
+                text("SELECT value FROM app_settings WHERE key = 'media_local_root'")
+            ).scalar_one_or_none()
+            configured_local = str(settings.media_local_root or "").strip().rstrip("/")
+            if configured_local and configured_local != str(qbit_root).strip().rstrip("/"):
+                if current_local is None:
+                    connection.execute(
+                        text(
+                            "INSERT INTO app_settings (key, value, updated_at) "
+                            "VALUES ('media_local_root', :value, CURRENT_TIMESTAMP)"
+                        ),
+                        {"value": configured_local},
+                    )
+                elif str(current_local).strip().rstrip("/") == str(qbit_root).strip().rstrip("/"):
+                    connection.execute(
+                        text(
+                            "UPDATE app_settings SET value = :value, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE key = 'media_local_root'"
+                        ),
+                        {"value": configured_local},
+                    )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
+
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()

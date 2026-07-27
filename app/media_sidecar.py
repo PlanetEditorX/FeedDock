@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import os
 import tempfile
 
 from .models import FeedItem, Subscription
+from .media_paths import map_downloader_path_to_local
 from .runtime_config import MetadataConfig
 
 
@@ -15,19 +15,6 @@ class SidecarResult:
     state: str
     message: str
     path: str = ""
-
-
-def _safe_directory(path_value: str, root_value: str) -> Path | None:
-    if not path_value or not root_value:
-        return None
-    try:
-        root = Path(root_value).resolve(strict=False)
-        target = Path(path_value).resolve(strict=False)
-        if target != root and root not in target.parents:
-            return None
-        return target
-    except (OSError, RuntimeError, ValueError):
-        return None
 
 
 def write_bangumi_ini(
@@ -40,9 +27,14 @@ def write_bangumi_ini(
     bangumi_id = int(subscription.bangumi_id or 0)
     if bangumi_id <= 0:
         return SidecarResult(True, "skipped", "订阅没有 Bangumi ID")
-    directory = _safe_directory(item.save_path, config.media_local_root)
-    if directory is None:
-        return SidecarResult(False, "error", "下载目录不在允许的媒体根目录内")
+    try:
+        directory = map_downloader_path_to_local(
+            item.save_path,
+            getattr(config, "downloader_root", config.media_local_root),
+            config.media_local_root,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return SidecarResult(False, "error", f"无法映射下载目录：{exc}")
     try:
         if (subscription.media_type or "tv") != "movie" and directory.name.casefold().startswith("season "):
             directory = directory.parent

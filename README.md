@@ -1,8 +1,18 @@
 # FeedDock
 
-当前版本：`1.17.6`
+当前版本：`1.17.7`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名、把任务推送到 qBittorrent，并在下载完成后向媒体目录写入标准 NFO、海报和背景图。飞牛影视、Emby、Jellyfin 等媒体服务器仍负责扫描媒体目录并建立自身索引。
+
+## v1.17.7：下载器路径映射与单订阅刮削
+
+- qBittorrent 保存路径与 FeedDock 容器内媒体挂载路径不再要求字符串完全一致；
+- 按两个根目录的相对路径自动映射，例如 `/vol2/1000/影视/番剧` 映射到 `/media/番剧`；
+- 旧版被强制保存成 qBittorrent 路径的 `media_local_root` 会在升级时恢复为 Compose 的 `MEDIA_LOCAL_ROOT`；
+- 每张订阅卡片新增“刮削”按钮，只处理该订阅已经完成的下载条目；
+- 路径错误会同时显示 qBittorrent 路径、下载根目录、FeedDock 本地根目录和最终映射路径。
+
+详细说明见 [`MEDIA_PATH_MAPPING_1.17.7.md`](MEDIA_PATH_MAPPING_1.17.7.md)。
 
 
 ## v1.17.6：默认目录使用名称与年份
@@ -185,9 +195,10 @@ QBIT_URL=http://你的-qBittorrent:8080
 QBIT_USERNAME=admin
 QBIT_PASSWORD=替换为真实密码
 DOWNLOAD_PATH=/media
+MEDIA_LOCAL_ROOT=/media
 ```
 
-`DOWNLOAD_PATH` 必须是 qBittorrent 能识别的路径。Docker 部署时，FeedDock 和 qBittorrent 应把同一个宿主机目录挂载到相同容器路径，推荐统一为 `/media`。
+`DOWNLOAD_PATH` 是 qBittorrent 能识别的保存根目录；`MEDIA_LOCAL_ROOT` 是 FeedDock 容器中实际可见的媒体挂载目录。二者可以不同，但必须指向同一个宿主机目录。统一使用 `/media` 最简单；飞牛宿主机 qBittorrent 使用 `/vol2/1000/影视` 时，也可以让 FeedDock 使用 `/media` 并自动映射。
 
 ### 2. 启动
 
@@ -304,7 +315,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.6
+FEEDDOCK_BUILD_VERSION=1.17.7
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

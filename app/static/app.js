@@ -479,7 +479,7 @@ async function loadMetadataSettings() {
   form.elements.media_local_root.value = data.media_local_root || currentDownloadRoot;
   form.elements.clear_tmdb_token.checked = false;
   form.elements.clear_bangumi_token.checked = false;
-  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · NFO/图片刮削 ${data.auto_scrape_enabled ? '已启用' : '未启用'} · bangumi.ini ${data.bangumi_ini_enabled ? '已启用' : '未启用'}`;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · NFO/图片刮削 ${data.auto_scrape_enabled ? '已启用' : '未启用'} · qBittorrent 根目录 ${data.downloader_root || currentDownloadRoot} → FeedDock ${data.media_local_root || currentDownloadRoot} · bangumi.ini ${data.bangumi_ini_enabled ? '已启用' : '未启用'}`;
 }
 
 function metadataSettingsPayload() {
@@ -1240,9 +1240,10 @@ function renderSubscriptions(data) {
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
+    const scrape = text('button', '刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape`, { method: 'POST' }); showNotice(`${result.message}，共 ${result.items} 个已完成条目`); window.setTimeout(reloadAll, 2500); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
     const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); selectedSubscriptionIds.delete(sub.id); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
-    controls.append(edit, sync, toggle, remove); content.append(controls); card.append(content); container.append(card);
+    controls.append(edit, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
   }
   updateSubscriptionSelectionSummary();
 }
@@ -1535,7 +1536,6 @@ document.getElementById('downloaderForm').elements.download_path.addEventListene
   const value = event.currentTarget.value.trim();
   if (!value) return;
   currentDownloadRoot = value;
-  document.getElementById('metadataSettingsForm').elements.media_local_root.value = value;
   if (!subscriptionForm.elements.subscription_id.value) subscriptionForm.elements.custom_download_path.value = value;
 });
 

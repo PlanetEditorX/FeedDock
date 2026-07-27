@@ -354,6 +354,43 @@ class MetadataNamingTests(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertIn("不在允许的媒体根目录", result.message)
 
+    def test_local_scraper_maps_qbittorrent_path_to_feeddock_mount(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local_root = Path(tmp)
+            season = local_root / "感谢对战。～大小姐才不玩格斗游戏～ (2026)" / "Season 01"
+            season.mkdir(parents=True)
+            video = season / "感谢对战。～大小姐才不玩格斗游戏～ - S01E03.mkv"
+            video.write_bytes(b"video")
+            sub = self.subscription(
+                id=8,
+                name="感谢对战。～大小姐才不玩格斗游戏～",
+                manual_title="感谢对战。～大小姐才不玩格斗游戏～",
+                season=1,
+                metadata_overview="",
+                metadata_rating=0.0,
+                metadata_source="bangumi",
+                poster_url="",
+                backdrop_url="",
+                anilist_id=0,
+            )
+            item = SimpleNamespace(
+                id=29,
+                episode="3",
+                title="Episode 3",
+                desired_name="感谢对战。～大小姐才不玩格斗游戏～ - S01E03",
+                save_path="/vol2/1000/影视/感谢对战。～大小姐才不玩格斗游戏～ (2026)/Season 01",
+                published_at=None,
+            )
+            config = SimpleNamespace(
+                downloader_root="/vol2/1000/影视",
+                media_local_root=tmp,
+            )
+            result = scrape_completed_item(SimpleNamespace(), sub, item, config)
+            self.assertTrue(result.ok, result.message)
+            self.assertEqual(Path(result.local_path), season.parent)
+            self.assertTrue((season.parent / "tvshow.nfo").exists())
+            self.assertTrue(video.with_suffix(".nfo").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

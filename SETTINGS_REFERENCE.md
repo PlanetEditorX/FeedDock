@@ -1,6 +1,6 @@
-# FeedDock 1.17.6 设置说明
+# FeedDock 1.17.7 设置说明
 
-FeedDock 1.17.6 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.17.7 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 
@@ -19,6 +19,17 @@ FeedDock 1.17.6 延续现有设置体系，并将页面、真实本地刮削、�
 ## 刮削设置
 
 FeedDock 的“自动刮削”包含两步：同步外部元数据，并将标准 NFO、海报与背景图写入统一媒体根目录。FeedDock 不直接修改媒体服务器数据库。
+
+### 媒体路径映射
+
+“qBittorrent 下载根目录”是 qBittorrent 实际使用的保存路径；“FeedDock 本地媒体挂载目录”是 FeedDock 容器中实际可见的路径。二者可以不同，但必须指向同一宿主机目录。FeedDock 会保留下载根目录之后的相对路径，例如：
+
+```text
+/vol2/1000/影视/Show (2026)/Season 01
+→ /media/Show (2026)/Season 01
+```
+
+单订阅卡片上的“刮削”会使用同一映射，只处理当前订阅的已完成条目。
 
 ### 自动刮削
 
@@ -99,7 +110,7 @@ RSS 超时同时用于自动元数据同步、qBittorrent 调用和 Tracker 更�
 该选项依赖规范文件名，只在以下条件全部满足时生效：
 
 1. 订阅已开启自动重命名；
-2. FeedDock 与 qBittorrent 将同一宿主机目录映射为相同容器路径；
+2. FeedDock 与 qBittorrent 访问同一宿主机目录；容器内路径可以不同，并按两个根目录自动映射；
 3. 目标目录内存在与预期规范文件名同名的视频文件。
 
 FeedDock 只在计算出的目标目录直接检查最多 2000 个文件，并进行不区分大小写的完整文件干名匹配，不递归扫描整个媒体库。

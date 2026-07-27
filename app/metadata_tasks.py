@@ -93,8 +93,13 @@ def refresh_all_metadata() -> dict[str, Any]:
 _media_scrape_lock = threading.Lock()
 
 
-def scrape_completed_media() -> dict[str, Any]:
-    """Write NFO and artwork for every completed download already in the media root."""
+def scrape_completed_media(subscription_id: int | None = None) -> dict[str, Any]:
+    """Write NFO and artwork for completed downloads.
+
+    When ``subscription_id`` is supplied, only that subscription is processed.
+    The same lock is shared with the global action so two scrape jobs never
+    write the same NFO or artwork concurrently.
+    """
 
     if not _media_scrape_lock.acquire(blocking=False):
         with SessionLocal() as db:
@@ -112,14 +117,20 @@ def scrape_completed_media() -> dict[str, Any]:
     try:
         with SessionLocal() as db:
             config = load_metadata_config(db)
-            items = list(
-                db.scalars(
-                    select(FeedItem)
-                    .where(FeedItem.completed_at.is_not(None))
-                    .order_by(FeedItem.id)
+            query = select(FeedItem).where(FeedItem.completed_at.is_not(None))
+            if subscription_id is not None:
+                query = query.where(FeedItem.subscription_id == subscription_id)
+            items = list(db.scalars(query.order_by(FeedItem.id)))
+            target_subscription = db.get(Subscription, subscription_id) if subscription_id is not None else None
+            start_message = "开始刮削订阅媒体" if subscription_id is not None else "开始刮削已完成媒体"
+            start_details = f"待处理条目：{len(items)}"
+            if subscription_id is not None:
+                start_details = (
+                    f"订阅 ID：{subscription_id}\n"
+                    f"订阅：{target_subscription.name if target_subscription else '不存在'}\n"
+                    f"待处理条目：{len(items)}"
                 )
-            )
-            _add_log(db, "INFO", "开始刮削已完成媒体", f"待处理条目：{len(items)}")
+            _add_log(db, "INFO", start_message, start_details)
             db.commit()
             service = MetadataService(timeout=load_application_preferences(db).rss.timeout_seconds)
             for item in items:
@@ -193,19 +204,23 @@ def scrape_completed_media() -> dict[str, Any]:
                     )
                 db.commit()
 
+            finish_message = "刮削订阅媒体结束" if subscription_id is not None else "刮削已完成媒体结束"
+            finish_details = (
+                f"条目 {totals['items']}，成功 {totals['scraped']}，"
+                f"刮削前同步 {totals['metadata_updated']}，错误 {totals['errors']}"
+            )
+            if subscription_id is not None:
+                finish_details = f"订阅 ID：{subscription_id}\n{finish_details}"
             _add_log(
                 db,
                 "INFO" if totals["errors"] == 0 else "WARNING",
-                "刮削已完成媒体结束",
-                (
-                    f"条目 {totals['items']}，成功 {totals['scraped']}，"
-                    f"刮削前同步 {totals['metadata_updated']}，错误 {totals['errors']}"
-                ),
+                finish_message,
+                finish_details,
             )
             db.commit()
         return {
             "ok": totals["errors"] == 0,
-            "message": "媒体库刮削任务完成",
+            "message": "订阅媒体刮削任务完成" if subscription_id is not None else "媒体库刮削任务完成",
             **totals,
         }
     finally:

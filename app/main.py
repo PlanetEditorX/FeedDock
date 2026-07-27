@@ -1471,6 +1471,37 @@ def manual_media_scrape(background_tasks: BackgroundTasks) -> dict[str, bool | s
     return {"ok": True, "message": "媒体库刮削任务已启动"}
 
 
+@app.post("/api/subscriptions/{subscription_id}/scrape", dependencies=[Depends(require_admin)])
+def scrape_subscription_media(
+    subscription_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, bool | str | int]:
+    subscription = db.get(Subscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    completed_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(FeedItem)
+            .where(
+                FeedItem.subscription_id == subscription_id,
+                FeedItem.completed_at.is_not(None),
+            )
+        )
+        or 0
+    )
+    if completed_count == 0:
+        raise HTTPException(status_code=422, detail="该订阅没有已完成的下载条目可刮削")
+    background_tasks.add_task(scrape_completed_media, subscription_id)
+    return {
+        "ok": True,
+        "subscription_id": subscription_id,
+        "items": completed_count,
+        "message": f"“{subscription.name}”刮削任务已启动",
+    }
+
+
 @app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])
 def normalize_torrents_now() -> dict[str, Any]:
     return normalize_pending_items(limit=200)

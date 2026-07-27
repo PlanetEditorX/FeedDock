@@ -20,6 +20,7 @@ from .database import SessionLocal
 from .debug_logging import format_exception_details, log_event
 from .downloader import DownloaderResult, QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
+from .media_paths import map_downloader_path_to_local
 from .naming import is_video_file, media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
 from .outbound import external_get
@@ -446,10 +447,12 @@ def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Sess
     if not policy.auto_skip_existing or not subscription.rename_enabled or not item.desired_name:
         return False
     try:
-        root = Path(load_qbittorrent_config(db).download_path).resolve(strict=False)
-        directory = Path(item.save_path).resolve(strict=False)
-        if directory != root and root not in directory.parents:
-            return False
+        metadata = load_metadata_config(db)
+        directory = map_downloader_path_to_local(
+            item.save_path,
+            metadata.downloader_root,
+            metadata.media_local_root,
+        )
         if not directory.is_dir():
             return False
         target = item.desired_name.casefold()

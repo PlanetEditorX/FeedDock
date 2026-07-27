@@ -112,6 +112,69 @@ class MetadataRefreshTaskTests(unittest.TestCase):
         self.assertTrue(any(message.startswith("媒体库刮削完成") for message in messages))
         self.assertIn("刮削已完成媒体结束", messages)
 
+    def test_scrape_completed_media_can_target_one_subscription(self) -> None:
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as db:
+            synced_at = datetime.now(timezone.utc)
+            first = Subscription(
+                name="First", rss_url="https://example.test/first", metadata_last_synced_at=synced_at
+            )
+            second = Subscription(
+                name="Second", rss_url="https://example.test/second", metadata_last_synced_at=synced_at
+            )
+            db.add_all([first, second])
+            db.flush()
+            first_item = FeedItem(
+                subscription_id=first.id,
+                fingerprint="first-completed",
+                title="First Episode",
+                status="queued",
+                completed_at=datetime.now(timezone.utc),
+                scrape_status="pending",
+                save_path="/media/First/Season 01",
+            )
+            second_item = FeedItem(
+                subscription_id=second.id,
+                fingerprint="second-completed",
+                title="Second Episode",
+                status="queued",
+                completed_at=datetime.now(timezone.utc),
+                scrape_status="pending",
+                save_path="/media/Second/Season 01",
+            )
+            db.add_all([first_item, second_item])
+            db.commit()
+            first_id, second_item_id = first.id, second_item.id
+
+        with (
+            patch("app.metadata_tasks.SessionLocal", Session),
+            patch(
+                "app.metadata_tasks.load_application_preferences",
+                return_value=SimpleNamespace(rss=SimpleNamespace(timeout_seconds=20)),
+            ),
+            patch(
+                "app.scraper.scrape_completed_item",
+                return_value=SimpleNamespace(
+                    ok=True,
+                    message="已写入媒体库元数据",
+                    local_path="/media/First",
+                    files=["/media/First/tvshow.nfo"],
+                ),
+            ),
+        ):
+            result = scrape_completed_media(first_id)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["items"], 1)
+        with Session() as db:
+            untouched = db.get(FeedItem, second_item_id)
+            self.assertEqual(untouched.scrape_status, "pending")
+            messages = list(db.scalars(select(SystemLog.message).order_by(SystemLog.id)))
+        self.assertIn("开始刮削订阅媒体", messages)
+        self.assertIn("刮削订阅媒体结束", messages)
+
 
 if __name__ == "__main__":
     unittest.main()

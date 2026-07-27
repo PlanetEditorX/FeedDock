@@ -136,7 +136,6 @@ def save_qbittorrent_config(
         download_path=download_path,
     )
     current = load_qbittorrent_config(db)
-    old_download_path = current.download_path
     password = "" if clear_password else (current.password if qbit_password is None else qbit_password)
     if len(password) > 500:
         raise ValueError("qBittorrent 密码过长")
@@ -159,16 +158,14 @@ def save_qbittorrent_config(
         else:
             db.add(AppSetting(key=key, value=value))
 
-    # Keep the FeedDock scraper mount path aligned with the qBittorrent save
-    # root. This is the safest fnOS setup because both containers then use the
-    # same internal path, normally /media.
+    # Keep an existing FeedDock-local mount untouched. qBittorrent and
+    # FeedDock are allowed to mount the same host directory at different
+    # container paths; the scraper maps paths by their relative suffix.
     media_row = db.get(AppSetting, "media_local_root")
     if media_row is None:
-        db.add(AppSetting(key="media_local_root", value=path))
-    else:
-        media_row.value = path
-    # Every subscription uses the same container-visible media root. Folder
-    # customization belongs in save_path_template, not in a second root path.
+        db.add(AppSetting(key="media_local_root", value=str(settings.media_local_root or path)))
+    # Every subscription stores the qBittorrent-visible save root. FeedDock's
+    # own filesystem root lives in media_local_root and is mapped separately.
     db.execute(update(Subscription).values(custom_download_path=path))
     db.commit()
     return load_qbittorrent_config(db)
@@ -179,10 +176,8 @@ def reset_qbittorrent_config(db: Session) -> QBittorrentConfig:
     fallback = _environment_config()
     db.execute(update(Subscription).values(custom_download_path=fallback.download_path))
     media_row = db.get(AppSetting, "media_local_root")
-    if media_row:
-        media_row.value = fallback.download_path
-    else:
-        db.add(AppSetting(key="media_local_root", value=fallback.download_path))
+    if media_row is None:
+        db.add(AppSetting(key="media_local_root", value=str(settings.media_local_root or fallback.download_path)))
     db.commit()
     return load_qbittorrent_config(db)
 
@@ -321,6 +316,7 @@ class MetadataConfig:
     auto_scrape_enabled: bool
     follow_days: int
     bangumi_ini_enabled: bool
+    downloader_root: str
     media_local_root: str
     emby_url: str
     emby_api_key: str
@@ -360,6 +356,7 @@ class MetadataConfig:
             "auto_scrape_enabled": self.auto_scrape_enabled,
             "follow_days": self.follow_days,
             "bangumi_ini_enabled": self.bangumi_ini_enabled,
+            "downloader_root": self.downloader_root,
             "media_local_root": self.media_local_root,
             "emby_url": self.emby_url,
             "emby_api_key_configured": bool(self.emby_api_key),
@@ -399,6 +396,7 @@ def _environment_metadata_config() -> MetadataConfig:
         auto_scrape_enabled=True,
         follow_days=14,
         bangumi_ini_enabled=False,
+        downloader_root=settings.download_path,
         media_local_root=str(settings.media_local_root or settings.download_path),
         emby_url=settings.emby_url,
         emby_api_key=settings.emby_api_key,
@@ -421,7 +419,8 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         auto_scrape_enabled=fallback.auto_scrape_enabled,
         follow_days=fallback.follow_days,
         bangumi_ini_enabled=fallback.bangumi_ini_enabled,
-        media_local_root=qbit_root,
+        downloader_root=qbit_root,
+        media_local_root=str(settings.media_local_root or qbit_root),
         emby_url=fallback.emby_url,
         emby_api_key=fallback.emby_api_key,
         tmm_url=fallback.tmm_url,
@@ -447,7 +446,8 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         auto_scrape_enabled=_bool_value(rows.get("metadata_auto_scrape_enabled"), fallback.auto_scrape_enabled),
         follow_days=_safe_int(rows.get("metadata_follow_days"), fallback.follow_days, 1, 3650),
         bangumi_ini_enabled=_bool_value(rows.get("metadata_bangumi_ini_enabled"), fallback.bangumi_ini_enabled),
-        media_local_root=qbit_root,
+        downloader_root=qbit_root,
+        media_local_root=(rows.get("media_local_root", fallback.media_local_root).strip().rstrip("/") or "/"),
         emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
         emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
         tmm_url=rows.get("tmm_url", fallback.tmm_url).strip().rstrip("/"),
@@ -513,9 +513,6 @@ def save_metadata_config(
         raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
     if len(local_root) > 2000:
         raise ValueError("本地媒体挂载目录过长")
-    if local_root != qbit_root:
-        raise ValueError(f"本地媒体挂载目录必须与 qBittorrent 下载保存根目录一致：{qbit_root}")
-
     clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
     clean_tmm_url = _validate_optional_http_url(tmm_url, "tinyMediaManager 地址")
     tmdb_token = "" if clear_tmdb_token else (

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import FeedItem, Subscription
+from .media_paths import map_downloader_path_to_local
 from .naming import canonical_title, canonical_year, is_video_file
 from .outbound import external_get
 from .runtime_config import MetadataConfig, load_metadata_config
@@ -108,18 +109,14 @@ def _atomic_write(path: Path, content: bytes) -> bool:
     return True
 
 
-def _safe_media_directory(path_value: str, root_value: str) -> Path:
-    if not path_value or not root_value:
-        raise ValueError("媒体目录或媒体根目录未配置")
-    root = Path(root_value).expanduser().resolve(strict=False)
-    target = Path(path_value).expanduser().resolve(strict=False)
-    if target != root and root not in target.parents:
-        raise ValueError("下载目录不在允许的媒体根目录内")
-    if not target.exists():
-        raise FileNotFoundError(f"下载目录不存在：{target}")
-    if not target.is_dir():
-        raise ValueError(f"下载路径不是目录：{target}")
-    return target
+def _safe_media_directory(path_value: str, downloader_root: str, local_root: str) -> Path:
+    return map_downloader_path_to_local(
+        path_value,
+        downloader_root,
+        local_root,
+        require_exists=True,
+        require_directory=True,
+    )
 
 
 def _series_directory(subscription: Subscription, item_directory: Path) -> tuple[Path, Path]:
@@ -334,7 +331,11 @@ def scrape_completed_item(
 
     metadata = config or load_metadata_config(db)
     try:
-        item_directory = _safe_media_directory(item.save_path, metadata.media_local_root)
+        item_directory = _safe_media_directory(
+            item.save_path,
+            getattr(metadata, "downloader_root", metadata.media_local_root),
+            metadata.media_local_root,
+        )
         media_root, season_directory = _series_directory(subscription, item_directory)
         generated: list[Path] = []
         warnings: list[str] = []

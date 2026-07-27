@@ -1,4 +1,6 @@
-# FeedDock 1.17.6 元数据同步与本地媒体刮削
+# FeedDock 1.17.7 元数据同步与本地媒体刮削
+
+1.17.7 允许 qBittorrent 下载根目录与 FeedDock 本地媒体挂载目录不同，并在每张订阅卡片提供单独“刮削”入口。路径映射说明见 [`MEDIA_PATH_MAPPING_1.17.7.md`](MEDIA_PATH_MAPPING_1.17.7.md)。
 
 ## 三个独立动作
 

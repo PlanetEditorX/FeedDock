@@ -1,4 +1,4 @@
-# FeedDock v1.17.6 飞牛 OS 部署
+# FeedDock v1.17.7 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -27,7 +27,7 @@ environment:
 /vol2/1000/影视                → /media
 ```
 
-`/data` 保存数据库、Mikan 目录缓存和封面缓存；升级时不要删除。`/media` 必须与 qBittorrent 使用同一份宿主机影视目录。
+`/data` 保存数据库、Mikan 目录缓存和封面缓存；升级时不要删除。`/media` 必须挂载 qBittorrent 实际使用的同一份宿主机影视目录，但 qBittorrent 自己看到的路径可以不同。
 
 宿主机影视目录不是 `/vol2/1000/影视` 时，只修改 Compose 左侧路径，容器内仍建议保持 `/media`：
 
@@ -77,20 +77,20 @@ admin / password
 
 ## 4. qBittorrent 路径
 
-FeedDock 网页中的“统一媒体根目录”建议填写：
+FeedDock 网页“刮削设置”中的“FeedDock 本地媒体挂载目录”建议填写：
 
 ```text
 /media
 ```
 
-qBittorrent 容器也必须把同一个宿主机影视目录挂载到 `/media`，并将下载保存路径设在 `/media` 下。FeedDock 会自动让以下两处保持一致：
+qBittorrent 可以把同一个宿主机影视目录挂载到 `/media`，也可以使用飞牛宿主机路径，例如 `/vol2/1000/影视`。网页“下载设置”填写 qBittorrent 实际使用的根目录，FeedDock 会把相对目录映射到 `/media`：
 
 ```text
-qBittorrent 下载根目录
-订阅统一下载根目录
+qBittorrent：/vol2/1000/影视/番剧名称 (2026)/Season 01
+FeedDock：   /media/番剧名称 (2026)/Season 01
 ```
 
-番剧名、年份、季度等子目录通过订阅中的路径模板生成，不要把宿主机路径 `/vol2/...` 填进容器页面。
+番剧名、年份、季度等子目录通过订阅中的路径模板生成。qBittorrent 根目录必须填写它自己实际使用的路径；FeedDock 本地根目录必须填写 FeedDock 容器真实挂载路径。
 
 默认模板：
 
@@ -109,7 +109,7 @@ qBittorrent 下载根目录
 - 密钥支持 32 位 v3 API Key 或 v4 Read Access Token；
 - Bangumi Token 公开读取通常可留空；
 - 自动刮削会同步标题、简介、评分和总集数，并在统一媒体目录写入 NFO、海报与背景图；
-- 本地媒体挂载目录会自动同步为 `/media`，不可单独修改。
+- 本地媒体挂载目录默认来自 `MEDIA_LOCAL_ROOT=/media`，可以在网页中单独修改，不再被 qBittorrent 保存路径覆盖。
 
 选择搜索结果后，订阅名称会自动写成：
 
