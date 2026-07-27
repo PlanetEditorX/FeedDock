@@ -9,7 +9,7 @@ from .anime_catalog import refresh_due_anime_catalogs
 from .database import SessionLocal
 from .debug_logging import log_exception
 from .mikan_cache import refresh_due_mikan_catalogs
-from .postprocess import normalize_pending_items
+from .postprocess import cleanup_internal_qbittorrent_tags, normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
 from .runtime_config import load_automation_config, load_rss_poll_config, mark_automation_run
 from .settings_config import load_application_preferences
@@ -54,6 +54,7 @@ class PollScheduler:
             return
         last_rss_refresh: float | None = None
         next_completion_check = 0.0
+        next_tag_cleanup = 0.0
         while not self._stop_event.is_set():
             now = time.monotonic()
             with SessionLocal() as db:
@@ -76,6 +77,13 @@ class PollScheduler:
                     log_exception("后台下载完成检查异常", exc, stage="scheduler.normalize-pending")
                 next_completion_check = time.monotonic() + 120
 
+            if now >= next_tag_cleanup:
+                try:
+                    cleanup_internal_qbittorrent_tags()
+                except Exception as exc:
+                    log_exception("qBittorrent 临时标签清理异常", exc, stage="scheduler.cleanup-tags")
+                next_tag_cleanup = time.monotonic() + 3600
+
             try:
                 self.run_daily_automation()
             except Exception as exc:
@@ -92,7 +100,7 @@ class PollScheduler:
                 log_exception("多站点番剧周历后台刷新异常", exc, stage="scheduler.anime-catalog-refresh")
 
             next_rss_refresh = (last_rss_refresh or time.monotonic()) + poll_interval * 60
-            next_event = min(next_rss_refresh, next_completion_check)
+            next_event = min(next_rss_refresh, next_completion_check, next_tag_cleanup)
             wait_seconds = max(1.0, next_event - time.monotonic())
             if self._stop_event.wait(min(60.0, wait_seconds)):
                 return

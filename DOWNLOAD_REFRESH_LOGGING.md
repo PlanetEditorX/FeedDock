@@ -50,7 +50,7 @@ qBittorrent 已确认任务
 - 集数；
 - RSS 标题；
 - 保存目录；
-- qBittorrent 任务标签；
+- 临时 qBittorrent 关联标签（确认后自动删除）；
 - 规范任务名称；
 - 重试次数和下载器返回结果。
 
@@ -71,7 +71,7 @@ qBittorrent 已确认任务
 
 ### qBittorrent 已确认任务
 
-FeedDock 已在 qBittorrent 任务列表中按唯一标签查到任务，并保存实际任务名称、状态和哈希。仅收到添加接口的 `Ok.` 不再视为成功。
+FeedDock 已在 qBittorrent 任务列表中按临时标签查到任务，保存实际任务名称、状态和 hash，并立即清理该标签。仅收到添加接口的 `Ok.` 不再视为成功。
 
 ### 等待下载并发空位
 

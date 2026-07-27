@@ -388,6 +388,22 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('def _tmdb_auth', metadata)
         self.assertIn('api_key', metadata)
 
+    def test_qbittorrent_internal_tags_are_temporary_and_hash_tracked(self) -> None:
+        downloader = (ROOT / "app/downloader.py").read_text(encoding="utf-8")
+        postprocess = (ROOT / "app/postprocess.py").read_text(encoding="utf-8")
+        scheduler = (ROOT / "app/scheduler.py").read_text(encoding="utf-8")
+        rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
+
+        self.assertIn('api/v2/torrents/removeTags', downloader)
+        self.assertIn('api/v2/torrents/deleteTags', downloader)
+        self.assertIn('def cleanup_internal_tags', downloader)
+        self.assertIn('torrent_hash: str = ""', downloader)
+        self.assertIn('cleanup_internal_qbittorrent_tags', postprocess)
+        self.assertIn('or_(FeedItem.torrent_hash != "", FeedItem.qbit_tag != "")', postprocess)
+        self.assertIn('torrent_hash=item.torrent_hash', postprocess)
+        self.assertIn('cleanup_internal_qbittorrent_tags()', scheduler)
+        self.assertIn('item.qbit_tag = ""', rss_service)
+
     def test_notification_and_subscription_monitoring_are_wired_end_to_end(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

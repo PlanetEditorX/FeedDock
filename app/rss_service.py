@@ -611,6 +611,10 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
             subscription=subscription,
             item=item,
         )
+        if getattr(result, "tag_removed", False):
+            # qBittorrent tags are used only as a short-lived correlation key.
+            # Once the real torrent hash is stored, later checks use the hash.
+            item.qbit_tag = ""
     else:
         item.status = "error"
         item.reason = f"{result.message}（已尝试 {attempts} 次）"

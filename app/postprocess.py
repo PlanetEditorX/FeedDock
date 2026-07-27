@@ -22,6 +22,7 @@ from .subscription_monitor import evaluate_subscription_completion
 
 
 _normalize_lock = threading.Lock()
+_tag_cleanup_lock = threading.Lock()
 _ACTIVE_RENAME_STATES = {
     "",
     "pending",
@@ -48,6 +49,61 @@ def _metadata_sync_due(subscription: Subscription) -> bool:
     return datetime.now(timezone.utc) - last >= timedelta(hours=settings.metadata_auto_sync_hours)
 
 
+def cleanup_internal_qbittorrent_tags(
+    db: Session | None = None,
+) -> dict[str, Any]:
+    """Remove legacy ``feeddock-item-*`` tags and preserve real torrent hashes."""
+
+    if not _tag_cleanup_lock.acquire(blocking=False):
+        return {"ok": False, "message": "已有 qBittorrent 标签清理正在运行", "cleaned": 0}
+    owns_session = db is None
+    session = db or SessionLocal()
+    try:
+        result = QBittorrentClient().cleanup_internal_tags()
+        cleaned_tags = set(result.cleaned_tags)
+        updated = 0
+        resolved = 0
+        if cleaned_tags:
+            items = list(
+                session.scalars(
+                    select(FeedItem).where(FeedItem.qbit_tag.in_(cleaned_tags))
+                )
+            )
+            for item in items:
+                mapped_hash = result.resolved_hashes.get(item.qbit_tag, "")
+                if mapped_hash and not item.torrent_hash:
+                    item.torrent_hash = mapped_hash
+                    resolved += 1
+                item.qbit_tag = ""
+                updated += 1
+
+        if cleaned_tags:
+            _add_log(
+                session,
+                "INFO" if result.ok else "WARNING",
+                "qBittorrent 临时标签清理完成",
+                (
+                    f"qBittorrent 标签：{len(cleaned_tags)}\n"
+                    f"数据库条目：{updated}\n补全任务哈希：{resolved}\n"
+                    f"结果：{result.message}"
+                ),
+            )
+        elif not result.ok:
+            _add_log(session, "WARNING", "qBittorrent 临时标签清理失败", result.message)
+        session.commit()
+        return {
+            "ok": result.ok,
+            "message": result.message,
+            "cleaned": len(cleaned_tags),
+            "updated": updated,
+            "resolved": resolved,
+        }
+    finally:
+        if owns_session:
+            session.close()
+        _tag_cleanup_lock.release()
+
+
 def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow_scrape: bool = True) -> dict[str, Any]:
     """Normalize tagged torrents, detect completion, and run configured post-download metadata work."""
 
@@ -71,7 +127,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                 select(FeedItem)
                 .where(
                     FeedItem.status == "queued",
-                    FeedItem.qbit_tag != "",
+                    or_(FeedItem.torrent_hash != "", FeedItem.qbit_tag != ""),
                     or_(
                         FeedItem.rename_status.in_(_ACTIVE_RENAME_STATES),
                         FeedItem.scrape_status.in_(("pending", "error")),
@@ -88,6 +144,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             stats["checked"] += 1
             result = client.normalize_single_video(
                 tag=item.qbit_tag,
+                torrent_hash=item.torrent_hash,
                 desired_name=item.desired_name,
             )
             previous_state = item.rename_status
@@ -113,7 +170,8 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                         level="ERROR",
                         message="qBittorrent 中未找到已记录任务",
                         details=(
-                            f"条目 ID：{item.id}\n任务标签：{item.qbit_tag}\n"
+                            f"条目 ID：{item.id}\n任务哈希：{item.torrent_hash or '无'}\n"
+                            f"临时标签：{item.qbit_tag or '已清理'}\n"
                             f"标题：{item.title}\n处理：已标记为错误，可重新推送"
                         ),
                     )
@@ -122,6 +180,22 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                 continue
             if result.torrent_hash:
                 item.torrent_hash = result.torrent_hash
+                if item.qbit_tag and hasattr(client, "remove_internal_tag"):
+                    cleanup = client.remove_internal_tag(
+                        tag=item.qbit_tag, torrent_hash=result.torrent_hash
+                    )
+                    if cleanup.ok:
+                        item.qbit_tag = ""
+                    else:
+                        _add_log(
+                            session,
+                            "WARNING",
+                            "qBittorrent 临时标签清理失败",
+                            (
+                                f"条目 ID：{item.id}\n任务哈希：{result.torrent_hash}\n"
+                                f"临时标签：{item.qbit_tag}\n错误：{cleanup.message}"
+                            ),
+                        )
                 tracker_policy = load_application_preferences(session).trackers
                 if tracker_policy.enabled and tracker_policy.trackers and item.trackers_applied_at is None:
                     tracker_result = client.add_trackers(result.torrent_hash, tracker_policy.trackers)

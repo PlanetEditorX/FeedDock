@@ -133,12 +133,23 @@ class MetadataNamingTests(unittest.TestCase):
         with patch.object(client, "_client", return_value=_FakeQbitClient(calls)):
             added = client.add_url("magnet:?xt=urn:btih:abc", "/downloads/rss/Show/Season 01", rename="Show - S01E01", tags="feeddock-item-1")
             self.assertTrue(added.ok)
-            normalized = client.normalize_single_video(tag="feeddock-item-1", desired_name="Show - S01E01")
+            self.assertTrue(added.tag_removed)
+            normalized = client.normalize_single_video(
+                torrent_hash=added.torrent_hash, desired_name="Show - S01E01"
+            )
         self.assertTrue(normalized.ok)
         self.assertEqual(normalized.state, "completed")
         add_call = next(call for call in calls if call[1].endswith("torrents/add"))
         self.assertEqual(add_call[3]["rename"][1], "Show - S01E01")
         self.assertEqual(add_call[3]["tags"][1], "feeddock-item-1")
+        self.assertTrue(any(call[1].endswith("removeTags") for call in calls))
+        self.assertTrue(any(call[1].endswith("deleteTags") for call in calls))
+        hash_lookups = [
+            call for call in calls
+            if call[0] == "GET" and call[1].endswith("torrents/info")
+            and (call[2] or {}).get("hashes") == "abc"
+        ]
+        self.assertEqual(len(hash_lookups), 1)
         rename_calls = [call for call in calls if call[1].endswith("renameFile")]
         self.assertEqual(len(rename_calls), 2)
         self.assertTrue(rename_calls[0][2]["newPath"].endswith("Show - S01E01.mkv"))

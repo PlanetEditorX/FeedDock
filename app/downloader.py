@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import posixpath
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -20,6 +20,15 @@ class DownloaderResult:
     torrent_hash: str = ""
     torrent_name: str = ""
     verified: bool = False
+    tag_removed: bool = False
+
+
+@dataclass(slots=True)
+class InternalTagCleanupResult:
+    ok: bool
+    message: str
+    cleaned_tags: tuple[str, ...] = ()
+    resolved_hashes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -197,6 +206,39 @@ class QBittorrentClient:
             verified=False,
         )
 
+    @staticmethod
+    def _cleanup_verified_tag(
+        client: httpx.Client,
+        *,
+        tag: str,
+        torrent_hash: str,
+    ) -> DownloaderResult:
+        """Remove one temporary FeedDock tag after the torrent hash is known."""
+
+        if not tag:
+            return DownloaderResult(True, "没有临时标签需要清理", tag_removed=True)
+        if not torrent_hash:
+            return DownloaderResult(False, "任务哈希为空，暂时保留临时标签")
+
+        remove_response = client.post(
+            "api/v2/torrents/removeTags",
+            data={"hashes": torrent_hash, "tags": tag},
+        )
+        if remove_response.status_code != 200:
+            return DownloaderResult(
+                False, f"移除临时标签失败：HTTP {remove_response.status_code}"
+            )
+
+        delete_response = client.post(
+            "api/v2/torrents/deleteTags",
+            data={"tags": tag},
+        )
+        if delete_response.status_code != 200:
+            return DownloaderResult(
+                False, f"删除临时标签失败：HTTP {delete_response.status_code}"
+            )
+        return DownloaderResult(True, "临时标签已清理", tag_removed=True)
+
     def _finish_add(
         self,
         client: httpx.Client,
@@ -211,6 +253,15 @@ class QBittorrentClient:
         verified = self._verify_added_torrent(client, tag=tag)
         if verified.ok and rename and not verified.torrent_name:
             verified.message += f"；请求名称：{safe_segment(rename)}"
+        if verified.ok and tag:
+            cleanup = self._cleanup_verified_tag(
+                client, tag=tag, torrent_hash=verified.torrent_hash
+            )
+            verified.tag_removed = cleanup.tag_removed
+            if cleanup.ok:
+                verified.message += "；临时标签已清理"
+            else:
+                verified.message += f"；临时标签稍后清理：{cleanup.message}"
         return verified
 
     def add_url(
@@ -300,6 +351,123 @@ class QBittorrentClient:
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
 
+
+    def remove_internal_tag(self, *, tag: str, torrent_hash: str) -> DownloaderResult:
+        """Retry removal of one temporary internal tag without affecting the torrent."""
+
+        error = self._configuration_error()
+        if error:
+            return DownloaderResult(False, error)
+        if not tag:
+            return DownloaderResult(True, "没有临时标签需要清理", tag_removed=True)
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return login
+                return self._cleanup_verified_tag(
+                    client, tag=tag, torrent_hash=torrent_hash
+                )
+        except httpx.HTTPError as exc:
+            return DownloaderResult(False, f"清理临时标签请求失败：{exc}")
+
+    def cleanup_internal_tags(
+        self,
+        *,
+        prefix: str = "feeddock-item-",
+        batch_size: int = 100,
+    ) -> InternalTagCleanupResult:
+        """Resolve torrent hashes and remove legacy FeedDock item tags in batches."""
+
+        error = self._configuration_error()
+        if error:
+            return InternalTagCleanupResult(False, error)
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return InternalTagCleanupResult(False, login.message)
+
+                tags_response = client.get("api/v2/torrents/tags")
+                tags_response.raise_for_status()
+                payload = tags_response.json()
+                if not isinstance(payload, list):
+                    return InternalTagCleanupResult(
+                        False, "qBittorrent 返回了无效的标签列表"
+                    )
+                tags = sorted(
+                    {str(value).strip() for value in payload if str(value).strip().startswith(prefix)}
+                )
+                if not tags:
+                    return InternalTagCleanupResult(True, "没有需要清理的 FeedDock 临时标签")
+
+                resolved_hashes: dict[str, str] = {}
+                torrents_response = client.get(
+                    "api/v2/torrents/info",
+                    params={"sort": "added_on", "reverse": "true"},
+                )
+                torrents_response.raise_for_status()
+                torrents = torrents_response.json()
+                if not isinstance(torrents, list):
+                    return InternalTagCleanupResult(
+                        False, "qBittorrent 返回了无效的任务列表"
+                    )
+                known_tags = set(tags)
+                for torrent in torrents:
+                    torrent_hash = str(torrent.get("hash") or "").strip()
+                    raw_tags = torrent.get("tags") or ""
+                    if isinstance(raw_tags, str):
+                        torrent_tags = {value.strip() for value in raw_tags.split(",") if value.strip()}
+                    elif isinstance(raw_tags, list):
+                        torrent_tags = {str(value).strip() for value in raw_tags if str(value).strip()}
+                    else:
+                        torrent_tags = set()
+                    for tag in torrent_tags & known_tags:
+                        if torrent_hash and tag not in resolved_hashes:
+                            resolved_hashes[tag] = torrent_hash
+
+                cleaned: list[str] = []
+                failures: list[str] = []
+                size = max(1, int(batch_size or 100))
+                for offset in range(0, len(tags), size):
+                    batch = tags[offset : offset + size]
+                    joined = ",".join(batch)
+                    remove_response = client.post(
+                        "api/v2/torrents/removeTags",
+                        data={"hashes": "all", "tags": joined},
+                    )
+                    if remove_response.status_code != 200:
+                        failures.append(
+                            f"移除 {len(batch)} 个标签失败：HTTP {remove_response.status_code}"
+                        )
+                        continue
+                    delete_response = client.post(
+                        "api/v2/torrents/deleteTags",
+                        data={"tags": joined},
+                    )
+                    if delete_response.status_code != 200:
+                        failures.append(
+                            f"删除 {len(batch)} 个标签失败：HTTP {delete_response.status_code}"
+                        )
+                        continue
+                    cleaned.extend(batch)
+
+                if failures:
+                    return InternalTagCleanupResult(
+                        False,
+                        f"已清理 {len(cleaned)} 个标签；" + "；".join(failures),
+                        tuple(cleaned),
+                        resolved_hashes,
+                    )
+                return InternalTagCleanupResult(
+                    True,
+                    f"已清理 {len(cleaned)} 个 FeedDock 临时标签",
+                    tuple(cleaned),
+                    resolved_hashes,
+                )
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            return InternalTagCleanupResult(False, f"清理 FeedDock 临时标签失败：{exc}")
+
     def active_download_count(self) -> tuple[bool, int, str]:
         error = self._configuration_error()
         if error:
@@ -345,8 +513,14 @@ class QBittorrentClient:
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"添加 Tracker 请求失败：{exc}")
 
-    def normalize_single_video(self, *, tag: str, desired_name: str = "") -> TorrentNormalizeResult:
-        """Inspect one tagged torrent, normalize a single video, and report completion.
+    def normalize_single_video(
+        self,
+        *,
+        tag: str = "",
+        torrent_hash: str = "",
+        desired_name: str = "",
+    ) -> TorrentNormalizeResult:
+        """Inspect one FeedDock torrent by hash (preferred) or temporary tag.
 
         Renaming may happen as soon as magnet metadata is available, but local
         scraping is intentionally deferred until qBittorrent reports 100%.
@@ -357,15 +531,16 @@ class QBittorrentClient:
         error = self._configuration_error()
         if error:
             return TorrentNormalizeResult(False, "error", error)
-        if not tag:
-            return TorrentNormalizeResult(False, "skipped", "没有任务标签")
+        if not torrent_hash and not tag:
+            return TorrentNormalizeResult(False, "skipped", "没有任务哈希或临时标签")
 
         try:
             with self._client() as client:
                 login = self._login(client)
                 if not login.ok:
                     return TorrentNormalizeResult(False, "error", login.message)
-                torrents_response = client.get("api/v2/torrents/info", params={"tag": tag})
+                lookup_params = {"hashes": torrent_hash} if torrent_hash else {"tag": tag}
+                torrents_response = client.get("api/v2/torrents/info", params=lookup_params)
                 torrents_response.raise_for_status()
                 torrents = torrents_response.json()
                 if not isinstance(torrents, list) or not torrents:
@@ -375,8 +550,8 @@ class QBittorrentClient:
                     key=lambda value: int(value.get("added_on") or 0),
                     reverse=True,
                 )[0]
-                torrent_hash = str(torrent.get("hash") or "")
-                if not torrent_hash:
+                resolved_hash = str(torrent.get("hash") or "")
+                if not resolved_hash:
                     return TorrentNormalizeResult(False, "pending", "等待 qBittorrent 返回任务哈希")
 
                 try:
@@ -393,19 +568,19 @@ class QBittorrentClient:
                 )
 
                 files_response = client.get(
-                    "api/v2/torrents/files", params={"hash": torrent_hash}
+                    "api/v2/torrents/files", params={"hash": resolved_hash}
                 )
                 files_response.raise_for_status()
                 files = files_response.json()
                 if not isinstance(files, list) or not files:
                     return TorrentNormalizeResult(
-                        False, "pending", "磁力链接元数据尚未获取", torrent_hash, completed, progress
+                        False, "pending", "磁力链接元数据尚未获取", resolved_hash, completed, progress
                     )
                 videos = [file for file in files if is_video_file(str(file.get("name") or ""))]
                 if not videos:
                     state = "completed_no_video" if completed else "waiting_completion"
                     return TorrentNormalizeResult(
-                        False, state, "暂未发现视频文件", torrent_hash, completed, progress
+                        False, state, "暂未发现视频文件", resolved_hash, completed, progress
                     )
 
                 rename_message = ""
@@ -424,7 +599,7 @@ class QBittorrentClient:
                             rename_response = client.post(
                                 "api/v2/torrents/renameFile",
                                 data={
-                                    "hash": torrent_hash,
+                                    "hash": resolved_hash,
                                     "oldPath": video_path,
                                     "newPath": new_video_path,
                                 },
@@ -434,7 +609,7 @@ class QBittorrentClient:
                                     False,
                                     "error",
                                     f"视频文件重命名失败：HTTP {rename_response.status_code}",
-                                    torrent_hash,
+                                    resolved_hash,
                                     completed,
                                     progress,
                                 )
@@ -459,7 +634,7 @@ class QBittorrentClient:
                             response = client.post(
                                 "api/v2/torrents/renameFile",
                                 data={
-                                    "hash": torrent_hash,
+                                    "hash": resolved_hash,
                                     "oldPath": subtitle_path,
                                     "newPath": new_subtitle_path,
                                 },
@@ -477,14 +652,14 @@ class QBittorrentClient:
                     if rename_message:
                         message += "；下载已完成"
                     return TorrentNormalizeResult(
-                        True, state, message, torrent_hash, True, 100
+                        True, state, message, resolved_hash, True, 100
                     )
 
                 state = "manual_required_waiting" if manual_required else "waiting_completion"
                 message = rename_message or "任务已建立"
                 message += f"；等待下载完成（{progress}%）"
                 return TorrentNormalizeResult(
-                    True, state, message, torrent_hash, False, progress
+                    True, state, message, resolved_hash, False, progress
                 )
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             return TorrentNormalizeResult(False, "error", f"重命名或完成状态检查失败：{exc}")

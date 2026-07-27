@@ -11,8 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.downloader import DownloaderResult, QBittorrentClient
+from app.downloader import DownloaderResult, InternalTagCleanupResult, QBittorrentClient
 from app.media_sidecar import write_bangumi_ini
+from app.postprocess import cleanup_internal_qbittorrent_tags
 from app.models import FeedItem, Subscription, SystemLog
 from app.rss_service import _existing_video_matches, _push_feed_item, dispatch_scheduled_downloads
 from app.settings_config import (
@@ -371,6 +372,107 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(item.status, "scheduled")
         self.assertIn("并发空位", message)
+
+
+
+    def test_qbittorrent_cleans_only_feeddock_item_tags(self):
+        calls = []
+
+        class TagClient:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def get(self, path, params=None):
+                calls.append(("GET", path, params))
+                if path.endswith("torrents/tags"):
+                    return _FakeHttpResponse([
+                        "keep-user-tag",
+                        "feeddock-item-1",
+                        "feeddock-item-2",
+                    ])
+                if path.endswith("torrents/info"):
+                    return _FakeHttpResponse([
+                        {"hash": "hash-1", "tags": "keep-user-tag, feeddock-item-1"},
+                        {"hash": "hash-2", "tags": "feeddock-item-2"},
+                    ])
+                return _FakeHttpResponse([])
+            def post(self, path, data=None, files=None):
+                calls.append(("POST", path, data))
+                return _FakeHttpResponse()
+
+        client = QBittorrentClient(
+            base_url="http://qbit:8080", username="admin", password="pw"
+        )
+        with (
+            patch.object(client, "_client", return_value=TagClient()),
+            patch.object(client, "_login", return_value=DownloaderResult(True, "ok")),
+        ):
+            result = client.cleanup_internal_tags()
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(set(result.cleaned_tags), {"feeddock-item-1", "feeddock-item-2"})
+        self.assertEqual(result.resolved_hashes["feeddock-item-1"], "hash-1")
+        remove = next(call for call in calls if call[1].endswith("removeTags"))
+        delete = next(call for call in calls if call[1].endswith("deleteTags"))
+        self.assertEqual(remove[2]["hashes"], "all")
+        self.assertNotIn("keep-user-tag", remove[2]["tags"])
+        self.assertEqual(delete[2]["tags"], remove[2]["tags"])
+
+    def test_successful_push_clears_temporary_tag_after_qbit_cleanup(self):
+        sub = Subscription(name="Demo", rss_url="https://example.test/rss", rename_enabled=False)
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="cleaned-push",
+            title="Demo - 01",
+            download_url="magnet:?xt=urn:btih:cleaned",
+            episode="1",
+        )
+        self.db.add(item)
+        self.db.flush()
+        self.save_preferences(concurrent_limit=0, retry_count=0)
+        fake = SimpleNamespace(
+            add_url=lambda *_args, **_kwargs: DownloaderResult(
+                True,
+                "qBittorrent 已确认任务；临时标签已清理",
+                torrent_hash="hash-cleaned",
+                verified=True,
+                tag_removed=True,
+            )
+        )
+        with patch("app.rss_service.QBittorrentClient", return_value=fake):
+            ok, _message = _push_feed_item(self.db, item, sub)
+        self.assertTrue(ok)
+        self.assertEqual(item.torrent_hash, "hash-cleaned")
+        self.assertEqual(item.qbit_tag, "")
+
+    def test_legacy_item_tags_are_cleaned_and_hashes_preserved(self):
+        sub = Subscription(name="Legacy", rss_url="https://example.test/rss")
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="legacy-tag",
+            title="Legacy 01",
+            status="queued",
+            qbit_tag="feeddock-item-77",
+            torrent_hash="",
+        )
+        self.db.add(item)
+        self.db.commit()
+        cleanup = InternalTagCleanupResult(
+            True,
+            "已清理 2 个 FeedDock 临时标签",
+            ("feeddock-item-77", "feeddock-item-orphan"),
+            {"feeddock-item-77": "legacy-hash"},
+        )
+        fake = SimpleNamespace(cleanup_internal_tags=lambda: cleanup)
+        with patch("app.postprocess.QBittorrentClient", return_value=fake):
+            result = cleanup_internal_qbittorrent_tags(self.db)
+        self.db.refresh(item)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["cleaned"], 2)
+        self.assertEqual(item.torrent_hash, "legacy-hash")
+        self.assertEqual(item.qbit_tag, "")
 
 
 if __name__ == "__main__":
