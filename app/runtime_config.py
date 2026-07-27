@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
-from .models import AppSetting, Subscription
+from .models import AppSetting, FeedItem, Subscription
 
 
 QBIT_SETTING_KEYS = {
@@ -297,6 +297,11 @@ METADATA_SETTING_KEYS = {
     "tmdb_read_access_token",
     "bangumi_access_token",
     "metadata_language",
+    "tmdb_api_base",
+    "tmdb_image_base",
+    "metadata_auto_scrape_enabled",
+    "metadata_follow_days",
+    "metadata_bangumi_ini_enabled",
     "media_local_root",
     "emby_url",
     "emby_api_key",
@@ -311,6 +316,11 @@ class MetadataConfig:
     tmdb_read_access_token: str
     bangumi_access_token: str
     language: str
+    tmdb_api_base: str
+    tmdb_image_base: str
+    auto_scrape_enabled: bool
+    follow_days: int
+    bangumi_ini_enabled: bool
     media_local_root: str
     emby_url: str
     emby_api_key: str
@@ -339,12 +349,17 @@ class MetadataConfig:
     def tmm_configured(self) -> bool:
         return bool(self.tmm_enabled and self.tmm_url and self.tmm_api_key)
 
-    def public_dict(self) -> dict[str, str | bool]:
+    def public_dict(self) -> dict[str, str | bool | int]:
         return {
             "tmdb_token_configured": self.tmdb_configured,
             "bangumi_token_configured": bool(self.bangumi_access_token),
             "anilist_configured": True,
             "metadata_language": self.language,
+            "tmdb_api_base": self.tmdb_api_base,
+            "tmdb_image_base": self.tmdb_image_base,
+            "auto_scrape_enabled": self.auto_scrape_enabled,
+            "follow_days": self.follow_days,
+            "bangumi_ini_enabled": self.bangumi_ini_enabled,
             "media_local_root": self.media_local_root,
             "emby_url": self.emby_url,
             "emby_api_key_configured": bool(self.emby_api_key),
@@ -366,11 +381,24 @@ def _bool_value(value: str | bool | None, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _safe_int(value: object, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
 def _environment_metadata_config() -> MetadataConfig:
     return MetadataConfig(
         tmdb_read_access_token=settings.tmdb_read_access_token,
         bangumi_access_token=settings.bangumi_access_token,
         language=settings.metadata_language,
+        tmdb_api_base=settings.tmdb_api_base,
+        tmdb_image_base=settings.tmdb_image_base,
+        auto_scrape_enabled=False,
+        follow_days=14,
+        bangumi_ini_enabled=False,
         media_local_root=str(settings.media_local_root or settings.download_path),
         emby_url=settings.emby_url,
         emby_api_key=settings.emby_api_key,
@@ -388,6 +416,11 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         tmdb_read_access_token=fallback.tmdb_read_access_token,
         bangumi_access_token=fallback.bangumi_access_token,
         language=fallback.language,
+        tmdb_api_base=fallback.tmdb_api_base,
+        tmdb_image_base=fallback.tmdb_image_base,
+        auto_scrape_enabled=fallback.auto_scrape_enabled,
+        follow_days=fallback.follow_days,
+        bangumi_ini_enabled=fallback.bangumi_ini_enabled,
         media_local_root=qbit_root,
         emby_url=fallback.emby_url,
         emby_api_key=fallback.emby_api_key,
@@ -409,6 +442,11 @@ def _load_metadata_with_session(db: Session) -> MetadataConfig:
         tmdb_read_access_token=rows.get("tmdb_read_access_token", fallback.tmdb_read_access_token),
         bangumi_access_token=rows.get("bangumi_access_token", fallback.bangumi_access_token),
         language=rows.get("metadata_language", fallback.language).strip() or "zh-CN",
+        tmdb_api_base=rows.get("tmdb_api_base", fallback.tmdb_api_base).strip().rstrip("/") or fallback.tmdb_api_base,
+        tmdb_image_base=rows.get("tmdb_image_base", fallback.tmdb_image_base).strip().rstrip("/") or fallback.tmdb_image_base,
+        auto_scrape_enabled=_bool_value(rows.get("metadata_auto_scrape_enabled"), fallback.auto_scrape_enabled),
+        follow_days=_safe_int(rows.get("metadata_follow_days"), fallback.follow_days, 1, 3650),
+        bangumi_ini_enabled=_bool_value(rows.get("metadata_bangumi_ini_enabled"), fallback.bangumi_ini_enabled),
         media_local_root=qbit_root,
         emby_url=rows.get("emby_url", fallback.emby_url).strip().rstrip("/"),
         emby_api_key=rows.get("emby_api_key", fallback.emby_api_key),
@@ -446,7 +484,12 @@ def save_metadata_config(
     bangumi_access_token: str | None,
     clear_bangumi_token: bool,
     metadata_language: str,
-    media_local_root: str,
+    tmdb_api_base: str = "",
+    tmdb_image_base: str = "",
+    auto_scrape_enabled: bool = False,
+    follow_days: int = 14,
+    bangumi_ini_enabled: bool = False,
+    media_local_root: str = "",
     emby_url: str,
     emby_api_key: str | None,
     clear_emby_api_key: bool,
@@ -459,6 +502,10 @@ def save_metadata_config(
     language = metadata_language.strip() or "zh-CN"
     if len(language) > 20:
         raise ValueError("元数据语言代码过长")
+    if not 1 <= int(follow_days) <= 3650:
+        raise ValueError("追更天数必须在 1 到 3650 天之间")
+    clean_tmdb_api = _validate_optional_http_url(tmdb_api_base, "TMDB API 地址") or settings.tmdb_api_base
+    clean_tmdb_image = _validate_optional_http_url(tmdb_image_base, "TMDB 图片地址") or settings.tmdb_image_base
 
     qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
     local_root = media_local_root.strip().rstrip("/") or qbit_root
@@ -498,6 +545,11 @@ def save_metadata_config(
         "tmdb_read_access_token": tmdb_token,
         "bangumi_access_token": bangumi_token,
         "metadata_language": language,
+        "tmdb_api_base": clean_tmdb_api,
+        "tmdb_image_base": clean_tmdb_image,
+        "metadata_auto_scrape_enabled": "1" if auto_scrape_enabled else "0",
+        "metadata_follow_days": str(int(follow_days)),
+        "metadata_bangumi_ini_enabled": "1" if bangumi_ini_enabled else "0",
         "media_local_root": local_root,
         "emby_url": clean_emby_url,
         "emby_api_key": emby_key,
@@ -515,6 +567,19 @@ def save_metadata_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
+    if bangumi_ini_enabled and not current.bangumi_ini_enabled:
+        db.execute(
+            update(FeedItem)
+            .where(
+                FeedItem.status == "queued",
+                FeedItem.completed_at.is_not(None),
+                FeedItem.scrape_status == "skipped",
+            )
+            .values(
+                scrape_status="pending",
+                scrape_message="等待补写 bangumi.ini",
+            )
+        )
     db.commit()
     return load_metadata_config(db)
 

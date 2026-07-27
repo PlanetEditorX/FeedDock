@@ -1,9 +1,11 @@
-# FeedDock v1.13.0 飞牛 OS 部署
+# FeedDock v1.14.0 飞牛 OS 部署
 
 ## 新增可选配置
 
 ```yaml
 environment:
+  TMDB_API_BASE: "https://api.themoviedb.org"
+  TMDB_IMAGE_BASE: "https://image.tmdb.org"
   ANILIST_API_URL: "https://graphql.anilist.co"
   AUTOMATION_TIME: "02:00"
   AUTOMATION_TIMEZONE: "Asia/Shanghai"
@@ -12,7 +14,7 @@ environment:
   FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "false"
 ```
 
-网页保存的设置优先于 Compose。FeedDock 不再调用 tinyMediaManager 或写本地 NFO，代理只用于外部请求，本地服务应放入不使用代理列表。
+网页保存的设置优先于 Compose。FeedDock 不再调用 tinyMediaManager 或写本地 NFO/海报；可选的 `bangumi.ini` 只写入 Bangumi ID。代理只用于外部请求，本地服务应放入不使用代理列表。
 
 # FeedDock 飞牛 OS 部署说明
 
@@ -96,13 +98,17 @@ qBittorrent 下载根目录
 {base}/{media_folder}/Season {season:02}
 ```
 
+启用“文件已下载自动跳过”前，所有启用订阅都必须开启自动重命名。FeedDock 会在后端阻止不符合条件的创建、编辑、导入或批量启用操作。
+
 ## 5. TMDB 与 Bangumi
 
-网页打开“元数据设置”：
+网页打开“设置 → 刮削设置”：
 
-- TMDB Read Access Token：用于搜索、简介、海报、年份和季度总集数；
-- Bangumi Token：公开读取通常可留空；
-- 元数据语言：建议 `zh-CN`；
+- TMDB API 默认 `https://api.themoviedb.org`；
+- TMDB Image 默认 `https://image.tmdb.org`；
+- 密钥支持 32 位 v3 API Key 或 v4 Read Access Token；
+- Bangumi Token 公开读取通常可留空；
+- 自动刮削表示同步标题、评分、海报地址和总集数，不会下载 NFO 或图片；
 - 本地媒体挂载目录会自动同步为 `/media`，不可单独修改。
 
 选择搜索结果后，订阅名称会自动写成：
@@ -115,13 +121,14 @@ qBittorrent 下载根目录
 
 ## 6. 下载完成后外部识别
 
-FeedDock 不再生成 NFO/图片，也不调用 tinyMediaManager。工作流程：
+FeedDock 不再生成 NFO/图片，也不调用 tinyMediaManager。开启 `bangumi.ini` 后可在番剧根目录写入 Bangumi ID。工作流程：
 
 ```text
-推送 qBittorrent
+推送 qBittorrent（可配置重试、并发和做种时长）
+→ 获取任务哈希并追加已缓存 Tracker
 → 获取种子文件列表并安全规范文件名
 → 等待 qBittorrent 进度达到 100%
-→ 记录完成状态
+→ 可选写入 bangumi.ini 并记录完成状态
 → 飞牛影视/Emby/Jellyfin 等外部媒体库自行识别
 ```
 
@@ -143,7 +150,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.13.0 将首页改为订阅优先的任务式控制台，新增顶部导航、批量启停/删除、订阅 JSON 导入导出和常规密码修改。本版本不增加数据库字段，从 v1.12.0 升级无需手工迁移。
+v1.14.0 新增主题与排序、自动元数据同步、`bangumi.ini`、下载重试/并发/做种时长、RSS 总开关与自动跳过、Bangumi 完结停用和 Tracker 缓存。启动时会自动增加评分、总集数检查时间和 Tracker 状态字段，不需要手工 SQL。
 
 升级后建议强制刷新一次浏览器，并确认首页只显示订阅列表。下载、设置和日志现在通过顶部菜单进入。网页“系统管理”中的重启与关闭默认不可用；需要远程控制进程时，在 Compose 中显式设置：
 

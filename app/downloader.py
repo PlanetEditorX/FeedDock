@@ -114,6 +114,7 @@ class QBittorrentClient:
         *,
         rename: str = "",
         tags: str | Iterable[str] = "",
+        seeding_minutes: int = -1,
     ) -> DownloaderResult:
         error = self._configuration_error()
         if error:
@@ -138,6 +139,8 @@ class QBittorrentClient:
                     files["rename"] = (None, safe_segment(rename))
                 if tags_value:
                     files["tags"] = (None, tags_value)
+                if seeding_minutes >= 0:
+                    files["seedingTimeLimit"] = (None, str(seeding_minutes))
                 response = client.post("api/v2/torrents/add", files=files)
                 if response.status_code != 200:
                     return DownloaderResult(False, f"添加任务失败：HTTP {response.status_code}")
@@ -150,6 +153,51 @@ class QBittorrentClient:
                 return DownloaderResult(True, message)
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
+
+    def active_download_count(self) -> tuple[bool, int, str]:
+        error = self._configuration_error()
+        if error:
+            return False, 0, error
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return False, 0, login.message
+                response = client.get(
+                    "api/v2/torrents/info",
+                    params={"filter": "downloading", "category": self.category},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, list):
+                    return False, 0, "qBittorrent 返回了无效的任务列表"
+                return True, len(payload), "已读取活动下载数"
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            return False, 0, f"读取活动下载数失败：{exc}"
+
+    def add_trackers(self, torrent_hash: str, trackers: Iterable[str]) -> DownloaderResult:
+        error = self._configuration_error()
+        if error:
+            return DownloaderResult(False, error)
+        values = [str(value).strip() for value in trackers if str(value).strip()]
+        if not torrent_hash:
+            return DownloaderResult(False, "任务哈希为空")
+        if not values:
+            return DownloaderResult(True, "没有需要添加的 Tracker")
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return login
+                response = client.post(
+                    "api/v2/torrents/addTrackers",
+                    data={"hash": torrent_hash, "urls": "\n".join(values)},
+                )
+                if response.status_code != 200:
+                    return DownloaderResult(False, f"添加 Tracker 失败：HTTP {response.status_code}")
+                return DownloaderResult(True, f"已添加 {len(values)} 个 Tracker")
+        except httpx.HTTPError as exc:
+            return DownloaderResult(False, f"添加 Tracker 请求失败：{exc}")
 
     def normalize_single_video(self, *, tag: str, desired_name: str = "") -> TorrentNormalizeResult:
         """Inspect one tagged torrent, normalize a single video, and report completion.

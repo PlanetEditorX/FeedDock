@@ -41,6 +41,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "total_episodes": "INTEGER NOT NULL DEFAULT 0",
     "total_episodes_locked": "BOOLEAN NOT NULL DEFAULT 0",
     "total_episodes_source": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "total_episodes_checked_at": "DATETIME NULL",
     "naming_mode": "VARCHAR(20) NOT NULL DEFAULT 'auto'",
     "media_type": "VARCHAR(20) NOT NULL DEFAULT 'tv'",
     "manual_title": "TEXT NOT NULL DEFAULT ''",
@@ -48,6 +49,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "bangumi_id": "INTEGER NOT NULL DEFAULT 0",
     "anilist_id": "INTEGER NOT NULL DEFAULT 0",
     "metadata_year": "INTEGER NOT NULL DEFAULT 0",
+    "metadata_rating": "FLOAT NOT NULL DEFAULT 0",
     "metadata_source": "VARCHAR(32) NOT NULL DEFAULT ''",
     "metadata_overview": "TEXT NOT NULL DEFAULT ''",
     "poster_url": "TEXT NOT NULL DEFAULT ''",
@@ -84,6 +86,9 @@ _FEED_ITEM_COLUMNS: dict[str, str] = {
     "scrape_status": "VARCHAR(32) NOT NULL DEFAULT ''",
     "scrape_message": "TEXT NOT NULL DEFAULT ''",
     "scraped_at": "DATETIME NULL",
+    "trackers_status": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "trackers_message": "TEXT NOT NULL DEFAULT ''",
+    "trackers_applied_at": "DATETIME NULL",
     "hidden": "BOOLEAN NOT NULL DEFAULT 0",
 }
 

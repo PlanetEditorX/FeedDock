@@ -45,7 +45,7 @@ main { width: min(1200px, calc(100% - 32px)); margin: 26px auto 60px; }
 .form-grid .wide { grid-column: 1 / -1; }
 .form-grid button { align-self: end; justify-self: start; }
 input, select { width: 100%; padding: 10px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); outline: none; }
-input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #58a6ff22; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft, #58a6ff22); }
 .hint, .muted, .empty { color: var(--muted); }
 .hint { margin: 14px 0 0; }
 code { background: var(--panel-2); padding: 2px 5px; border-radius: 4px; }
@@ -269,7 +269,7 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .log-error { border-left: 3px solid var(--danger); padding-left: .65rem; }
 .log-debug { opacity: .92; }
 
-/* v1.13.0 task-oriented navigation inspired by ani-rss information hierarchy */
+/* v1.14.0 task-oriented navigation inspired by ani-rss information hierarchy */
 .topbar { padding-top: 12px; padding-bottom: 12px; gap: 18px; }
 .app-brand { flex: 0 0 auto; cursor: pointer; }
 .app-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 8px; }
@@ -335,3 +335,17 @@ button:disabled { cursor: not-allowed; }
   .batch-toolbar { align-items: flex-start; flex-direction: column; }
   .login-settings { align-items: flex-start; flex-direction: column; }
 }
+
+:root[data-theme-color="blue"] { --accent: #58a6ff; --accent-soft: rgba(88,166,255,.14); }
+:root[data-theme-color="indigo"] { --accent: #8b8cff; --accent-soft: rgba(139,140,255,.14); }
+:root[data-theme-color="green"] { --accent: #4fd1a5; --accent-soft: rgba(79,209,165,.14); }
+:root[data-theme-color="orange"] { --accent: #f6a04d; --accent-soft: rgba(246,160,77,.14); }
+:root[data-theme-color="rose"] { --accent: #f778ba; --accent-soft: rgba(247,120,186,.14); }
+.rating-badge { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid var(--warn); border-radius: 999px; color: var(--warn); font-size: 12px; font-weight: 750; white-space: nowrap; }
+.subscription-title { flex-wrap: wrap; justify-content: flex-start; }
+.subscription-title h3 { margin-right: auto; }
+label small { color: var(--muted); font-size: 12px; font-weight: 400; }
+
+.setting-details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.setting-details summary { color: var(--accent); cursor: pointer; font-weight: 700; }
+.setting-details p { margin: 9px 0 0; color: var(--muted); }

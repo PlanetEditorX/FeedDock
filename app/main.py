@@ -68,8 +68,16 @@ from .runtime_config import (
     save_qbittorrent_config,
     set_app_setting,
 )
+from .settings_config import (
+    load_application_preferences,
+    normalize_tracker_text,
+    reset_application_preferences,
+    save_application_preferences,
+    save_tracker_cache,
+)
 from .scheduler import scheduler, start_scheduler, stop_scheduler
 from .schemas import (
+    ApplicationPreferencesUpdate,
     AuthStatusOut,
     AutomationSettingsUpdate,
     ChangePasswordRequest,
@@ -131,6 +139,31 @@ def _set_session_cookie(response: Response, account: AdminAccount) -> None:
         samesite="lax",
         path="/",
     )
+
+
+def _validate_auto_skip_rename_requirement(
+    db: Session,
+    values: dict[str, Any],
+    *,
+    existing: Subscription | None = None,
+) -> None:
+    """Prevent subscriptions from violating global file-skip prerequisites.
+
+    The browser disables invalid combinations, but imports, batch actions and
+    direct API calls must enforce the same rule on the server.
+    """
+
+    if not load_application_preferences(db).rss.auto_skip_existing:
+        return
+    enabled = bool(values.get("enabled", existing.enabled if existing is not None else True))
+    rename_enabled = bool(
+        values.get("rename_enabled", existing.rename_enabled if existing is not None else True)
+    )
+    if enabled and not rename_enabled:
+        raise HTTPException(
+            status_code=422,
+            detail='启用“文件已下载自动跳过”时，所有启用订阅都必须开启自动重命名',
+        )
 
 
 def _subscription_values(
@@ -416,6 +449,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, Any]:
         "mikan_cache_hours": settings.mikan_cache_hours,
         "metadata_auto_sync_hours": settings.metadata_auto_sync_hours,
         **metadata.public_dict(),
+        "preferences": load_application_preferences(db).public_dict(),
         "automation": load_automation_config(db).public_dict(),
         "proxy": load_proxy_config(db).public_dict(),
     }
@@ -451,8 +485,65 @@ def restore_downloader_settings(db: Session = Depends(get_db)) -> dict[str, str 
     return reset_qbittorrent_config(db).public_dict()
 
 
+@app.get("/api/application/settings", dependencies=[Depends(require_admin)])
+def get_application_settings(db: Session = Depends(get_db)) -> dict[str, object]:
+    return load_application_preferences(db).public_dict()
+
+
+@app.put("/api/application/settings", dependencies=[Depends(require_admin)])
+def update_application_settings(
+    payload: ApplicationPreferencesUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        config = save_application_preferences(
+            db,
+            theme_color=payload.theme_color,
+            subscription_sort=payload.subscription_sort,
+            retry_count=payload.retry_count,
+            concurrent_limit=payload.concurrent_limit,
+            seeding_minutes=payload.seeding_minutes,
+            rss_enabled=payload.rss_enabled,
+            rss_timeout_seconds=payload.rss_timeout_seconds,
+            auto_skip_existing=payload.auto_skip_existing,
+            auto_disable_complete=payload.auto_disable_complete,
+            trackers_enabled=payload.trackers_enabled,
+            trackers_update_url=payload.trackers_update_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config.public_dict()
+
+
+@app.delete("/api/application/settings", dependencies=[Depends(require_admin)])
+def restore_application_settings(db: Session = Depends(get_db)) -> dict[str, object]:
+    return reset_application_preferences(db).public_dict()
+
+
+@app.post("/api/trackers/refresh", dependencies=[Depends(require_admin)])
+def refresh_trackers(db: Session = Depends(get_db)) -> dict[str, object]:
+    policy = load_application_preferences(db).trackers
+    if not policy.enabled:
+        raise HTTPException(status_code=422, detail="请先启用 Trackers")
+    try:
+        response = external_get(
+            policy.update_url,
+            db=db,
+            timeout=load_application_preferences(db).rss.timeout_seconds,
+            headers={"User-Agent": settings.rss_user_agent, "Accept": "text/plain,*/*"},
+        )
+        response.raise_for_status()
+        trackers = normalize_tracker_text(response.text)
+        if not trackers:
+            raise ValueError("更新地址没有返回有效 Tracker")
+        saved = save_tracker_cache(db, trackers)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Trackers 更新失败：{exc}") from exc
+    return {"ok": True, "message": f"已更新 {len(trackers)} 个 Tracker", **saved.public_dict()}
+
+
 @app.get("/api/metadata/settings", dependencies=[Depends(require_admin)])
-def get_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+def get_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool | int]:
     return load_metadata_config(db).public_dict()
 
 
@@ -460,7 +551,7 @@ def get_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool
 def update_metadata_settings(
     payload: MetadataSettingsUpdate,
     db: Session = Depends(get_db),
-) -> dict[str, str | bool]:
+) -> dict[str, str | bool | int]:
     try:
         config = save_metadata_config(
             db,
@@ -469,6 +560,11 @@ def update_metadata_settings(
             bangumi_access_token=payload.bangumi_access_token,
             clear_bangumi_token=payload.clear_bangumi_token,
             metadata_language=payload.metadata_language,
+            tmdb_api_base=payload.tmdb_api_base,
+            tmdb_image_base=payload.tmdb_image_base,
+            auto_scrape_enabled=payload.auto_scrape_enabled,
+            follow_days=payload.follow_days,
+            bangumi_ini_enabled=payload.bangumi_ini_enabled,
             media_local_root=payload.media_local_root,
             emby_url=payload.emby_url,
             emby_api_key=payload.emby_api_key,
@@ -484,7 +580,7 @@ def update_metadata_settings(
 
 
 @app.delete("/api/metadata/settings", dependencies=[Depends(require_admin)])
-def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool]:
+def restore_metadata_settings(db: Session = Depends(get_db)) -> dict[str, str | bool | int]:
     return reset_metadata_config(db).public_dict()
 
 
@@ -896,7 +992,9 @@ def create_subscription(
     }
     try:
         request.state.debug_stage = "subscription.build-values"
-        subscription = Subscription(**_subscription_values(payload, db))
+        values = _subscription_values(payload, db)
+        _validate_auto_skip_rename_requirement(db, values)
+        subscription = Subscription(**values)
         request.state.debug_stage = "subscription.insert"
         db.add(subscription)
         request.state.debug_stage = "subscription.commit"
@@ -952,6 +1050,7 @@ def import_subscriptions(
             rss_url = str(item.rss_url)
             existing = db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
             values = _subscription_values(item, db)
+            _validate_auto_skip_rename_requirement(db, values, existing=existing)
             if existing is None:
                 db.add(Subscription(**values))
                 created += 1
@@ -983,6 +1082,11 @@ def batch_subscriptions(
             db.delete(subscription)
     else:
         enabled = payload.action == "enable"
+        if enabled:
+            for subscription in subscriptions:
+                _validate_auto_skip_rename_requirement(
+                    db, {"enabled": True}, existing=subscription
+                )
         for subscription in subscriptions:
             subscription.enabled = enabled
     db.commit()
@@ -1024,6 +1128,7 @@ def update_subscription(
     try:
         request.state.debug_stage = "subscription.apply-values"
         values = _subscription_values(payload, db)
+        _validate_auto_skip_rename_requirement(db, values, existing=subscription)
         reset_monitor_state_for_changes(subscription, values)
         for key, value in values.items():
             setattr(subscription, key, value)

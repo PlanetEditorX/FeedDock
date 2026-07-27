@@ -4,13 +4,16 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
 from .downloader import QBittorrentClient
+from .media_sidecar import write_bangumi_ini
 from .models import FeedItem, Subscription, SystemLog
 from .notifications import send_notification
+from .runtime_config import load_metadata_config
+from .settings_config import load_application_preferences
 from .subscription_monitor import evaluate_subscription_completion
 
 
@@ -40,6 +43,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
         "manual_required": 0,
         "errors": 0,
         "scraped": 0,
+        "trackers_applied": 0,
     }
     try:
         items = list(
@@ -48,7 +52,11 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                 .where(
                     FeedItem.status == "queued",
                     FeedItem.qbit_tag != "",
-                    FeedItem.rename_status.in_(_ACTIVE_RENAME_STATES),
+                    or_(
+                        FeedItem.rename_status.in_(_ACTIVE_RENAME_STATES),
+                        FeedItem.scrape_status.in_(("pending", "error")),
+                        FeedItem.trackers_status == "error",
+                    ),
                 )
                 .order_by(FeedItem.id)
                 .limit(limit)
@@ -68,6 +76,16 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             item.download_progress = max(0, min(100, int(result.progress or 0)))
             if result.torrent_hash:
                 item.torrent_hash = result.torrent_hash
+                tracker_policy = load_application_preferences(session).trackers
+                if tracker_policy.enabled and tracker_policy.trackers and item.trackers_applied_at is None:
+                    tracker_result = client.add_trackers(result.torrent_hash, tracker_policy.trackers)
+                    item.trackers_status = "completed" if tracker_result.ok else "error"
+                    item.trackers_message = tracker_result.message[:2000]
+                    if tracker_result.ok:
+                        item.trackers_applied_at = datetime.now(timezone.utc)
+                        stats["trackers_applied"] += 1
+                    else:
+                        stats["errors"] += 1
 
             if "已规范化" in result.message and previous_state not in {"completed", "manual_required"}:
                 stats["renamed"] += 1
@@ -89,8 +107,19 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                             item=item,
                             details={"progress": 100},
                         )
-                item.scrape_status = "skipped"
-                item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
+                subscription = session.get(Subscription, item.subscription_id)
+                if subscription is not None:
+                    sidecar = write_bangumi_ini(subscription, item, load_metadata_config(session))
+                    item.scrape_status = sidecar.state
+                    item.scrape_message = sidecar.message[:2000]
+                    if sidecar.state == "completed":
+                        item.scraped_at = datetime.now(timezone.utc)
+                        stats["scraped"] += 1
+                    elif sidecar.state == "error":
+                        stats["errors"] += 1
+                else:
+                    item.scrape_status = "skipped"
+                    item.scrape_message = "订阅不存在"
 
                 if result.state == "manual_required":
                     stats["manual_required"] += 1
@@ -117,7 +146,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                         f"检查 {stats['checked']}，已规范化 {stats['renamed']}，"
                         f"下载完成 {stats['completed']}，等待 {stats['pending']}，"
                         f"需手动处理 {stats['manual_required']}，"
-                        f"错误 {stats['errors']}"
+                        f"Tracker {stats['trackers_applied']}，错误 {stats['errors']}"
                     ),
                 )
             )

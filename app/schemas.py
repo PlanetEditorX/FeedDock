@@ -180,6 +180,7 @@ class SubscriptionOut(BaseModel):
     bangumi_id: int
     anilist_id: int
     metadata_year: int
+    metadata_rating: float
     metadata_source: str
     metadata_overview: str
     poster_url: str
@@ -200,6 +201,7 @@ class SubscriptionOut(BaseModel):
     total_episodes: int
     total_episodes_locked: bool
     total_episodes_source: str
+    total_episodes_checked_at: datetime | None
     rename_enabled: bool
     file_name_template: str
     scrape_enabled: bool
@@ -271,6 +273,9 @@ class FeedItemOut(BaseModel):
     scrape_status: str
     scrape_message: str
     scraped_at: datetime | None
+    trackers_status: str
+    trackers_message: str
+    trackers_applied_at: datetime | None
     hidden: bool
     created_at: datetime
     updated_at: datetime
@@ -340,12 +345,31 @@ class QBittorrentSettingsUpdate(BaseModel):
         return value.strip()
 
 
+class ApplicationPreferencesUpdate(BaseModel):
+    theme_color: Literal["blue", "indigo", "green", "orange", "rose"] = "blue"
+    subscription_sort: Literal["rating", "pinyin", "updated"] = "updated"
+    retry_count: int = Field(default=2, ge=0, le=10)
+    concurrent_limit: int = Field(default=3, ge=0, le=100)
+    seeding_minutes: int = Field(default=-1, ge=-1, le=525600)
+    rss_enabled: bool = True
+    rss_timeout_seconds: int = Field(default=20, ge=5, le=300)
+    auto_skip_existing: bool = False
+    auto_disable_complete: bool = False
+    trackers_enabled: bool = True
+    trackers_update_url: str = Field(default="https://cf.trackerslist.com/best.txt", max_length=4000)
+
+
 class MetadataSettingsUpdate(BaseModel):
     tmdb_read_access_token: str | None = Field(default=None, max_length=2000)
     clear_tmdb_token: bool = False
     bangumi_access_token: str | None = Field(default=None, max_length=2000)
     clear_bangumi_token: bool = False
     metadata_language: str = Field(default="zh-CN", max_length=20)
+    tmdb_api_base: str = Field(default="https://api.themoviedb.org", max_length=2000)
+    tmdb_image_base: str = Field(default="https://image.tmdb.org", max_length=2000)
+    auto_scrape_enabled: bool = False
+    follow_days: int = Field(default=14, ge=1, le=3650)
+    bangumi_ini_enabled: bool = False
     media_local_root: str = Field(default="", max_length=2000)
     emby_url: str = Field(default="", max_length=2000)
     emby_api_key: str | None = Field(default=None, max_length=1000)
@@ -409,6 +433,7 @@ class MetadataCandidateOut(BaseModel):
     poster_url: str = ""
     detail_url: str = ""
     score: float = 0.0
+    rating: float = 0.0
 
 
 class MetadataRecordOut(MetadataCandidateOut):

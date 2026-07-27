@@ -1,23 +1,35 @@
 # FeedDock
 
-当前版本：`1.13.0`
+当前版本：`1.14.0`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
 
+## v1.14.0：设置与自动化策略
+
+本版本在 1.13.0 的订阅优先控制台基础上，补齐页面、刮削、下载、RSS 和 Tracker 设置，并接入真实执行流程：
+
+- 新增五种主题色，以及按评分、拼音或更新时间排列订阅；
+- 新增全局自动元数据同步、14 天追更窗口、可自定义 TMDB API/图片地址；
+- TMDB 同时支持 32 位 v3 API Key 与 v4 Read Access Token；
+- 下载完成后可安全生成 `bangumi.ini`，开启时会为符合条件的历史完成任务安排一次补写；
+- 新增 qBittorrent 推送失败重试、同时下载限制和做种时长；
+- 新增全局 RSS 开关、20 秒超时、已下载文件自动跳过和 Bangumi 总集数完结停用；
+- 新增 Tracker 列表下载、去重缓存和任务哈希可用后的自动追加；
+- 自动跳过所依赖的“自动重命名”条件在创建、编辑、导入和批量启用路径中均由后端强制校验；
+- 新增 SQLite 增量字段，用于评分、Bangumi 总集数检查时间和 Tracker 处理状态。
+
+完整行为、依赖条件与安全边界见 [`SETTINGS_REFERENCE.md`](SETTINGS_REFERENCE.md)。
+
 ## v1.13.0：订阅优先的任务式控制台
 
-本版本参考 ani-rss 的任务导航思路，将 FeedDock 首页重构为订阅列表，并按使用频率和风险重新组织右上角操作：
-
-- 首页只展示订阅统计、搜索、状态筛选和订阅卡片；
+- 默认首页改为订阅统计、搜索、状态筛选和订阅卡片；
 - 顶部依次提供“添加、下载、刷新、管理、设置、日志”；
-- “添加”支持 Mikan、ANI.BT、Anime Garden、其它 RSS 和批量合集；
-- 下载条目、各类设置和日志进入独立视图，刷新页面后仍保留当前 Hash 路由；
+- 添加入口支持 Mikan、ANI.BT、Anime Garden、其它 RSS 和批量合集；
 - 管理视图支持批量启动、禁用、删除，以及 JSON 导入和导出；
-- 登录密码不再仅限首次登录时修改，可随时从登录设置进入；
-- 系统重启和关闭默认禁用，必须通过环境变量显式开启；
-- 本次没有新增数据库字段，从 1.12.0 升级无需迁移。
+- 下载、设置和日志使用独立 Hash 路由；
+- 登录密码可随时修改，系统重启和关闭默认禁用。
 
-界面结构、排序依据、导入格式和安全边界见 [`UI_NAVIGATION.md`](UI_NAVIGATION.md)。
+界面结构见 [`UI_NAVIGATION.md`](UI_NAVIGATION.md)。
 
 ## v1.12.0：通知中心与订阅健康监控
 
@@ -48,8 +60,10 @@ FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它�
 
 ### 下载与命名
 
-- 推送 qBittorrent；
+- 推送 qBittorrent，并支持失败重试、并发空位等待和单任务做种时限；
 - 自定义下载根目录、媒体目录模板和文件名模板；
+- 可按规范目标文件名跳过已经存在的媒体文件；
+- 可缓存并向新任务追加 Tracker 列表；
 - 通过唯一 qBittorrent Tag 跟踪磁力元数据、进度和完成状态；
 - 单视频任务可规范化视频名及同名字幕；
 - 多视频合集不猜测文件对应关系，保留原名并提示手动处理；
@@ -75,11 +89,11 @@ Mikan / RSS
     ↓
 写入条目并生成保存路径 / 目标文件名
     ↓
-即时或定时推送 qBittorrent（唯一 Tag）
+即时或定时推送 qBittorrent（唯一 Tag、重试、并发限制、做种时限）
     ↓
-每 2 分钟检查任务元数据、进度和完成状态
+每 2 分钟检查任务哈希、Tracker、进度和完成状态
     ↓
-可选：发送完成通知、判断整季完成并自动停用
+可选：生成 bangumi.ini、发送完成通知、判断整季完成并自动停用
     ↓
 外部媒体库识别规范目录和文件名
 ```
@@ -221,7 +235,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.13.0
+FEEDDOCK_BUILD_VERSION=1.14.0
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password
@@ -233,6 +247,8 @@ QBIT_PASSWORD=
 QBIT_CATEGORY=rss
 DOWNLOAD_PATH=/media
 METADATA_LANGUAGE=zh-CN
+TMDB_API_BASE=https://api.themoviedb.org
+TMDB_IMAGE_BASE=https://image.tmdb.org
 TMDB_READ_ACCESS_TOKEN=
 BANGUMI_ACCESS_TOKEN=
 MEDIA_LOCAL_ROOT=/media
@@ -248,47 +264,12 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=false
 
 ## 数据库升级
 
-启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除订阅、条目或历史指纹。v1.12.0 新增：
+启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除订阅、条目、RSS 指纹或通知配置。1.14.0 新增：
 
-- `auto_disable_when_complete`；
-- `stale_days`；
-- `last_new_item_at`；
-- `last_stale_notified_at`；
-- `completion_notified_at`；
-- `last_missing_signature`。
+- `subscriptions.metadata_rating`：元数据评分，用于首页排序；
+- `subscriptions.total_episodes_checked_at`：Bangumi 总集数最近检查时间；
+- `feed_items.trackers_status`；
+- `feed_items.trackers_message`；
+- `feed_items.trackers_applied_at`。
 
-网页通知配置保存在 `app_settings` 表。升级不需要手工 SQL。v1.13.0 不增加数据库字段，只新增导航、批量管理和订阅导入导出能力。
-
-## 安全说明
-
-- 密码、Token、Device Key、Webhook 地址和请求头默认不回传；
-- DEBUG 日志对密码、Token、API Key、Authorization、Cookie 和 Webhook 配置做脱敏；
-- Webhook 可向任意配置地址发送订阅和条目元数据，请只使用可信 HTTPS 服务；
-- 通知发送失败只记录日志，不会改变下载任务结果。
-
-## 开发与验证
-
-```bash
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
-python -m compileall -q app
-node --check app/static/app.js
-node --check app/static/mikan-subscription-state.js
-node --check app/static/navigation.js
-```
-
-完整验证结果见 [`VALIDATION.md`](VALIDATION.md)。
-
-## 相关文档
-
-- [`UI_NAVIGATION.md`](UI_NAVIGATION.md)：订阅优先界面、菜单排序、批量管理与导入导出；
-- [`ANI_RSS_GAP_ANALYSIS.md`](ANI_RSS_GAP_ANALYSIS.md)：上游功能差异、优先级和未采纳项；
-- [`NOTIFICATIONS_AND_MONITORING.md`](NOTIFICATIONS_AND_MONITORING.md)：通知、去重、完结与长期未更新规则；
-- [`MIKAN_SUBSCRIPTION_STATUS.md`](MIKAN_SUBSCRIPTION_STATUS.md)：Mikan 已订阅标识模块；
-- [`METADATA_NAMING.md`](METADATA_NAMING.md)：元数据与命名规则；
-- [`FNOS_DEPLOY.md`](FNOS_DEPLOY.md)：飞牛 OS 部署；
-- [`DEBUG_LOGGING.md`](DEBUG_LOGGING.md)：DEBUG 日志使用方法。
-
-## License
-
-项目许可证见 [`LICENSE`](LICENSE)。请只处理你有权访问的 RSS 与媒体文件。
+主题、下载策略、RSS 策略、Tracker 缓存和刮削设置保存在现有 `app_settings` 表。升级不需要手工 SQL。

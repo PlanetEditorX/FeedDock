@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import html
 import posixpath
+from pathlib import Path
+import time
 import re
 import threading
 from datetime import date, datetime, timedelta, timezone
@@ -17,7 +19,7 @@ from .database import SessionLocal
 from .debug_logging import format_exception_details
 from .downloader import QBittorrentClient
 from .models import FeedItem, Subscription, SystemLog
-from .naming import media_folder_name, naming_context, render_desired_name
+from .naming import is_video_file, media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
 from .outbound import external_get
 from .notifications import send_notification
@@ -28,7 +30,8 @@ from .subscription_monitor import (
     evaluate_subscription_completion,
     record_new_feed_activity,
 )
-from .runtime_config import get_app_setting, load_automation_config, load_qbittorrent_config
+from .runtime_config import get_app_setting, load_automation_config, load_metadata_config, load_qbittorrent_config
+from .settings_config import load_application_preferences
 
 
 _refresh_lock = threading.Lock()
@@ -234,7 +237,7 @@ def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
         url,
         db=db,
         headers=headers,
-        timeout=settings.request_timeout_seconds,
+        timeout=(load_application_preferences(db).rss.timeout_seconds if db is not None else settings.request_timeout_seconds),
     )
     response.raise_for_status()
     return parse_feed(response.content)
@@ -307,8 +310,17 @@ def calculate_missing_episodes(db: Session, subscription: Subscription) -> list[
 
 
 def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
-    if not subscription.auto_metadata:
+    config = load_metadata_config(db)
+    global_enabled = bool(config.auto_scrape_enabled)
+    if not subscription.auto_metadata and not global_enabled:
         return
+    if global_enabled and not subscription.auto_metadata:
+        activity = subscription.last_new_item_at or subscription.last_checked_at or subscription.created_at
+        if activity is not None:
+            if activity.tzinfo is None:
+                activity = activity.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - activity > timedelta(days=config.follow_days):
+                return
     last = subscription.metadata_last_synced_at
     if last is not None:
         if last.tzinfo is None:
@@ -318,10 +330,8 @@ def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
     try:
         from .metadata_service import MetadataService
 
-        MetadataService().sync(db, subscription, "auto")
+        MetadataService(timeout=load_application_preferences(db).rss.timeout_seconds).sync(db, subscription, "auto")
     except Exception as exc:
-        # Metadata outages must never prevent RSS processing. The error is
-        # visible in the system log and the next scheduled run retries it.
         add_log(
             db,
             "WARNING",
@@ -335,7 +345,54 @@ def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
         db.commit()
 
 
+def _refresh_total_episodes_if_due(db: Session, subscription: Subscription) -> None:
+    policy = load_application_preferences(db).rss
+    if not policy.auto_disable_complete or subscription.total_episodes_locked or int(subscription.bangumi_id or 0) <= 0:
+        return
+    checked = subscription.total_episodes_checked_at
+    if checked is not None:
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - checked < timedelta(hours=12):
+            return
+    try:
+        from .metadata_service import MetadataService
+
+        record = MetadataService(timeout=policy.timeout_seconds).get(
+            db, provider="bangumi", metadata_id=int(subscription.bangumi_id), season=subscription.season
+        )
+        if record.total_episodes > 0:
+            subscription.total_episodes = record.total_episodes
+            subscription.total_episodes_source = "bangumi"
+        subscription.total_episodes_checked_at = datetime.now(timezone.utc)
+    except Exception as exc:
+        add_log(db, "WARNING", f"Bangumi 总集数更新失败：{subscription.name}", str(exc))
+
+
+def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Session) -> bool:
+    policy = load_application_preferences(db).rss
+    if not policy.auto_skip_existing or not subscription.rename_enabled or not item.desired_name:
+        return False
+    try:
+        root = Path(load_qbittorrent_config(db).download_path).resolve(strict=False)
+        directory = Path(item.save_path).resolve(strict=False)
+        if directory != root and root not in directory.parents:
+            return False
+        if not directory.is_dir():
+            return False
+        target = item.desired_name.casefold()
+        for index, child in enumerate(directory.iterdir()):
+            if index >= 2000:
+                break
+            if child.is_file() and is_video_file(child.name) and child.stem.casefold() == target:
+                return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return False
+
+
 def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> tuple[bool, str]:
+    preferences = load_application_preferences(db)
     save_path = item.save_path or render_save_path(subscription, item.episode, db)
     desired_name = (
         render_desired_name(subscription, item.episode)
@@ -345,11 +402,47 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     item.save_path = save_path
     item.desired_name = desired_name
     item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
-    item.scrape_status = "skipped"
-    item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
-    result = QBittorrentClient().add_url(
-        item.download_url, save_path, rename=desired_name, tags=item.qbit_tag
-    )
+    item.scrape_status = "pending" if load_metadata_config(db).bangumi_ini_enabled else "skipped"
+    item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+
+    if _existing_video_matches(item, subscription, db):
+        item.status = "skipped"
+        item.reason = "目标目录中已存在同名视频文件"
+        item.rename_status = "skipped"
+        item.rename_message = item.reason
+        return True, item.reason
+
+    client = QBittorrentClient(timeout=preferences.rss.timeout_seconds)
+    if preferences.download.concurrent_limit > 0 and hasattr(client, "active_download_count"):
+        ok, active, message = client.active_download_count()
+        if ok and active >= preferences.download.concurrent_limit:
+            item.status = "scheduled"
+            item.reason = f"等待下载并发空位（{active}/{preferences.download.concurrent_limit}）"
+            item.rename_status = "pending"
+            item.rename_message = item.reason
+            return True, item.reason
+        if not ok:
+            add_log(db, "WARNING", "读取下载并发数失败，继续尝试推送", message)
+
+    attempts = preferences.download.retry_count + 1
+    result = None
+    for attempt in range(attempts):
+        try:
+            result = client.add_url(
+                item.download_url,
+                save_path,
+                rename=desired_name,
+                tags=item.qbit_tag,
+                seeding_minutes=preferences.download.seeding_minutes,
+            )
+        except TypeError:
+            # Compatibility with third-party downloader test doubles and older adapters.
+            result = client.add_url(item.download_url, save_path, rename=desired_name, tags=item.qbit_tag)
+        if result.ok:
+            break
+        if attempt + 1 < attempts:
+            time.sleep(min(1.0, 0.2 * (attempt + 1)))
+    assert result is not None
     if result.ok:
         item.status = "queued"
         item.reason = result.message
@@ -365,28 +458,29 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         )
     else:
         item.status = "error"
-        item.reason = result.message
+        item.reason = f"{result.message}（已尝试 {attempts} 次）"
         item.rename_status = "error"
-        item.rename_message = result.message
+        item.rename_message = item.reason
         send_notification(
             db,
             "rss_error",
             f"下载任务推送失败：{subscription.name}",
-            f"{item.title}\n{result.message}",
+            f"{item.title}\n{item.reason}",
             subscription=subscription,
             item=item,
         )
-    return result.ok, result.message
+    return result.ok, item.reason
 
 
-def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500) -> dict[str, int | bool | str]:
+def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500, include_daily: bool = True) -> dict[str, int | bool | str]:
     owns = db is None
     session = db or SessionLocal()
-    stats = {"checked": 0, "queued": 0, "errors": 0}
+    stats = {"checked": 0, "queued": 0, "waiting": 0, "skipped": 0, "errors": 0}
     try:
-        items = list(session.scalars(
-            select(FeedItem).where(FeedItem.status == "scheduled").order_by(FeedItem.id).limit(limit)
-        ))
+        statement = select(FeedItem).where(FeedItem.status == "scheduled")
+        if not include_daily:
+            statement = statement.where(FeedItem.reason.like("等待下载并发空位%"))
+        items = list(session.scalars(statement.order_by(FeedItem.id).limit(limit)))
         for item in items:
             stats["checked"] += 1
             subscription = session.get(Subscription, item.subscription_id)
@@ -395,9 +489,24 @@ def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500)
                 item.reason = "订阅已删除或停用"
                 continue
             ok, _ = _push_feed_item(session, item, subscription)
-            stats["queued" if ok else "errors"] += 1
+            if item.status == "queued" and ok:
+                stats["queued"] += 1
+            elif item.status == "scheduled" and ok:
+                stats["waiting"] += 1
+            elif item.status == "skipped":
+                stats["skipped"] += 1
+            else:
+                stats["errors"] += 1
         if items:
-            add_log(session, "INFO" if not stats["errors"] else "WARNING", "定时下载任务执行完成", f"检查 {stats['checked']}，推送 {stats['queued']}，错误 {stats['errors']}")
+            add_log(
+                session,
+                "INFO" if not stats["errors"] else "WARNING",
+                "定时下载任务执行完成",
+                (
+                    f"检查 {stats['checked']}，推送 {stats['queued']}，"
+                    f"等待空位 {stats['waiting']}，跳过 {stats['skipped']}，错误 {stats['errors']}"
+                ),
+            )
             session.commit()
         return {"ok": True, "message": "定时下载任务执行完成", **stats}
     finally:
@@ -407,6 +516,10 @@ def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500)
 
 def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
     stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
+    preferences = load_application_preferences(db)
+    if not preferences.rss.enabled:
+        return stats
+    _refresh_total_episodes_if_due(db, subscription)
     _sync_metadata_if_due(db, subscription)
     try:
         entries, source_name = _load_subscription_entries(subscription, db)
@@ -535,18 +648,23 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
         item.qbit_tag = f"feeddock-item-{item.id}"
-        item.scrape_status = "skipped"
-        item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
+        item.scrape_status = "pending" if load_metadata_config(db).bangumi_ini_enabled else "skipped"
+        item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
             item.rename_status = "pending"
             item.rename_message = "等待定时推送"
-            item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
+            item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
         else:
             ok, _ = _push_feed_item(db, item, subscription)
-            stats["queued" if ok else "errors"] += 1
+            if item.status == "skipped":
+                stats["skipped"] += 1
+            elif item.status in {"queued", "scheduled"} and ok:
+                stats["queued"] += 1
+            else:
+                stats["errors"] += 1
 
     now = datetime.now(timezone.utc)
     if any(candidate["matched"] for candidate in candidates):
@@ -573,6 +691,8 @@ def refresh_all() -> dict[str, int | bool | str]:
     totals = {"subscriptions": 0, "new": 0, "queued": 0, "skipped": 0, "errors": 0}
     try:
         with SessionLocal() as db:
+            if not load_application_preferences(db).rss.enabled:
+                return {"ok": True, "message": "RSS 开关已关闭", **totals}
             subscriptions = list(
                 db.scalars(select(Subscription).where(Subscription.enabled.is_(True)).order_by(Subscription.id))
             )

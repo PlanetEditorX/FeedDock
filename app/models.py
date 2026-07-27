@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -69,6 +69,7 @@ class Subscription(Base):
     total_episodes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_episodes_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     total_episodes_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    total_episodes_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Metadata matching and Emby-friendly naming. Existing installations are
     # migrated additively in database.ensure_schema().
@@ -79,6 +80,7 @@ class Subscription(Base):
     bangumi_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     anilist_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metadata_year: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metadata_rating: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     metadata_source: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     metadata_overview: Mapped[str] = mapped_column(Text, default="", nullable=False)
     poster_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -156,6 +158,9 @@ class FeedItem(Base):
     scrape_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     scrape_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trackers_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    trackers_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    trackers_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

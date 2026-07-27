@@ -273,6 +273,52 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', false)", script)
         self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 
+
+    def test_ani_rss_inspired_settings_are_wired_end_to_end(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        settings_config = (ROOT / "app/settings_config.py").read_text(encoding="utf-8")
+        rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
+        postprocess = (ROOT / "app/postprocess.py").read_text(encoding="utf-8")
+        metadata = (ROOT / "app/metadata_service.py").read_text(encoding="utf-8")
+
+        for element_id in (
+            "pageSettingsForm",
+            "metadataSettingsForm",
+            "downloaderForm",
+            "automationSettingsForm",
+            "trackersSettingsForm",
+            "refreshTrackers",
+        ):
+            self.assertIn(f'id="{element_id}"', index)
+        for field in (
+            'name="theme_color"',
+            'name="subscription_sort"',
+            'name="auto_scrape_enabled"',
+            'name="follow_days"',
+            'name="bangumi_ini_enabled"',
+            'name="retry_count"',
+            'name="concurrent_limit"',
+            'name="seeding_minutes"',
+            'name="rss_enabled"',
+            'name="rss_timeout_seconds"',
+            'name="auto_skip_existing"',
+            'name="auto_disable_complete"',
+            'name="trackers_update_url"',
+        ):
+            self.assertIn(field, index)
+        self.assertIn('/api/application/settings', script)
+        self.assertIn('/api/trackers/refresh', script)
+        self.assertIn('def update_application_settings', main)
+        self.assertIn('def refresh_trackers', main)
+        self.assertIn('rss_auto_skip_existing', settings_config)
+        self.assertIn('_existing_video_matches', rss_service)
+        self.assertIn('seeding_minutes=preferences.download.seeding_minutes', rss_service)
+        self.assertIn('client.add_trackers', postprocess)
+        self.assertIn('def _tmdb_auth', metadata)
+        self.assertIn('api_key', metadata)
+
     def test_notification_and_subscription_monitoring_are_wired_end_to_end(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

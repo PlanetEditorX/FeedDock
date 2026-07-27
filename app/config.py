@@ -88,7 +88,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.13.0"),
+        app_version=os.getenv("APP_VERSION", "1.14.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -99,7 +99,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.13.0 (+self-hosted RSS automation)",
+            "FeedDock/1.14.0 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -127,8 +127,8 @@ def load_settings() -> Settings:
         mikan_thumbnail_width=_as_int("MIKAN_THUMBNAIL_WIDTH", 240, minimum=80),
         mikan_thumbnail_height=_as_int("MIKAN_THUMBNAIL_HEIGHT", 320, minimum=80),
         metadata_language=os.getenv("METADATA_LANGUAGE", "zh-CN").strip() or "zh-CN",
-        tmdb_api_base=os.getenv("TMDB_API_BASE", "https://api.themoviedb.org/3").strip().rstrip("/"),
-        tmdb_image_base=os.getenv("TMDB_IMAGE_BASE", "https://image.tmdb.org/t/p").strip().rstrip("/"),
+        tmdb_api_base=os.getenv("TMDB_API_BASE", "https://api.themoviedb.org").strip().rstrip("/"),
+        tmdb_image_base=os.getenv("TMDB_IMAGE_BASE", "https://image.tmdb.org").strip().rstrip("/"),
         tmdb_read_access_token=os.getenv("TMDB_READ_ACCESS_TOKEN", "").strip(),
         bangumi_api_base=os.getenv("BANGUMI_API_BASE", "https://api.bgm.tv").strip().rstrip("/"),
         bangumi_access_token=os.getenv("BANGUMI_ACCESS_TOKEN", "").strip(),

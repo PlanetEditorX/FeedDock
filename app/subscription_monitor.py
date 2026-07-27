@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .models import FeedItem, Subscription, SystemLog
 from .notifications import send_notification
+from .settings_config import load_application_preferences
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -154,7 +155,8 @@ def evaluate_subscription_completion(
     *,
     now: datetime | None = None,
 ) -> bool:
-    if not subscription.auto_disable_when_complete or subscription.total_episodes <= 0:
+    global_enabled = load_application_preferences(db).rss.auto_disable_complete
+    if not (subscription.auto_disable_when_complete or global_enabled) or subscription.total_episodes <= 0:
         return False
     expected = set(range(1, subscription.total_episodes + 1))
     completed = tracked_episode_numbers(db, subscription, completed_only=True)

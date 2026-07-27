@@ -29,6 +29,7 @@ class MetadataCandidate:
     poster_url: str = ""
     detail_url: str = ""
     score: float = 0.0
+    rating: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -42,6 +43,16 @@ class MetadataRecord(MetadataCandidate):
     air_date: str = ""
     available_seasons: list[dict[str, Any]] = field(default_factory=list)
     recommended_season: int = 1
+
+
+def _tmdb_api_root(config: MetadataConfig) -> str:
+    root = (getattr(config, "tmdb_api_base", "") or settings.tmdb_api_base).rstrip("/")
+    return root if root.endswith("/3") else f"{root}/3"
+
+
+def _tmdb_image_root(config: MetadataConfig) -> str:
+    root = (getattr(config, "tmdb_image_base", "") or settings.tmdb_image_base).rstrip("/")
+    return root if root.endswith("/t/p") else f"{root}/t/p"
 
 
 _CHINESE_NUMBERS = {
@@ -104,6 +115,19 @@ class MetadataService:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers
+
+    @staticmethod
+    def _tmdb_auth(token: str) -> tuple[dict[str, str], dict[str, str]]:
+        """Support both TMDB v3 API keys and v4 Read Access Tokens."""
+
+        value = (token or "").strip()
+        headers = {"Accept": "application/json", "User-Agent": settings.rss_user_agent}
+        params: dict[str, str] = {}
+        if re.fullmatch(r"[0-9a-fA-F]{32}", value):
+            params["api_key"] = value
+        elif value:
+            headers["Authorization"] = f"Bearer {value}"
+        return headers, params
 
     def search(
         self,
@@ -183,6 +207,7 @@ class MetadataService:
         subscription.season = record.season
         subscription.season_mode = selected_mode
         subscription.metadata_year = record.year
+        subscription.metadata_rating = max(0.0, min(10.0, float(record.rating or 0.0)))
         subscription.metadata_source = provider
         subscription.metadata_overview = record.overview
         subscription.poster_url = record.poster_url
@@ -273,16 +298,18 @@ class MetadataService:
         self, db: Session, config: MetadataConfig, query: str, media_type: str, year: int, limit: int
     ) -> list[MetadataCandidate]:
         if not config.tmdb_read_access_token:
-            raise ValueError("尚未配置 TMDB Read Access Token")
+            raise ValueError("尚未配置 TMDB API Key 或 Read Access Token")
         kind = "movie" if media_type == "movie" else "tv"
+        headers, auth_params = self._tmdb_auth(config.tmdb_read_access_token)
         params: dict[str, Any] = {
             "query": query, "language": config.language, "include_adult": "false", "page": 1,
+            **auth_params,
         }
         if year:
             params["primary_release_year" if kind == "movie" else "year"] = year
-        url = f"{settings.tmdb_api_base}/search/{kind}"
+        url = f"{_tmdb_api_root(config)}/search/{kind}"
         with external_client(url, db=db, timeout=self.timeout) as client:
-            response = client.get(url, params=params, headers=self._headers(config.tmdb_read_access_token))
+            response = client.get(url, params=params, headers=headers)
             response.raise_for_status()
             payload = response.json()
         candidates: list[MetadataCandidate] = []
@@ -296,8 +323,9 @@ class MetadataService:
                 provider="tmdb", id=int(item.get("id") or 0), media_type=kind,
                 title=title_with_year(title or original, item_year), original_title=original,
                 year=item_year, overview=str(item.get("overview") or "").strip(),
-                poster_url=(f"{settings.tmdb_image_base}/w342{poster_path}" if poster_path else ""),
+                poster_url=(f"{_tmdb_image_root(config)}/w342{poster_path}" if poster_path else ""),
                 detail_url=f"https://www.themoviedb.org/{kind}/{int(item.get('id') or 0)}",
+                rating=round(float(item.get("vote_average") or 0.0), 2),
             ))
         return candidates
 
@@ -347,20 +375,22 @@ class MetadataService:
         season: int, season_mode: str, query_title: str,
     ) -> MetadataRecord:
         if not config.tmdb_read_access_token:
-            raise ValueError("尚未配置 TMDB Read Access Token")
+            raise ValueError("尚未配置 TMDB API Key 或 Read Access Token")
         kind = "movie" if media_type == "movie" else "tv"
-        headers = self._headers(config.tmdb_read_access_token)
-        detail_url = f"{settings.tmdb_api_base}/{kind}/{metadata_id}"
+        headers, auth_params = self._tmdb_auth(config.tmdb_read_access_token)
+        detail_url = f"{_tmdb_api_root(config)}/{kind}/{metadata_id}"
         with external_client(detail_url, db=db, timeout=self.timeout) as client:
-            detail_response = client.get(detail_url, params={"language": config.language}, headers=headers)
+            detail_response = client.get(
+                detail_url, params={"language": config.language, **auth_params}, headers=headers
+            )
             detail_response.raise_for_status()
             detail = detail_response.json()
             rows = self._available_tmdb_seasons(detail) if kind == "tv" else []
             resolved_season = self._resolve_tmdb_season(rows, season, season_mode, query_title) if kind == "tv" else 1
             season_detail: dict[str, Any] = {}
             if kind == "tv":
-                season_url = f"{settings.tmdb_api_base}/tv/{metadata_id}/season/{resolved_season}"
-                response = client.get(season_url, params={"language": config.language}, headers=headers)
+                season_url = f"{_tmdb_api_root(config)}/tv/{metadata_id}/season/{resolved_season}"
+                response = client.get(season_url, params={"language": config.language, **auth_params}, headers=headers)
                 if response.status_code == 200:
                     season_detail = response.json()
                 elif response.status_code != 404:
@@ -382,11 +412,11 @@ class MetadataService:
         return MetadataRecord(
             provider="tmdb", id=metadata_id, media_type=kind, title=title or original,
             original_title=original, year=year, overview=str(detail.get("overview") or "").strip(),
-            poster_url=(f"{settings.tmdb_image_base}/original{poster_path}" if poster_path else ""),
-            backdrop_url=(f"{settings.tmdb_image_base}/original{backdrop_path}" if backdrop_path else ""),
+            poster_url=(f"{_tmdb_image_root(config)}/original{poster_path}" if poster_path else ""),
+            backdrop_url=(f"{_tmdb_image_root(config)}/original{backdrop_path}" if backdrop_path else ""),
             detail_url=f"https://www.themoviedb.org/{kind}/{metadata_id}", total_episodes=total,
             season=resolved_season, air_date=date_value[:10], available_seasons=rows,
-            recommended_season=resolved_season,
+            recommended_season=resolved_season, rating=round(float(detail.get("vote_average") or 0.0), 2),
         )
 
     def _search_bangumi(
@@ -416,6 +446,7 @@ class MetadataService:
                 year=item_year, overview=str(item.get("summary") or "").strip(),
                 poster_url=str(images.get("large") or images.get("common") or ""),
                 detail_url=f"https://bangumi.tv/subject/{subject_id}",
+                rating=round(float((item.get("rating") or {}).get("score") or 0.0), 2),
             ))
         return candidates
 
@@ -447,6 +478,7 @@ class MetadataService:
             poster_url=str(images.get("large") or images.get("common") or ""), backdrop_url="",
             detail_url=f"https://bangumi.tv/subject/{metadata_id}", total_episodes=total,
             season=max(0, season), air_date=date_value[:10], recommended_season=max(0, season),
+            rating=round(float((detail.get("rating") or {}).get("score") or 0.0), 2),
         )
 
     def _anilist_request(self, db: Session, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -470,7 +502,7 @@ class MetadataService:
             media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
               id title { romaji english native } description(asHtml: false)
               episodes startDate { year month day } coverImage { extraLarge large }
-              bannerImage siteUrl format
+              bannerImage siteUrl format averageScore
             }
           }
         }
@@ -493,6 +525,7 @@ class MetadataService:
                 overview=_strip_markup(str(item.get("description") or "")),
                 poster_url=str(cover.get("extraLarge") or cover.get("large") or ""),
                 detail_url=str(item.get("siteUrl") or f"https://anilist.co/anime/{media_id}"),
+                rating=round(float(item.get("averageScore") or 0.0) / 10.0, 2),
             ))
         return candidates
 
@@ -526,4 +559,5 @@ class MetadataService:
             detail_url=str(item.get("siteUrl") or f"https://anilist.co/anime/{metadata_id}"),
             total_episodes=int(item.get("episodes") or (1 if item.get("format") == "MOVIE" else 0)),
             season=max(0, season), air_date=air_date[:10], recommended_season=max(0, season),
+            rating=round(float(item.get("averageScore") or 0.0) / 10.0, 2),
         )

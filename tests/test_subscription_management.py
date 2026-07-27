@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 from app.main import batch_subscriptions, export_subscriptions, import_subscriptions, system_status
+from app.settings_config import save_application_preferences
+from fastapi import HTTPException
 from app.models import Subscription
 from app.schemas import SubscriptionBatchRequest, SubscriptionCreate, SubscriptionImportRequest
 
@@ -102,6 +104,38 @@ class SubscriptionManagementTests(unittest.TestCase):
         )
         self.assertEqual(deleted["affected"], 1)
         self.assertIsNone(self.db.get(Subscription, rows[1].id))
+
+
+    def test_auto_skip_blocks_enabling_subscription_without_rename(self) -> None:
+        subscription = Subscription(
+            name="No rename",
+            rss_url="https://example.test/no-rename.xml",
+            enabled=False,
+            rename_enabled=False,
+        )
+        self.db.add(subscription)
+        self.db.commit()
+        save_application_preferences(
+            self.db,
+            theme_color="blue",
+            subscription_sort="updated",
+            retry_count=2,
+            concurrent_limit=3,
+            seeding_minutes=-1,
+            rss_enabled=True,
+            rss_timeout_seconds=20,
+            auto_skip_existing=True,
+            auto_disable_complete=False,
+            trackers_enabled=True,
+            trackers_update_url="https://cf.trackerslist.com/best.txt",
+        )
+        with self.assertRaises(HTTPException) as raised:
+            batch_subscriptions(
+                SubscriptionBatchRequest(ids=[subscription.id], action="enable"), self.db
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("自动重命名", raised.exception.detail)
+        self.assertFalse(self.db.get(Subscription, subscription.id).enabled)
 
     def test_system_actions_are_safe_by_default(self) -> None:
         status = system_status()

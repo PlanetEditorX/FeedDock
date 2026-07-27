@@ -11,6 +11,7 @@ from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
 from .runtime_config import load_automation_config, load_rss_poll_config, mark_automation_run
+from .settings_config import load_application_preferences
 
 
 class PollScheduler:
@@ -56,7 +57,8 @@ class PollScheduler:
             now = time.monotonic()
             with SessionLocal() as db:
                 poll_interval = load_rss_poll_config(db).minutes
-            rss_due = last_rss_refresh is None or now - last_rss_refresh >= poll_interval * 60
+                rss_enabled = load_application_preferences(db).rss.enabled
+            rss_due = rss_enabled and (last_rss_refresh is None or now - last_rss_refresh >= poll_interval * 60)
             if rss_due:
                 try:
                     refresh_all()
@@ -67,6 +69,7 @@ class PollScheduler:
             if now >= next_completion_check:
                 try:
                     with SessionLocal() as db:
+                        dispatch_scheduled_downloads(db, limit=100, include_daily=False)
                         normalize_pending_items(db, limit=100)
                 except Exception as exc:
                     log_exception("后台下载完成检查异常", exc, stage="scheduler.normalize-pending")

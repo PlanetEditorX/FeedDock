@@ -42,6 +42,9 @@ services:
       # 元数据与 Emby 规范命名
       METADATA_LANGUAGE: "zh-CN"
       METADATA_AUTO_SYNC_HOURS: "24"
+      TMDB_API_BASE: "https://api.themoviedb.org"
+      TMDB_IMAGE_BASE: "https://image.tmdb.org"
+      # 支持 32 位 v3 API Key 或 v4 Read Access Token
       TMDB_READ_ACCESS_TOKEN: ""
       BANGUMI_ACCESS_TOKEN: ""
       ANILIST_API_URL: "https://graphql.anilist.co"
