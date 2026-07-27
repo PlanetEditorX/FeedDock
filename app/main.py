@@ -849,6 +849,7 @@ def source_catalog_detail(
     source_id: str,
     title: str = Query(min_length=1, max_length=300),
     subject_id: int = Query(default=0, ge=0),
+    mikan_id: int = Query(default=0, ge=0),
     original_title: str = Query(default="", max_length=300),
     english_title: str = Query(default="", max_length=300),
     aliases: str = Query(default="", max_length=2000),
@@ -860,6 +861,7 @@ def source_catalog_detail(
         "title_original": original_title or title,
         "title_english": english_title or original_title or title,
         "subject_id": subject_id,
+        "mikan_id": mikan_id,
         "aliases": [value.strip() for value in aliases.split("\n") if value.strip()] or [title],
     }
     try:

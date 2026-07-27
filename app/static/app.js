@@ -758,7 +758,8 @@ async function openMikanDetail(item, forceRefresh = false) {
       detail = await api(path, forceRefresh ? { method: 'POST' } : {});
     } else {
       const params = new URLSearchParams({
-        title: item.title || '', subject_id: String(item.subject_id || item.bangumi_id || 0),
+        title: item.title || '', subject_id: String(item.subject_id || 0),
+        mikan_id: String(item.mikan_id || 0),
         original_title: item.title_original || '', english_title: item.title_english || '',
         aliases: (item.aliases || []).join('\n'), force_refresh: forceRefresh ? 'true' : 'false',
       });
@@ -904,7 +905,8 @@ function renderMikanCatalog(data) {
 
   const hiddenSummary = hiddenCount ? ` · 已隐藏 ${hiddenCount} 部` : '';
   const sourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
-  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${data.attribution ? ` · ${data.attribution}` : ""}`;
+  const fallbackSummary = data.fallback_notice ? ` · ${data.fallback_notice}` : '';
+  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${fallbackSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
   state.className = 'hint';
 
   for (const row of data.rows) {

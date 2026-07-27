@@ -1,4 +1,4 @@
-# FeedDock v1.16.0 飞牛 OS 部署
+# FeedDock v1.16.1 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -150,7 +150,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.16.0 让 Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 都进入按星期番剧周历，并支持搜索、缓存读取、强制更新和站点专用 RSS。共享周历会遵循代理设置。从 1.15.0 升级不新增数据库字段，不需要手工 SQL。
+v1.16.1 修复非 Mikan 周历对单一 GitHub Raw 域名的依赖：默认依次尝试多个 `bangumi-data` 镜像，全部失败时自动复用 Mikan 季度目录和缓存。升级不新增数据库字段，不需要手工 SQL。
 
 升级后建议强制刷新一次浏览器，并确认首页只显示订阅列表。下载、设置和日志现在通过顶部菜单进入。网页“系统管理”中的重启与关闭默认不可用；需要远程控制进程时，在 Compose 中显式设置：
 
@@ -173,6 +173,19 @@ environment:
 2. `PUID`、`PGID` 是否为 `0`；
 3. 挂载不是只读；
 4. 飞牛共享目录权限允许容器访问。
+
+### ANI.BT、Anime Garden、Nyaa、SubsPlease 提示 DNS 解析失败
+
+1.16.1 会自动尝试多个周历镜像，并在全部失败时回退 Mikan。升级后先强制刷新浏览器，再点击“强制更新”。
+
+需要自定义镜像时，在 Compose 中设置：
+
+```yaml
+environment:
+  ANIME_CATALOG_BASE_URLS: "https://你的镜像/data/items,https://备用镜像/data/items"
+```
+
+该配置只影响番剧周历元数据，不改变各资源站 RSS 地址。
 
 ### 最终下载路径仍不正确
 

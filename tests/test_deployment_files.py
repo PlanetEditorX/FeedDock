@@ -35,6 +35,9 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "30"', compose)
         self.assertIn('MIKAN_THUMBNAIL_WIDTH: "240"', compose)
         self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "320"', compose)
+        self.assertIn('ANIME_CATALOG_BASE_URLS:', compose)
+        self.assertIn('cdn.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items', compose)
+        self.assertIn('fastly.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
     def test_frontend_has_multi_source_weekly_catalog(self) -> None:
@@ -66,6 +69,8 @@ class DeploymentFileTests(unittest.TestCase):
             index.index('/static/app.js?v='),
         )
         self.assertIn("result.desired_name || result.save_path", script)
+        self.assertIn("mikan_id: String(item.mikan_id || 0)", script)
+        self.assertIn("fallback_notice", script)
         self.assertNotIn("dmhy", script.lower())
 
     def test_mikan_modal_is_hidden_until_anime_is_selected(self) -> None:

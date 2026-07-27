@@ -350,7 +350,7 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .setting-details summary { color: var(--accent); cursor: pointer; font-weight: 700; }
 .setting-details p { margin: 9px 0 0; color: var(--muted); }
 
-/* v1.16.0 subscription source integrations */
+/* v1.16.1 subscription source integrations */
 .subscription-source-context { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .subscription-source-heading { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .subscription-source-heading h3 { margin: 0 0 5px; font-size: 17px; }

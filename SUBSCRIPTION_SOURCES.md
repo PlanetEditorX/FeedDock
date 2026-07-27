@@ -1,4 +1,4 @@
-# FeedDock 1.16.0 订阅站点说明
+# FeedDock 1.16.1 订阅站点说明
 
 “添加 → 添加订阅”现包含：
 
@@ -26,7 +26,7 @@ Mikan 使用自身季度目录，并提供字幕组维度的 RSS：
 
 ## ANI.BT
 
-ANI.BT 使用共享周历，并根据 Bangumi 条目 ID 生成：
+ANI.BT 使用共享周历。标准数据使用 Bangumi 条目 ID；当共享镜像失败并回退 Mikan 时，使用 Mikan 番剧 ID：
 
 - 全部发布；
 - 1080p；
@@ -35,10 +35,14 @@ ANI.BT 使用共享周历，并根据 Bangumi 条目 ID 生成：
 RSS 形式：
 
 ```text
+# 标准周历
 https://anibt.net/rss/anime.xml?bgmId=543360
+
+# Mikan 回退周历
+https://anibt.net/rss/anime.xml?bangumiId=3921
 ```
 
-没有 Bangumi 条目 ID 时不会伪造 RSS，周历卡片会明确禁用。
+ANI.BT 官方兼容 Mikan 的 `bangumiId` 参数。只有 Bangumi ID 和 Mikan ID 都不存在时，周历卡片才会禁用。
 
 ## Anime Garden
 
@@ -111,4 +115,4 @@ other
 
 ## 升级
 
-1.15.0 → 1.16.0 不需要数据库迁移。静态资源缓存参数更新为 `v=1.16.0`。
+1.16.0 → 1.16.1 不需要数据库迁移。升级后建议强制刷新浏览器；首次刷新非 Mikan 周历时会自动采用多镜像和 Mikan 回退逻辑。

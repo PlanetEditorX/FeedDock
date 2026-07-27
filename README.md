@@ -1,20 +1,21 @@
 # FeedDock
 
-当前版本：`1.16.0`
+当前版本：`1.16.1`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
 
-## v1.16.0：多站点番剧周历
+## v1.16.1：多站点周历 DNS 容错修复
 
-- Mikan、ANI.BT、Anime Garden、Nyaa 和 SubsPlease 均可从“添加”进入按星期番剧列表；
-- 所有站点支持标题搜索、读取持久缓存和手动强制更新；
-- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 共享 `bangumi-data` 周历，切换站点不会重复请求季度数据；
-- 每个站点根据自身能力生成 RSS：ANI.BT 使用 Bangumi ID，Anime Garden 使用标题过滤，Nyaa 使用分类搜索，SubsPlease 使用分辨率 Feed 与包含规则；
-- 打开番剧后会缓存每个 RSS 预设的最近资源，支持单独强制更新；
-- 已浏览季度会按现有缓存周期后台更新，并遵循 FeedDock 代理设置；
-- 没有站点所需标识的番剧会明确禁用，而不是生成无效订阅。
+- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 不再只依赖 `raw.githubusercontent.com`；
+- 默认依次尝试 jsDelivr CDN、jsDelivr Fastly 节点和 GitHub Raw；
+- 某个域名发生 DNS 解析错误后会在本轮立即熔断，不再对 3 个月重复等待；
+- 所有 `bangumi-data` 镜像不可用时，自动复用已经可用的 Mikan 季度目录；
+- 回退后的四个站点仍可按星期浏览、搜索、读取缓存和强制更新；
+- ANI.BT 使用官方支持的 Mikan `bangumiId` 兼容参数生成 RSS；
+- 强制更新失败但已有 Mikan 缓存时，会继续读取缓存，不返回空白页面；
+- 页面会明确显示“已自动回退到 Mikan 季度目录”，便于区分标准周历和容错数据。
 
-详细说明见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md) 和 [`SUBSCRIPTION_SOURCES.md`](SUBSCRIPTION_SOURCES.md)。
+可通过 `ANIME_CATALOG_BASE_URLS` 自定义镜像顺序。详细说明见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md)。
 
 ## v1.15.0：订阅站点入口
 
@@ -260,7 +261,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.16.0
+FEEDDOCK_BUILD_VERSION=1.16.1
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

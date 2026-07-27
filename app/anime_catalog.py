@@ -6,7 +6,7 @@ import threading
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_, select
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
+from .mikan_cache import MikanCacheService
 from .models import MikanCacheEntry, Subscription, SystemLog, utcnow
 from .outbound import external_get
 from .rss_parser import parse_feed
@@ -30,8 +31,9 @@ _SEASON_MONTHS = {
 _WEEKDAYS = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
 _CATALOG_KIND = "anime_catalog"
 _DETAIL_KIND = "source_detail"
-_SCHEMA_VERSION = 1
-_DATA_BASE = "https://raw.githubusercontent.com/bangumi-data/bangumi-data/master/data/items"
+_SCHEMA_VERSION = 2
+_DATA_BASES = settings.anime_catalog_base_urls
+_DATA_BASE = _DATA_BASES[0] if _DATA_BASES else ""
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _SUPPORTED_SOURCES = {"anibt", "ag", "nyaa", "subsplease"}
 _SOURCE_LABELS = {"anibt": "ANI.BT", "ag": "Anime Garden", "nyaa": "Nyaa", "subsplease": "SubsPlease"}
@@ -47,6 +49,20 @@ def _loads(value: str) -> dict[str, Any]:
 
 def _dumps(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _is_dns_failure(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    markers = (
+        "temporary failure in name resolution",
+        "name or service not known",
+        "nodename nor servname provided",
+        "no address associated with hostname",
+        "getaddrinfo failed",
+        "errno -2",
+        "errno -3",
+    )
+    return isinstance(exc, OSError) or any(marker in message for marker in markers)
 
 
 def _aware(value: datetime) -> datetime:
@@ -164,6 +180,65 @@ def parse_bangumi_data_items(payloads: list[list[dict[str, Any]]], *, year: int,
     }
 
 
+def normalize_mikan_catalog(payload: dict[str, Any], *, year: int, season: str, upstream_errors: list[str] | None = None) -> dict[str, Any]:
+    """Convert the working Mikan quarter catalog into the shared catalog schema.
+
+    This is a network-resilience fallback. Mikan IDs are preserved separately
+    from Bangumi subject IDs so ANI.BT can use its documented Mikan-compatible
+    ``bangumiId`` alias without corrupting metadata identifiers.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for row in payload.get("rows", []):
+        items: list[dict[str, Any]] = []
+        for raw in row.get("items", []):
+            title = str(raw.get("title", "")).strip()
+            try:
+                mikan_id = int(raw.get("bangumi_id") or 0)
+            except (TypeError, ValueError):
+                mikan_id = 0
+            if not title or not mikan_id:
+                continue
+            items.append({
+                "catalog_id": mikan_id,
+                "subject_id": 0,
+                "mikan_id": mikan_id,
+                "title": title,
+                "title_original": title,
+                "title_english": "",
+                "aliases": [title],
+                "begin": "",
+                "air_time": str(raw.get("update_at", "") or ""),
+                "weekday": str(row.get("weekday", "") or ""),
+                "day_of_week": row.get("day_of_week"),
+                "official_url": str(raw.get("detail_url", "") or ""),
+                "cover_url": str(raw.get("cover_url", "") or ""),
+                "cover_proxy_url": str(raw.get("cover_proxy_url", "") or ""),
+                "mikan_base_url": str(raw.get("base_url", "") or payload.get("base_url", "") or ""),
+            })
+        if items:
+            rows.append({
+                "weekday": str(row.get("weekday", "") or "其他"),
+                "day_of_week": row.get("day_of_week"),
+                "items": items,
+            })
+
+    errors = list(upstream_errors or [])
+    return {
+        "provider": "mikan-fallback",
+        "year": year,
+        "season": season,
+        "query": "",
+        "base_url": str(payload.get("base_url", "") or ""),
+        "rows": rows,
+        "errors": errors,
+        "upstream_errors": errors,
+        "fallback_used": True,
+        "fallback_notice": "bangumi-data 镜像不可用，已自动回退到 Mikan 季度目录",
+        "attribution": "番剧周历回退来源：Mikan；标准周历数据：bangumi-data（CC BY 4.0）",
+    }
+
+
 def _preset(*, title: str, source_name: str, rss_url: str, include_keywords: str = "", bangumi_id: int = 0) -> dict[str, Any]:
     return {
         "name": title,
@@ -197,6 +272,7 @@ def source_groups(source_id: str, item: dict[str, Any]) -> list[dict[str, Any]]:
     original = str(item.get("title_original", "")).strip() or title
     english = str(item.get("title_english", "")).strip() or original
     subject_id = int(item.get("subject_id") or 0)
+    mikan_id = int(item.get("mikan_id") or 0)
     groups: list[dict[str, Any]] = []
 
     def add(name: str, rss_url: str, include: str = "") -> None:
@@ -217,9 +293,13 @@ def source_groups(source_id: str, item: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     if source_id == "anibt":
-        if not subject_id:
+        if subject_id:
+            base = f"https://anibt.net/rss/anime.xml?{urlencode({'bgmId': subject_id})}"
+        elif mikan_id:
+            # ANI.BT explicitly supports Mikan's bangumiId compatibility alias.
+            base = f"https://anibt.net/rss/anime.xml?{urlencode({'bangumiId': mikan_id})}"
+        else:
             return []
-        base = f"https://anibt.net/rss/anime.xml?{urlencode({'bgmId': subject_id})}"
         add("全部发布", base)
         add("1080p", base + "&resolution=1080p")
         add("720p", base + "&resolution=720p")
@@ -243,14 +323,37 @@ def source_groups(source_id: str, item: dict[str, Any]) -> list[dict[str, Any]]:
     return groups
 
 
+def _anibt_query_ids(url: str) -> tuple[int, int]:
+    try:
+        query = parse_qs(urlparse(url).query)
+    except ValueError:
+        return 0, 0
+    lowered = {str(key).casefold(): values for key, values in query.items()}
+
+    def first_int(name: str) -> int:
+        values = lowered.get(name.casefold(), [])
+        try:
+            value = int(values[0]) if values else 0
+        except (TypeError, ValueError):
+            return 0
+        return value if value > 0 else 0
+
+    return first_int("bgmId"), first_int("bangumiId")
+
+
 def _subscription_matches(source_id: str, item: dict[str, Any], subscriptions: list[Subscription]) -> bool:
     aliases = {str(value).strip().casefold() for value in item.get("aliases", []) if str(value).strip()}
     subject_id = int(item.get("subject_id") or 0)
+    mikan_id = int(item.get("mikan_id") or 0)
     for subscription in subscriptions:
         if classify_subscription_source(subscription.rss_url) != source_id:
             continue
-        if source_id == "anibt" and subject_id and subscription.bangumi_id == subject_id:
-            return True
+        if source_id == "anibt":
+            bgm_id, compatible_mikan_id = _anibt_query_ids(subscription.rss_url)
+            if subject_id and (subscription.bangumi_id == subject_id or bgm_id == subject_id):
+                return True
+            if mikan_id and compatible_mikan_id == mikan_id:
+                return True
         candidate_values = {
             subscription.name.casefold(),
             subscription.reference_title.casefold(),
@@ -280,7 +383,7 @@ def decorate_catalog(payload: dict[str, Any], source_id: str, subscriptions: lis
             if folded and not any(folded in value.casefold() for value in aliases):
                 continue
             item = dict(raw)
-            item["bangumi_id"] = int(item.get("subject_id") or 0)
+            item["bangumi_id"] = int(item.get("subject_id") or item.get("mikan_id") or 0)
             groups = source_groups(source_id, item)
             item["available"] = bool(groups)
             item["subscribed"] = _subscription_matches(source_id, item, subscriptions)
@@ -328,27 +431,122 @@ class AnimeCatalogCacheService:
         db.commit(); db.refresh(row)
         return row
 
-    def _fetch_catalog(self, year: int, season: str, *, db: Session | None = None) -> dict[str, Any]:
+    def _fetch_catalog(
+        self,
+        year: int,
+        season: str,
+        *,
+        db: Session | None = None,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         payloads: list[list[dict[str, Any]]] = []
-        errors: list[str] = []
+        used_bases: list[str] = []
+        month_errors: list[str] = []
+        disabled_bases: set[str] = set()
+
         for month in _SEASON_MONTHS[season]:
-            url = f"{_DATA_BASE}/{year}/{month:02}.json"
-            try:
-                response = external_get(url, db=db, timeout=settings.request_timeout_seconds, headers={"User-Agent": settings.rss_user_agent, "Accept": "application/json"})
-                response.raise_for_status()
-                if len(response.content) > _MAX_RESPONSE_BYTES:
-                    raise ValueError("单月数据超过 16 MiB")
-                parsed = response.json()
-                if not isinstance(parsed, list):
-                    raise ValueError("返回格式不是数组")
-                payloads.append(parsed)
-            except Exception as exc:
-                errors.append(f"{month:02} 月：{exc}")
-        if not payloads:
-            raise RuntimeError("；".join(errors) or "无法读取番剧周历")
-        result = parse_bangumi_data_items(payloads, year=year, season=season)
-        result["errors"] = errors
-        return result
+            attempts: list[str] = []
+            parsed_month: list[dict[str, Any]] | None = None
+            for base in _DATA_BASES:
+                if base in disabled_bases:
+                    continue
+                url = f"{base}/{year}/{month:02}.json"
+                try:
+                    response = external_get(
+                        url,
+                        db=db,
+                        timeout=settings.request_timeout_seconds,
+                        headers={"User-Agent": settings.rss_user_agent, "Accept": "application/json"},
+                    )
+                    response.raise_for_status()
+                    if len(response.content) > _MAX_RESPONSE_BYTES:
+                        raise ValueError("单月数据超过 16 MiB")
+                    candidate = response.json()
+                    if not isinstance(candidate, list):
+                        raise ValueError("返回格式不是数组")
+                    parsed_month = candidate
+                    if base not in used_bases:
+                        used_bases.append(base)
+                    break
+                except Exception as exc:
+                    host = urlparse(base).netloc or base
+                    attempts.append(f"{host}: {exc}")
+                    if _is_dns_failure(exc):
+                        disabled_bases.add(base)
+            if parsed_month is None:
+                unavailable = "本轮可用镜像均已失败" if disabled_bases else "没有配置周历镜像"
+                month_errors.append(f"{month:02} 月：" + "；".join(attempts or [unavailable]))
+            else:
+                payloads.append(parsed_month)
+
+        if len(payloads) == len(_SEASON_MONTHS[season]):
+            result = parse_bangumi_data_items(payloads, year=year, season=season)
+            result.update({
+                "base_url": used_bases[0] if used_bases else _DATA_BASE,
+                "base_urls": used_bases,
+                "fallback_used": False,
+                "fallback_notice": "",
+                "errors": [],
+            })
+            return result
+
+        # GitHub Raw is frequently affected by DNS or regional network issues.
+        # Reuse the already supported Mikan quarter catalog so every source page
+        # remains usable instead of coupling four providers to one hostname.
+        try:
+            mikan_service = MikanCacheService()
+
+            def read_mikan(session: Session, refresh: bool) -> dict[str, Any]:
+                return mikan_service.catalog(
+                    session,
+                    year,
+                    season,
+                    "",
+                    force_refresh=refresh,
+                )
+
+            if db is None:
+                with SessionLocal() as fallback_db:
+                    try:
+                        mikan_payload = read_mikan(fallback_db, force_refresh)
+                    except Exception:
+                        if not force_refresh:
+                            raise
+                        mikan_payload = read_mikan(fallback_db, False)
+            else:
+                try:
+                    mikan_payload = read_mikan(db, force_refresh)
+                except Exception:
+                    if not force_refresh:
+                        raise
+                    mikan_payload = read_mikan(db, False)
+            fallback = normalize_mikan_catalog(
+                mikan_payload,
+                year=year,
+                season=season,
+                upstream_errors=month_errors,
+            )
+            if fallback["rows"]:
+                return fallback
+            month_errors.append("Mikan：季度目录为空")
+        except Exception as exc:
+            month_errors.append(f"Mikan：{exc}")
+
+        # A partially available bangumi-data quarter is still more useful than
+        # a total failure when Mikan is also unreachable.
+        if payloads:
+            result = parse_bangumi_data_items(payloads, year=year, season=season)
+            result.update({
+                "base_url": used_bases[0] if used_bases else _DATA_BASE,
+                "base_urls": used_bases,
+                "fallback_used": False,
+                "partial": True,
+                "fallback_notice": "部分月份不可用，当前显示已成功读取的周历数据",
+                "errors": month_errors,
+            })
+            return result
+
+        raise RuntimeError("；".join(month_errors) or "无法读取番剧周历")
 
     def catalog(self, db: Session, year: int, season: str, *, force_refresh: bool = False) -> dict[str, Any]:
         if not 2000 <= year <= 2100:
@@ -366,7 +564,7 @@ class AnimeCatalogCacheService:
         status = "cache"
         if needs_refresh:
             try:
-                payload = self._fetch_catalog(year, season, db=db)
+                payload = self._fetch_catalog(year, season, db=db, force_refresh=force_refresh)
             except Exception as exc:
                 if entry is None:
                     raise
