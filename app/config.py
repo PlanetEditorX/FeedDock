@@ -50,6 +50,8 @@ class Settings:
     timezone: str
     update_repository: str
     update_api_url: str
+    update_manifest_urls: tuple[str, ...]
+    update_check_cache_hours: int
     watchtower_url: str
     watchtower_token: str
     deployed_image: str
@@ -88,7 +90,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.17.8"),
+        app_version=os.getenv("APP_VERSION", "1.17.9"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -99,7 +101,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.17.8 (+self-hosted RSS automation)",
+            "FeedDock/1.17.9 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -109,6 +111,16 @@ def load_settings() -> Settings:
         timezone=os.getenv("TZ", "Asia/Shanghai"),
         update_repository=os.getenv("UPDATE_REPOSITORY", "planeteditorx/feeddock").strip().strip("/"),
         update_api_url=os.getenv("UPDATE_API_URL", "https://api.github.com").strip().rstrip("/"),
+        update_manifest_urls=tuple(
+            value.strip()
+            for value in os.getenv(
+                "UPDATE_MANIFEST_URLS",
+                "https://cdn.jsdelivr.net/gh/planeteditorx/feeddock@main/update.json,"
+                "https://raw.githubusercontent.com/planeteditorx/feeddock/main/update.json",
+            ).split(",")
+            if value.strip()
+        ),
+        update_check_cache_hours=_as_int("UPDATE_CHECK_CACHE_HOURS", 6, minimum=1),
         watchtower_url=os.getenv("WATCHTOWER_URL", "").strip().rstrip("/"),
         watchtower_token=os.getenv("WATCHTOWER_TOKEN", ""),
         deployed_image=os.getenv("FEEDDOCK_IMAGE", "ghcr.io/planeteditorx/feeddock:latest").strip(),

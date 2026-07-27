@@ -1,8 +1,19 @@
 # FeedDock
 
-当前版本：`1.17.8`
+当前版本：`1.17.9`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名、把任务推送到 qBittorrent，并在下载完成后向媒体目录写入标准 NFO、海报和背景图。飞牛影视、Emby、Jellyfin 等媒体服务器仍负责扫描媒体目录并建立自身索引。
+
+
+## v1.17.9：媒体去重、孤儿元数据清理与静态版本清单
+
+- 推送 qBittorrent 前检查目标媒体目录；规范命名后的目标视频已经存在时直接跳过。
+- 启用“文件已下载自动跳过”后，还会使用 `SxxExx` 集数标记识别被其它媒体工具再次改名的视频。
+- 自动或手动刷新订阅时，若已刮削目录只剩 NFO/海报而没有视频，会清理 FeedDock 生成的孤儿元数据。
+- 版本检查优先读取并缓存 `update.json`，GitHub Release API 仅作为每天最多一次的备用检查。
+- 系统设置会显示“在线更新”；真正更新 Docker 镜像仍通过 Watchtower HTTP API 安全执行。
+
+详细说明见 [`MEDIA_LIBRARY_HYGIENE_AND_UPDATES.md`](MEDIA_LIBRARY_HYGIENE_AND_UPDATES.md)。
 
 ## v1.17.8：qBittorrent 临时标签自动清理
 
@@ -325,7 +336,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.8
+FEEDDOCK_BUILD_VERSION=1.17.9
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

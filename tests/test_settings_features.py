@@ -196,6 +196,24 @@ class ApplicationSettingsTests(unittest.TestCase):
             self.save_preferences(auto_skip_existing=True)
             self.assertTrue(_existing_video_matches(item, sub, self.db))
 
+    def test_exact_existing_video_is_always_skipped_even_when_broad_scan_disabled(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / "Demo" / "Season 01"
+            directory.mkdir(parents=True)
+            target = directory / "Demo - S01E02.mkv"
+            target.write_bytes(b"video")
+            sub = Subscription(name="Demo", rss_url="https://example.test/rss", rename_enabled=True, season=1)
+            item = FeedItem(
+                subscription_id=1, fingerprint="exact", title="Demo 02", episode="2",
+                save_path=str(directory), desired_name="Demo - S01E02",
+            )
+            self.save_preferences(auto_skip_existing=False)
+            from app.models import AppSetting
+            self.db.merge(AppSetting(key="download_path", value=root))
+            self.db.merge(AppSetting(key="media_local_root", value=root))
+            self.db.commit()
+            self.assertEqual(_existing_video_matches(item, sub, self.db), target)
+
     def test_global_auto_disable_uses_completed_whole_episodes(self):
         sub = Subscription(name="Demo", rss_url="https://example.test/rss", total_episodes=2, enabled=True)
         self.db.add(sub)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import unittest
 from pathlib import Path
 
@@ -206,13 +208,24 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("reloadAll().then(() => loadUpdateStatus", script)
         self.assertTrue(script.rstrip().endswith("reloadAll();"))
 
-    def test_fnos_update_check_enabled_and_one_click_update_disabled(self) -> None:
+    def test_fnos_update_check_uses_static_manifest_and_optional_watchtower(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
+        self.assertIn('UPDATE_MANIFEST_URLS:', compose)
+        self.assertIn('UPDATE_CHECK_CACHE_HOURS: "6"', compose)
         self.assertIn('UPDATE_REPOSITORY: "planeteditorx/feeddock"', compose)
         self.assertIn('UPDATE_API_URL: "https://api.github.com"', compose)
         self.assertIn('WATCHTOWER_URL: ""', compose)
         self.assertIn('WATCHTOWER_TOKEN: ""', compose)
         self.assertNotIn("watchtower:", compose)
+
+    def test_static_update_manifest_matches_version_file(self) -> None:
+        payload = json.loads((ROOT / "update.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["version"], (ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertIn("release_url", payload)
+        update_service = (ROOT / "app/update_service.py").read_text(encoding="utf-8")
+        self.assertIn("manifest-cache", update_service)
+        self.assertIn("If-None-Match", update_service)
+        self.assertIn("timedelta(hours=24)", update_service)
 
 
     def test_dmhy_integration_is_removed(self) -> None:

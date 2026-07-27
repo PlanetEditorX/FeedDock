@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 from sqlalchemy import create_engine
@@ -171,6 +172,29 @@ class RSSServiceTests(unittest.TestCase):
             self.assertIn("新订阅自动刷新开始：Auto refresh demo", messages)
             self.assertIn("qBittorrent 已确认任务：Auto refresh demo", messages)
             self.assertIn("新订阅自动刷新完成：Auto refresh demo", messages)
+        engine.dispose()
+
+
+    def test_orphan_cleanup_runs_even_when_rss_switch_is_disabled(self):
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            subscription = Subscription(name="Demo", rss_url="https://example.test/feed.xml")
+            db.add(subscription)
+            db.commit()
+            with (
+                patch(
+                    "app.rss_service.load_application_preferences",
+                    return_value=SimpleNamespace(rss=SimpleNamespace(enabled=False)),
+                ),
+                patch("app.rss_service.cleanup_orphaned_metadata") as cleanup,
+                patch("app.rss_service._load_subscription_entries") as load_entries,
+            ):
+                cleanup.return_value = SimpleNamespace(ok=True, message="没有孤儿元数据", removed_files=[])
+                stats = process_subscription(db, subscription)
+            cleanup.assert_called_once_with(db, subscription)
+            load_entries.assert_not_called()
+            self.assertEqual(stats, {"new": 0, "queued": 0, "skipped": 0, "errors": 0})
         engine.dispose()
 
     def test_rss_refresh_rechecks_completion_for_historical_completed_items(self):

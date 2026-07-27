@@ -333,7 +333,7 @@ async function loadConfig() {
   // fetched after the user explicitly clicks the check button.
   document.getElementById('currentVersion').textContent = data.app_version || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
-  document.getElementById('updaterState').textContent = data.updater_configured ? '已启用' : '未启用';
+  document.getElementById('updaterState').textContent = data.updater_configured ? '在线更新已启用' : '需配置 Watchtower';
   const catalogState = document.getElementById('mikanCatalogState');
   if (catalogState && !document.getElementById('mikanCatalog').children.length) {
     catalogState.textContent = `首次没有缓存时会请求所选站点的目录数据；之后页面优先读取持久化缓存，已浏览季度默认每 ${data.mikan_cache_hours || 6} 小时后台更新一次。`;
@@ -574,11 +574,11 @@ async function loadGlobalRules() {
 }
 
 async function loadUpdateStatus(showResult = false) {
-  const data = await api('/api/update/status');
+  const data = await api(`/api/update/status${showResult ? '?force=true' : ''}`);
   document.getElementById('currentVersion').textContent = data.current_version || '—';
   document.getElementById('latestVersion').textContent = data.latest_version || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
-  document.getElementById('updaterState').textContent = data.updater_configured ? '已启用' : '未启用';
+  document.getElementById('updaterState').textContent = data.updater_configured ? '在线更新已启用' : '需配置 Watchtower';
   document.getElementById('versionSummary').textContent = data.message || '未获取到版本信息';
 
   const releaseLink = document.getElementById('releaseLink');
@@ -588,11 +588,12 @@ async function loadUpdateStatus(showResult = false) {
   } else releaseLink.classList.add('hidden');
 
   const apply = document.getElementById('applyUpdate');
-  if (data.update_available && data.updater_configured) apply.classList.remove('hidden');
+  if (data.update_available) apply.classList.remove('hidden');
   else apply.classList.add('hidden');
+  apply.textContent = data.updater_configured ? '在线更新' : '配置在线更新';
 
   if (showResult) {
-    const ok = !data.message.includes('失败') && !data.message.includes('上限');
+    const ok = !data.message.includes('失败') && !data.message.includes('上限') && !data.message.includes('限流');
     showNotice(data.message, ok);
   }
 }
@@ -1753,12 +1754,12 @@ document.getElementById('checkUpdate').addEventListener('click', async (event) =
   catch (error) { showNotice(error.message, false); }
   finally {
     button.disabled = false;
-    button.textContent = '检查更新';
+    button.textContent = '检查在线更新';
   }
 });
 
 document.getElementById('applyUpdate').addEventListener('click', async () => {
-  if (!window.confirm('确认拉取新镜像并重启 FeedDock？页面可能会短暂断开。')) return;
+  if (!window.confirm('确认执行在线更新？已配置 Watchtower 时会拉取新镜像并重启 FeedDock。')) return;
   try {
     const result = await api('/api/update/apply', { method: 'POST' });
     showNotice(result.message, result.ok);
@@ -1833,7 +1834,7 @@ document.getElementById('automationSettingsForm').addEventListener('submit', asy
   } catch(error){showNotice(error.message,false);}
 });
 document.getElementById('runAutomationNow').addEventListener('click', async()=>{try{const r=await api('/api/automation/run',{method:'POST'});showNotice(r.message||'统一任务已执行');await reloadAll();}catch(e){showNotice(e.message,false);}});
-document.getElementById('restoreAutomation').addEventListener('click', async()=>{const f=document.getElementById('automationSettingsForm');f.elements.rss_enabled.checked=true;f.elements.rss_timeout_seconds.value=20;f.elements.auto_skip_existing.checked=false;f.elements.auto_disable_complete.checked=false;await Promise.all([api('/api/automation/settings',{method:'DELETE'}),api('/api/rss-poll/settings',{method:'DELETE'}),saveApplicationSettings()]);await Promise.all([loadAutomationSettings(),loadApplicationSettings(),loadConfig()]);showNotice('已恢复默认 RSS 设置');});
+document.getElementById('restoreAutomation').addEventListener('click', async()=>{const f=document.getElementById('automationSettingsForm');f.elements.rss_enabled.checked=true;f.elements.rss_timeout_seconds.value=20;f.elements.auto_skip_existing.checked=true;f.elements.auto_disable_complete.checked=false;await Promise.all([api('/api/automation/settings',{method:'DELETE'}),api('/api/rss-poll/settings',{method:'DELETE'}),saveApplicationSettings()]);await Promise.all([loadAutomationSettings(),loadApplicationSettings(),loadConfig()]);showNotice('已恢复默认 RSS 设置');});
 document.getElementById('notificationSettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();try{await saveNotificationSettings();showNotice('通知设置已保存');}catch(e){showNotice(e.message,false);}});
 document.getElementById('testNotifications').addEventListener('click',async()=>{try{await saveNotificationSettings();const r=await api('/api/notifications/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreNotifications').addEventListener('click',async()=>{if(!window.confirm('确认清空网页保存的全部通知渠道和密钥？'))return;await api('/api/notifications/settings',{method:'DELETE'});await loadNotificationSettings();showNotice('通知设置已清空');});

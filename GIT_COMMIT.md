@@ -1,36 +1,25 @@
-# FeedDock 1.17.8 Git 提交说明
+# FeedDock 1.17.9 Git 提交说明
 
 ## 推荐提交
 
 ```text
-fix(qbittorrent): 清理临时 item 标签并改用 hash 跟踪
+feat(library): 增加媒体去重、孤儿清理与静态更新
 ```
 
 ## 提交正文
 
 ```text
-- 将 feeddock-item-* 改为仅用于添加确认的临时标签
-- 确认任务并保存 torrent hash 后立即移除和删除标签
-- 下载进度、重命名、Tracker、完成检测和刮削改为优先按 hash 查询
-- 后台批量清理历史 FeedDock 标签并回填缺失 hash
-- 仅处理 feeddock-item- 前缀，不修改用户自建标签
-- 增加标签清理、hash 跟踪和升级兼容测试
+- 下载前检查媒体目录中的精确目标文件和 SxxExx 集数标记
+- 刷新订阅时清理没有视频的 FeedDock NFO、海报和背景图
+- RSS 总开关关闭时仍允许执行本地孤儿元数据清理
+- 使用静态 update.json、条件请求和 SQLite 缓存检查新版本
+- GitHub Release API 降级为每天最多一次的备用检查
+- 在系统设置中提供在线更新入口与 Watchtower 配置提示
 ```
 
-## 主要文件
+## 兼容性
 
-```text
-app/downloader.py
-app/postprocess.py
-app/rss_service.py
-app/scheduler.py
-tests/test_metadata_naming.py
-tests/test_settings_features.py
-tests/test_deployment_files.py
-QBITTORRENT_TEMPORARY_TAGS.md
-QBITTORRENT_PUSH_VERIFICATION.md
-```
-
-## 数据库
-
-不增加表或字段。清理历史标签时，如果 FeedDock 条目缺少 `torrent_hash`，会从 qBittorrent 当前任务列表回填；成功清理后将数据库中的 `qbit_tag` 置空。
+- 不增加数据库列；版本清单缓存继续使用 `app_settings`。
+- 不删除视频、字幕或任意非元数据用户文件。
+- 已存在的规范命名目标视频会始终阻止重复推送；较宽松的 `SxxExx` 匹配仍由“文件已下载自动跳过”控制。
+- 在线更新仍要求外部 Watchtower HTTP API，不向 FeedDock 容器开放 Docker Socket。

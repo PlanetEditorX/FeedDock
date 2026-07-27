@@ -1,6 +1,9 @@
 import json
 import threading
 import unittest
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.database import Base, SessionLocal, engine
@@ -35,6 +38,17 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
                 "application/json",
             )
             return
+        if self.path == "/update.json":
+            payload = json.dumps(
+                {
+                    "version": "1.18.0",
+                    "release_url": "https://example.test/releases/v1.18.0",
+                    "published_at": "2026-07-27T00:00:00Z",
+                    "image": "ghcr.io/demo/feeddock:latest",
+                }
+            ).encode()
+            self._write(200, payload, "application/json", {"ETag": '"manifest-v1"'})
+            return
         if self.path == "/repos/rate/limited/releases/latest":
             self._write(
                 403,
@@ -46,7 +60,7 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         if self.path == "/repos/demo/feeddock/releases/latest":
             payload = json.dumps(
                 {
-                    "tag_name": "v1.7.1",
+                    "tag_name": "v1.18.1",
                     "html_url": "https://example.test/releases/v1.3.0",
                     "published_at": "2026-07-25T00:00:00Z",
                 }
@@ -133,9 +147,10 @@ class IntegrationTests(unittest.TestCase):
             watchtower_url=self.base_url,
             watchtower_token="updater-token",
             timeout=3,
+            manifest_urls=(),
         )
         status = service.check()
-        self.assertEqual(status.latest_version, "1.7.1")
+        self.assertEqual(status.latest_version, "1.18.1")
         self.assertTrue(status.update_available)
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)
@@ -145,12 +160,47 @@ class IntegrationTests(unittest.TestCase):
         service = UpdateService(
             repository="rate/limited",
             api_url=self.base_url,
+            manifest_urls=(),
             timeout=3,
         )
         status = service.check()
         self.assertFalse(status.update_available)
         self.assertIn("请求已达上限", status.message)
         self.assertIn("手动检查", status.message)
+
+    def test_update_prefers_static_manifest_without_github_api(self):
+        FakeServicesHandler.requests.clear()
+        service = UpdateService(
+            repository="demo/feeddock",
+            api_url=self.base_url,
+            manifest_urls=(f"{self.base_url}/update.json",),
+            timeout=3,
+        )
+        status = service.check(force=True)
+        self.assertEqual(status.latest_version, "1.18.0")
+        self.assertEqual(status.source, "manifest")
+        self.assertTrue(status.update_available)
+        paths = [entry[1] for entry in FakeServicesHandler.requests]
+        self.assertIn("/update.json", paths)
+        self.assertNotIn("/repos/demo/feeddock/releases/latest", paths)
+
+    def test_static_manifest_is_cached_without_repeated_network_requests(self):
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            service = UpdateService(
+                repository="demo/feeddock",
+                api_url=self.base_url,
+                manifest_urls=(f"{self.base_url}/update.json",),
+                timeout=3,
+            )
+            first = service.check(db, force=True)
+            self.assertEqual(first.source, "manifest")
+            FakeServicesHandler.requests.clear()
+            second = service.check(db, force=False)
+            self.assertEqual(second.source, "manifest-cache")
+            self.assertEqual(FakeServicesHandler.requests, [])
+        engine.dispose()
 
     def test_version_comparison(self):
         self.assertTrue(is_newer_version("v1.2.0", "1.1.9"))

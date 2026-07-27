@@ -12,6 +12,7 @@ on:
       - docker-entrypoint.py
       - requirements.txt
       - VERSION
+      - update.json
       - "app/**"
       - "tests/**"
       - docker-compose.yml
@@ -25,6 +26,7 @@ on:
       - docker-entrypoint.py
       - requirements.txt
       - VERSION
+      - update.json
       - "app/**"
       - "tests/**"
       - docker-compose.yml
@@ -82,6 +84,18 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+      - name: Validate static update manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
+          manifest = json.loads(Path("update.json").read_text(encoding="utf-8"))
+          assert manifest["version"] == version
+          assert f"/v{version}" in manifest["release_url"]
+          PY
 
       - name: Validate frontend JavaScript syntax
         run: |

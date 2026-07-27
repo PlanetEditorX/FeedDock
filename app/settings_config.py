@@ -63,7 +63,7 @@ class DownloadPolicy:
 class RssPolicy:
     enabled: bool = True
     timeout_seconds: int = 20
-    auto_skip_existing: bool = False
+    auto_skip_existing: bool = True
     auto_disable_complete: bool = False
 
     def public_dict(self) -> dict[str, int | bool]:

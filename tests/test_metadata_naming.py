@@ -16,7 +16,7 @@ from unittest.mock import patch
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
 from app.naming import media_folder_name, naming_context, remote_to_local_path, render_desired_name
-from app.scraper import ScrapeResult, scrape_completed_item, scrape_subscription, trigger_tmm_scrape
+from app.scraper import CleanupResult, ScrapeResult, cleanup_orphaned_metadata, scrape_completed_item, scrape_subscription, trigger_tmm_scrape
 
 
 class _Response:
@@ -82,6 +82,84 @@ class MetadataNamingTests(unittest.TestCase):
         values.update(overrides)
         return SimpleNamespace(**values)
 
+
+    def test_orphaned_feeddock_metadata_is_removed_when_video_is_missing(self):
+        from app.models import AppSetting
+        with tempfile.TemporaryDirectory() as root:
+            media_root = Path(root) / "Demo (2026)"
+            season = media_root / "Season 01"
+            season.mkdir(parents=True)
+            (media_root / "tvshow.nfo").write_text("metadata")
+            (media_root / "poster.jpg").write_bytes(b"image")
+            (season / "season.nfo").write_text("metadata")
+            (season / "Demo - S01E01.nfo").write_text("metadata")
+            (season / "Demo - S01E01.zh-CN.ass").write_text("subtitle")
+            (media_root / ".feeddock-scrape.json").write_text(
+                '{"generator":"FeedDock","subscription_id":1,"files":["tvshow.nfo","poster.jpg","Season 01/season.nfo","Season 01/Demo - S01E01.nfo"]}'
+            )
+            engine = create_engine("sqlite+pysqlite:///:memory:")
+            Base.metadata.create_all(engine)
+            SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+            with SessionLocal() as db:
+                sub = Subscription(id=1, name="Demo", rss_url="https://example.test/rss", media_type="tv", season=1)
+                db.add(sub)
+                db.add(AppSetting(key="download_path", value=root))
+                db.add(AppSetting(key="media_local_root", value=root))
+                db.add(FeedItem(
+                    subscription_id=1, fingerprint="orphan", title="Demo 01", episode="1",
+                    save_path=str(season), completed_at=datetime.now(timezone.utc),
+                    scrape_status="completed", scraped_at=datetime.now(timezone.utc),
+                ))
+                db.commit()
+                result = cleanup_orphaned_metadata(db, sub)
+                db.commit()
+                self.assertTrue(result.ok, result.message)
+                self.assertFalse((media_root / "tvshow.nfo").exists())
+                self.assertFalse((media_root / "poster.jpg").exists())
+                self.assertFalse((season / "season.nfo").exists())
+                self.assertTrue((season / "Demo - S01E01.zh-CN.ass").exists())
+                item = db.query(FeedItem).one()
+                self.assertEqual(item.scrape_status, "cleaned")
+            engine.dispose()
+
+    def test_orphan_cleanup_keeps_series_artwork_when_other_season_has_video(self):
+        from app.models import AppSetting
+        with tempfile.TemporaryDirectory() as root:
+            media_root = Path(root) / "Demo (2026)"
+            season1 = media_root / "Season 01"
+            season2 = media_root / "Season 02"
+            season1.mkdir(parents=True)
+            season2.mkdir(parents=True)
+            (media_root / "tvshow.nfo").write_text("series")
+            (media_root / "poster.jpg").write_bytes(b"image")
+            (season1 / "season.nfo").write_text("season")
+            (season1 / "Demo - S01E01.nfo").write_text("episode")
+            (season2 / "Demo - S02E01.mkv").write_bytes(b"video")
+            (media_root / ".feeddock-scrape.json").write_text(
+                '{"generator":"FeedDock","subscription_id":1,"files":["tvshow.nfo","poster.jpg","Season 01/season.nfo","Season 01/Demo - S01E01.nfo"]}'
+            )
+            engine = create_engine("sqlite+pysqlite:///:memory:")
+            Base.metadata.create_all(engine)
+            SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+            with SessionLocal() as db:
+                sub = Subscription(id=1, name="Demo", rss_url="https://example.test/rss", media_type="tv", season=1)
+                db.add(sub)
+                db.add(AppSetting(key="download_path", value=root))
+                db.add(AppSetting(key="media_local_root", value=root))
+                db.add(FeedItem(
+                    subscription_id=1, fingerprint="orphan-s1", title="Demo 01", episode="1",
+                    save_path=str(season1), completed_at=datetime.now(timezone.utc),
+                    scrape_status="completed", scraped_at=datetime.now(timezone.utc),
+                ))
+                db.commit()
+                result = cleanup_orphaned_metadata(db, sub)
+                db.commit()
+                self.assertTrue(result.ok, result.message)
+                self.assertFalse((season1 / "season.nfo").exists())
+                self.assertTrue((media_root / "tvshow.nfo").exists())
+                self.assertTrue((media_root / "poster.jpg").exists())
+                self.assertTrue((season2 / "Demo - S02E01.mkv").exists())
+            engine.dispose()
 
     def test_season_inference_supports_chinese_and_english(self):
         self.assertEqual(infer_season_from_title("金牌得主 第二季"), 2)

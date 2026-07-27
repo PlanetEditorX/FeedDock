@@ -1548,9 +1548,8 @@ def shutdown_system(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
     response_model=UpdateStatusOut,
     dependencies=[Depends(require_admin)],
 )
-def update_status() -> dict[str, str | bool]:
-    # This endpoint is intentionally only called by an explicit button click.
-    return UpdateService().check().as_dict()
+def update_status(force: bool = False, db: Session = Depends(get_db)) -> dict[str, str | bool]:
+    return UpdateService().check(db, force=force).as_dict()
 
 
 @app.post("/api/update/apply", dependencies=[Depends(require_admin)])

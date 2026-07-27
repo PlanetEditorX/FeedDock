@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import posixpath
 from pathlib import Path
 import time
@@ -34,6 +35,7 @@ from .subscription_monitor import (
 )
 from .runtime_config import get_app_setting, load_automation_config, load_metadata_config, load_qbittorrent_config
 from .settings_config import load_application_preferences
+from .scraper import cleanup_orphaned_metadata
 
 
 _refresh_lock = threading.Lock()
@@ -442,10 +444,18 @@ def _refresh_total_episodes_if_due(db: Session, subscription: Subscription) -> N
         add_log(db, "WARNING", f"Bangumi 总集数更新失败：{subscription.name}", str(exc))
 
 
-def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Session) -> bool:
+def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Session) -> Path | None:
+    """Return the existing media file matching the intended download.
+
+    The scan is constrained to the mapped target directory, follows at most two
+    directory levels, and prefers the exact normalized target name.  An
+    SxxExx token is accepted as a conservative fallback for files that were
+    renamed by another media manager after FeedDock originally created them.
+    """
+
     policy = load_application_preferences(db).rss
-    if not policy.auto_skip_existing or not subscription.rename_enabled or not item.desired_name:
-        return False
+    if not subscription.rename_enabled or not item.desired_name:
+        return None
     try:
         metadata = load_metadata_config(db)
         directory = map_downloader_path_to_local(
@@ -454,16 +464,35 @@ def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Sess
             metadata.media_local_root,
         )
         if not directory.is_dir():
-            return False
+            return None
         target = item.desired_name.casefold()
-        for index, child in enumerate(directory.iterdir()):
-            if index >= 2000:
-                break
-            if child.is_file() and is_video_file(child.name) and child.stem.casefold() == target:
-                return True
+        episode_value = episode_number(item.episode)
+        episode_token = ""
+        if episode_value is not None and episode_value == episode_value.to_integral_value():
+            episode_token = f"s{int(subscription.season or 0):02d}e{int(episode_value):02d}"
+
+        root_depth = len(directory.parts)
+        checked = 0
+        fallback: Path | None = None
+        for current_root, directories, filenames in os.walk(directory):
+            current = Path(current_root)
+            if len(current.parts) - root_depth >= 2:
+                directories[:] = []
+            for filename in filenames:
+                checked += 1
+                if checked > 5000:
+                    return fallback
+                candidate = current / filename
+                if not is_video_file(candidate.name):
+                    continue
+                stem = candidate.stem.casefold()
+                if stem == target:
+                    return candidate
+                if policy.auto_skip_existing and episode_token and episode_token in stem and fallback is None:
+                    fallback = candidate
+        return fallback
     except (OSError, RuntimeError, ValueError):
-        return False
-    return False
+        return None
 
 
 
@@ -501,9 +530,10 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
         ),
     )
 
-    if _existing_video_matches(item, subscription, db):
+    existing_video = _existing_video_matches(item, subscription, db)
+    if existing_video is not None:
         item.status = "skipped"
-        item.reason = "目标目录中已存在同名视频文件"
+        item.reason = f"媒体目录已存在目标视频：{existing_video.name}"
         item.rename_status = "skipped"
         item.rename_message = item.reason
         add_log(
@@ -689,8 +719,36 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     )
     db.commit()
     preferences = load_application_preferences(db)
+    try:
+        cleanup = cleanup_orphaned_metadata(db, subscription)
+        if cleanup.removed_files:
+            add_log(
+                db,
+                "INFO",
+                f"已清理孤儿媒体元数据：{subscription.name}",
+                (
+                    f"订阅 ID：{subscription.id}\n{cleanup.message}\n"
+                    + "\n".join((cleanup.removed_files or [])[:200])
+                )[:50000],
+            )
+            db.commit()
+        elif not cleanup.ok:
+            add_log(db, "WARNING", f"孤儿媒体元数据检查失败：{subscription.name}", cleanup.message)
+            db.commit()
+    except Exception as exc:
+        add_log(
+            db,
+            "WARNING",
+            f"孤儿媒体元数据检查失败：{subscription.name}",
+            format_exception_details(
+                exc,
+                stage="rss.cleanup-orphaned-metadata",
+                context={"subscription_id": subscription.id, "subscription_name": subscription.name},
+            ),
+        )
+        db.commit()
     if not preferences.rss.enabled:
-        add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭")
+        add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭；媒体目录清理已执行")
         db.commit()
         return stats
     _refresh_total_episodes_if_due(db, subscription)

@@ -352,6 +352,10 @@ class UpdateStatusOut(BaseModel):
     updater_configured: bool = False
     deployed_image: str = ""
     message: str = ""
+    source: str = "local"
+    checked_at: str = ""
+    manifest_url: str = ""
+    can_apply_update: bool = False
 
 
 class QBittorrentSettingsUpdate(BaseModel):
@@ -376,7 +380,7 @@ class ApplicationPreferencesUpdate(BaseModel):
     seeding_minutes: int = Field(default=-1, ge=-1, le=525600)
     rss_enabled: bool = True
     rss_timeout_seconds: int = Field(default=20, ge=5, le=300)
-    auto_skip_existing: bool = False
+    auto_skip_existing: bool = True
     auto_disable_complete: bool = False
     trackers_enabled: bool = True
     trackers_update_url: str = Field(default="https://cf.trackerslist.com/best.txt", max_length=4000)
