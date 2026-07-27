@@ -60,7 +60,6 @@ class Settings:
     mikan_image_cache_days: int
     mikan_thumbnail_width: int
     mikan_thumbnail_height: int
-    anime_catalog_base_urls: tuple[str, ...]
     metadata_language: str
     tmdb_api_base: str
     tmdb_image_base: str
@@ -89,7 +88,7 @@ def load_settings() -> Settings:
 
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "1.16.1"),
+        app_version=os.getenv("APP_VERSION", "1.17.0"),
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -100,7 +99,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            "FeedDock/1.16.1 (+self-hosted RSS automation)",
+            "FeedDock/1.17.0 (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),
@@ -127,20 +126,6 @@ def load_settings() -> Settings:
         mikan_image_cache_days=_as_int("MIKAN_IMAGE_CACHE_DAYS", 30),
         mikan_thumbnail_width=_as_int("MIKAN_THUMBNAIL_WIDTH", 240, minimum=80),
         mikan_thumbnail_height=_as_int("MIKAN_THUMBNAIL_HEIGHT", 320, minimum=80),
-        anime_catalog_base_urls=tuple(
-            value.strip().rstrip("/")
-            for value in os.getenv(
-                "ANIME_CATALOG_BASE_URLS",
-                ",".join(
-                    (
-                        "https://cdn.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items",
-                        "https://fastly.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items",
-                        "https://raw.githubusercontent.com/bangumi-data/bangumi-data/master/data/items",
-                    )
-                ),
-            ).split(",")
-            if value.strip()
-        ),
         metadata_language=os.getenv("METADATA_LANGUAGE", "zh-CN").strip() or "zh-CN",
         tmdb_api_base=os.getenv("TMDB_API_BASE", "https://api.themoviedb.org").strip().rstrip("/"),
         tmdb_image_base=os.getenv("TMDB_IMAGE_BASE", "https://image.tmdb.org").strip().rstrip("/"),

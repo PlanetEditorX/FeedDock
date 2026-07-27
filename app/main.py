@@ -11,11 +11,12 @@ from fastapi.exception_handlers import http_exception_handler, request_validatio
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .anime_catalog import AnimeCatalogCacheService, decorate_catalog
+from .anime_identity import backfill_subscription_identities, build_subscription_index, decorate_item, normalize_title, prepare_subscription_identity
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .debug_logging import (
     debug_enabled,
@@ -37,15 +38,15 @@ from .notification_config import (
 )
 from .notifications import send_notification
 from .metadata_service import MetadataService
-from .models import AdminAccount, FeedItem, Subscription, SystemLog
+from .models import AdminAccount, AnimePreference, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
 from .subscription_monitor import reset_monitor_state_for_changes
 from .subscription_sources import (
     classify_subscription_source,
+    get_subscription_source,
     subscription_source_catalog,
     subscription_source_label,
-    extract_source_bangumi_id,
 )
 from .rss_service import (
     calculate_missing_episodes,
@@ -84,6 +85,7 @@ from .settings_config import (
 )
 from .scheduler import scheduler, start_scheduler, stop_scheduler
 from .schemas import (
+    AnimePreferenceBatchUpdate,
     ApplicationPreferencesUpdate,
     AuthStatusOut,
     AutomationSettingsUpdate,
@@ -173,9 +175,27 @@ def _validate_auto_skip_rename_requirement(
         )
 
 
+def _refresh_subscription_identity(db: Session, subscription: Subscription) -> None:
+    values: dict[str, Any] = {}
+    prepare_subscription_identity(values, existing=subscription)
+    changed = False
+    for field in ("source_type", "source_anime_id", "canonical_key", "bangumi_id"):
+        if field not in values:
+            continue
+        value = values[field]
+        if getattr(subscription, field) != value:
+            setattr(subscription, field, value)
+            changed = True
+    if changed:
+        db.commit()
+        db.refresh(subscription)
+
+
 def _subscription_values(
     payload: SubscriptionCreate | SubscriptionUpdate | SubscriptionPreviewRequest,
     db: Session | None = None,
+    *,
+    existing: Subscription | None = None,
 ) -> dict[str, Any]:
     values = payload.model_dump(exclude_unset=isinstance(payload, SubscriptionUpdate), exclude={"sample_title"})
     for key in ("rss_url", "backup_rss_url"):
@@ -188,10 +208,7 @@ def _subscription_values(
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
-    if "rss_url" in values and not values.get("bangumi_id"):
-        detected_bangumi_id = extract_source_bangumi_id(values.get("rss_url"))
-        if detected_bangumi_id:
-            values["bangumi_id"] = detected_bangumi_id
+    prepare_subscription_identity(values, existing=existing)
     if db is not None:
         # qBittorrent, FeedDock scraping, and subscription rendering must use
         # one identical container path. Customize only the folder template.
@@ -207,41 +224,57 @@ def _apply_mikan_hidden_filters(
     year: int,
     season: str,
 ) -> dict[str, Any]:
-    """Annotate cached catalog items with local hidden state.
+    """Decorate Mikan rows with cross-site subscriptions and unified hidden preferences."""
 
-    Items remain in the API response so the browser can enter edit mode and
-    restore them without another Mikan request. Normal display filtering is
-    performed locally by the UI.
-    """
-
-    filters = load_mikan_hidden_filters(db, year=year, season=season)
-    subscribed_bangumi_ids = collect_subscribed_mikan_bangumi_ids(
-        db.execute(select(Subscription.rss_url, Subscription.backup_rss_url))
-    )
+    legacy_filters = load_mikan_hidden_filters(db, year=year, season=season)
+    subscriptions = list(db.scalars(select(Subscription)))
+    preferences = list(db.scalars(select(AnimePreference).where(AnimePreference.hidden.is_(True))))
+    subscription_index, alias_index = build_subscription_index(subscriptions)
     total_hidden = 0
     for row in payload.get("rows", []):
         weekday = str(row.get("weekday", "")).strip()
-        hidden_ids = filters.get(weekday, set())
+        legacy_hidden_ids = legacy_filters.get(weekday, set())
         row_hidden = 0
-        for item in row.get("items", []):
+        decorated_items = []
+        for raw in row.get("items", []):
             try:
-                bangumi_id = int(item.get("bangumi_id", 0))
+                mikan_id = int(raw.get("bangumi_id", 0))
             except (TypeError, ValueError):
-                bangumi_id = 0
-            hidden = bangumi_id in hidden_ids
-            item["hidden"] = hidden
-            item["subscribed"] = bangumi_id in subscribed_bangumi_ids
-            if hidden:
+                mikan_id = 0
+            item = dict(raw)
+            item.update({
+                "source_type": "mikan",
+                "source_anime_id": str(mikan_id) if mikan_id else "",
+                "subject_id": 0,
+                "mikan_id": mikan_id,
+                "aliases": [str(item.get("title", "") or "")],
+            })
+            item = decorate_item(
+                item,
+                current_source="mikan",
+                subscription_index=subscription_index,
+                alias_index=alias_index,
+                preferences=preferences,
+            )
+            item["hidden"] = bool(item["hidden"] or mikan_id in legacy_hidden_ids)
+            item["available"] = True
+            item["action_text"] = "点击查看 Mikan 字幕组和 RSS"
+            if item["hidden"]:
                 row_hidden += 1
+            decorated_items.append(item)
+        row["items"] = decorated_items
         row["hidden_count"] = row_hidden
         total_hidden += row_hidden
     payload["hidden_count"] = total_hidden
+    payload["source_id"] = "mikan"
     return payload
 
 def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
     output = SubscriptionOut.model_validate(subscription)
-    output.source_type = classify_subscription_source(subscription.rss_url)
-    output.source_label = subscription_source_label(subscription.rss_url)
+    output.source_type = subscription.source_type or classify_subscription_source(subscription.rss_url)
+    output.source_label = get_subscription_source(output.source_type).label
+    output.source_anime_id = subscription.source_anime_id
+    output.canonical_key = subscription.canonical_key
     output.canonical_title = canonical_title(subscription)
     output.media_folder = media_folder_name(subscription)
     if subscription.missing_detection:
@@ -255,6 +288,7 @@ async def lifespan(_app: FastAPI):
     ensure_schema()
     with SessionLocal() as db:
         initialize_admin(db)
+        backfill_subscription_identities(db)
         # Upgrade old subscriptions to the one-root model. qBittorrent and
         # FeedDock must see the same container path (normally /media).
         qbit_root = load_qbittorrent_config(db).download_path
@@ -817,9 +851,10 @@ def source_catalog(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        payload = AnimeCatalogCacheService().catalog(db, year, season)
+        payload = AnimeCatalogCacheService().catalog(db, source_id, year, season, query=q)
         subscriptions = list(db.scalars(select(Subscription)))
-        return decorate_catalog(payload, source_id, subscriptions, q)
+        preferences = list(db.scalars(select(AnimePreference).where(AnimePreference.hidden.is_(True))))
+        return decorate_catalog(payload, source_id, subscriptions, preferences, q)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -835,9 +870,10 @@ def refresh_source_catalog(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
-        payload = AnimeCatalogCacheService().catalog(db, year, season, force_refresh=True)
+        payload = AnimeCatalogCacheService().catalog(db, source_id, year, season, query=q, force_refresh=True)
         subscriptions = list(db.scalars(select(Subscription)))
-        return decorate_catalog(payload, source_id, subscriptions, q)
+        preferences = list(db.scalars(select(AnimePreference).where(AnimePreference.hidden.is_(True))))
+        return decorate_catalog(payload, source_id, subscriptions, preferences, q)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -849,6 +885,7 @@ def source_catalog_detail(
     source_id: str,
     title: str = Query(min_length=1, max_length=300),
     subject_id: int = Query(default=0, ge=0),
+    source_anime_id: str = Query(default="", max_length=120),
     mikan_id: int = Query(default=0, ge=0),
     original_title: str = Query(default="", max_length=300),
     english_title: str = Query(default="", max_length=300),
@@ -861,6 +898,7 @@ def source_catalog_detail(
         "title_original": original_title or title,
         "title_english": english_title or original_title or title,
         "subject_id": subject_id,
+        "source_anime_id": source_anime_id,
         "mikan_id": mikan_id,
         "aliases": [value.strip() for value in aliases.split("\n") if value.strip()] or [title],
     }
@@ -870,6 +908,38 @@ def source_catalog_detail(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{source_id} 资源详情读取失败：{exc}") from exc
+
+
+@app.put("/api/discovery/preferences/hidden", dependencies=[Depends(require_admin)])
+def update_hidden_anime_preferences(
+    payload: AnimePreferenceBatchUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    hidden_count = 0
+    for item in payload.items:
+        key = item.canonical_key.strip()
+        row = db.get(AnimePreference, key)
+        if item.hidden:
+            if row is None:
+                row = AnimePreference(canonical_key=key)
+                db.add(row)
+            row.hidden = True
+            row.bangumi_id = item.bangumi_id
+            row.title_normalized = normalize_title(item.title)
+            row.reason = item.reason.strip()
+            hidden_count += 1
+        else:
+            normalized_title = normalize_title(item.title)
+            clauses = [AnimePreference.canonical_key == key]
+            if item.bangumi_id > 0:
+                clauses.append(AnimePreference.bangumi_id == item.bangumi_id)
+            if normalized_title:
+                clauses.append(AnimePreference.title_normalized == normalized_title)
+            matches = list(db.scalars(select(AnimePreference).where(or_(*clauses))))
+            for match in matches:
+                db.delete(match)
+    db.commit()
+    return {"updated": len(payload.items), "hidden": hidden_count}
 
 
 @app.get(
@@ -1131,7 +1201,7 @@ def import_subscriptions(
         for item in payload.subscriptions:
             rss_url = str(item.rss_url)
             existing = db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
-            values = _subscription_values(item, db)
+            values = _subscription_values(item, db, existing=existing)
             _validate_auto_skip_rename_requirement(db, values, existing=existing)
             if existing is None:
                 db.add(Subscription(**values))
@@ -1209,7 +1279,7 @@ def update_subscription(
         raise HTTPException(status_code=404, detail="订阅不存在")
     try:
         request.state.debug_stage = "subscription.apply-values"
-        values = _subscription_values(payload, db)
+        values = _subscription_values(payload, db, existing=subscription)
         _validate_auto_skip_rename_requirement(db, values, existing=subscription)
         reset_monitor_state_for_changes(subscription, values)
         for key, value in values.items():
@@ -1248,6 +1318,7 @@ def apply_subscription_metadata(
             season=payload.season,
             season_mode=payload.season_mode,
         )
+        _refresh_subscription_identity(db, subscription)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -1270,6 +1341,7 @@ def sync_subscription_metadata(
         raise HTTPException(status_code=404, detail="订阅不存在")
     try:
         MetadataService().sync(db, subscription, payload.provider)
+        _refresh_subscription_identity(db, subscription)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

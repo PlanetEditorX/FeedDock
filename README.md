@@ -1,21 +1,23 @@
 # FeedDock
 
-当前版本：`1.16.1`
+当前版本：`1.17.0`
 
 FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
 
-## v1.16.1：多站点周历 DNS 容错修复
+## v1.17.0：原站番剧目录与跨站状态
 
-- ANI.BT、Anime Garden、Nyaa 和 SubsPlease 不再只依赖 `raw.githubusercontent.com`；
-- 默认依次尝试 jsDelivr CDN、jsDelivr Fastly 节点和 GitHub Raw；
-- 某个域名发生 DNS 解析错误后会在本轮立即熔断，不再对 3 个月重复等待；
-- 所有 `bangumi-data` 镜像不可用时，自动复用已经可用的 Mikan 季度目录；
-- 回退后的四个站点仍可按星期浏览、搜索、读取缓存和强制更新；
-- ANI.BT 使用官方支持的 Mikan `bangumiId` 兼容参数生成 RSS；
-- 强制更新失败但已有 Mikan 缓存时，会继续读取缓存，不返回空白页面；
-- 页面会明确显示“已自动回退到 Mikan 季度目录”，便于区分标准周历和容错数据。
+- Mikan 继续读取 Mikan 原站季度目录和字幕组；
+- ANI.BT 直接读取原站 `api/seasons/anime` 和 `api/anime/groups`；
+- Anime Garden 直接读取原站 `subjects` 和 `resources`；
+- 三个站点的目录和详情缓存完全隔离，单站失败不会显示其它站点数据；
+- 删除 `bangumi-data`、GitHub Raw、jsDelivr 和 Mikan 目录回退依赖；
+- 订阅持久化 `source_type`、`source_anime_id` 和 `canonical_key`；
+- 通过 Bangumi ID、原站 ID 和标题别名显示跨站订阅来源；
+- 支持 `✓ 已订阅`、`Mikan 已订阅`、`✓ 已订阅 · Mikan 也已订阅`；
+- 隐藏不喜欢的番剧会跨站生效，并兼容旧版 Mikan 星期过滤；
+- Nyaa、SubsPlease 等没有稳定原生星期目录的来源继续作为“其它 RSS”使用。
 
-可通过 `ANIME_CATALOG_BASE_URLS` 自定义镜像顺序。详细说明见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md)。
+完整设计见 [`MULTI_SOURCE_WEEKLY_CATALOG.md`](MULTI_SOURCE_WEEKLY_CATALOG.md)，站点说明见 [`SUBSCRIPTION_SOURCES.md`](SUBSCRIPTION_SOURCES.md)。
 
 ## v1.15.0：订阅站点入口
 
@@ -75,9 +77,10 @@ FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它�
 
 ### 订阅与发现
 
-- Mikan、ANI.BT、Anime Garden、Nyaa、SubsPlease 按星期番剧目录、标题搜索和持久缓存；
-- Mikan 保留原生字幕组目录和本地 WebP 封面，其它站点由统一周历生成站点专用 RSS；
-- 目录中标记 `✓ 已订阅`，保存、编辑、删除订阅后即时同步；
+- Mikan、ANI.BT、Anime Garden 各自读取原站番剧目录、标题搜索和独立缓存；
+- 展开番剧后按需加载目标站点字幕组、最近资源和专用 RSS；
+- 目录显示 `✓ 已订阅` 或 `Mikan 已订阅` 等跨站来源徽标；
+- 隐藏偏好按统一番剧身份跨站生效；
 - 主 RSS 与备用 RSS；
 - 包含、排除、全局排除规则；
 - 自定义集数正则、捕获组和集数偏移；
@@ -261,7 +264,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.16.1
+FEEDDOCK_BUILD_VERSION=1.17.0
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password
@@ -290,12 +293,11 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=false
 
 ## 数据库升级
 
-启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除订阅、条目、RSS 指纹或通知配置。1.14.0 新增：
+启动时会对 SQLite 执行仅新增字段和表的兼容迁移，不删除订阅、条目、RSS 指纹、通知配置或旧缓存。1.17.0 新增：
 
-- `subscriptions.metadata_rating`：元数据评分，用于首页排序；
-- `subscriptions.total_episodes_checked_at`：Bangumi 总集数最近检查时间；
-- `feed_items.trackers_status`；
-- `feed_items.trackers_message`；
-- `feed_items.trackers_applied_at`。
+- `subscriptions.source_type`：订阅来源类型；
+- `subscriptions.source_anime_id`：目标站点番剧 ID；
+- `subscriptions.canonical_key`：统一番剧身份；
+- `anime_preferences`：跨站隐藏偏好。
 
-主题、下载策略、RSS 策略、Tracker 缓存和刮削设置保存在现有 `app_settings` 表。升级不需要手工 SQL。
+程序启动时会为旧订阅回填来源和身份。更早版本的增量迁移仍会按顺序执行，无需手工 SQL。

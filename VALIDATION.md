@@ -1,75 +1,55 @@
-# FeedDock 1.16.1 验证报告
+# FeedDock 1.17.0 验证报告
 
-## 结论
+## 范围
 
-FeedDock 1.16.1 修复了 ANI.BT、Anime Garden、Nyaa 和 SubsPlease 周历共同依赖单一 GitHub Raw 域名的问题。
+本次验证覆盖：
 
-验证结果：
+- ANI.BT 原站季度目录与字幕组 API 适配；
+- Anime Garden 原站活跃番剧与资源 API 适配；
+- Mikan 现有原站目录兼容；
+- 目录和详情的站点独立缓存；
+- Bangumi ID、原站 ID 和标题别名身份匹配；
+- 跨站订阅来源徽标；
+- 跨站隐藏与取消隐藏；
+- 旧版 Mikan 星期隐藏兼容；
+- 1.16.1 SQLite 数据库增量升级；
+- 静态资源、Compose 和 GitHub Actions 配置。
 
-- **137 项 pytest 测试通过，另有 19 个子测试通过**；
-- Python 全项目编译通过；
-- 6 个前端 JavaScript 文件语法检查通过；
-- Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
-- 主页面 124 个、登录页 3 个、改密页 7 个 HTML ID 均唯一；
-- FastAPI 可导入，运行版本为 `1.16.1`；
-- 默认配置包含 3 个 `bangumi-data` 周历镜像；
-- 不新增数据库表或字段；
-- 完整发布包解压回归和从 1.16.0 应用 Git 补丁回归均通过。
+## 自动化测试
 
-## 修复覆盖
-
-### 多镜像顺序回退
-
-默认顺序：
-
-1. `cdn.jsdelivr.net`
-2. `fastly.jsdelivr.net`
-3. `raw.githubusercontent.com`
-
-每个月按顺序尝试。某个镜像发生 DNS 解析失败后，会在当前刷新周期熔断，后续月份不会重复等待该域名。
-
-### Mikan 目录回退
-
-当季度中任意月份无法从所有 `bangumi-data` 镜像读取时：
-
-- 优先复用 Mikan 同季度目录；
-- Mikan 强制更新失败但已有本地缓存时，继续读取缓存；
-- 页面显示明确的回退提示；
-- Mikan ID 与 Bangumi 条目 ID 分开保存，不会污染元数据字段；
-- ANI.BT 使用兼容的 `bangumiId` 参数生成 RSS；
-- Anime Garden、Nyaa 和 SubsPlease 继续基于标题生成各自 RSS。
-
-如果 Mikan 也不可用，但部分月份已成功读取，则显示部分季度数据；只有所有来源均失败且没有缓存时才返回错误。
-
-### 缓存兼容
-
-- 原 `anime:catalog:{year}:{season}` 缓存键保持不变；
-- 缓存 schema 版本从 1 升至 2，用于触发一次容错逻辑刷新；
-- 刷新失败时仍可回退旧缓存；
-- 原 Mikan 缓存、订阅、下载记录和系统设置不受影响。
-
-## 自动化测试重点
-
-`tests/test_catalog_weekly_sources.py` 新增覆盖：
-
-- 首个镜像 DNS 失败后自动使用第二镜像；
-- DNS 失败镜像在后续月份被熔断；
-- 所有镜像 DNS 失败后自动回退 Mikan；
-- 回退目录保留星期、封面、Mikan ID 和播出时间；
-- ANI.BT 生成 `bangumiId` 兼容 RSS；
-- 强制更新 Mikan 失败后读取已有 Mikan 缓存；
-- 标准 Bangumi ID 不被 Mikan ID 覆盖。
-
-`tests/test_deployment_files.py` 新增覆盖：
-
-- 飞牛 Compose 包含多镜像默认配置；
-- 前端向详情接口单独传递 `mikan_id`；
-- 前端显示 `fallback_notice`。
-
-## 执行命令
+执行：
 
 ```bash
 PYTHONPATH=. pytest -q
+```
+
+结果：
+
+```text
+134 passed, 15 subtests passed
+```
+
+核心覆盖：
+
+- ANI.BT 请求 `https://anibt.net/api/seasons/anime`；
+- ANI.BT 请求 `https://anibt.net/api/anime/groups`；
+- Anime Garden 请求 `https://api.animes.garden/subjects`；
+- Anime Garden 请求 `https://api.animes.garden/resources`；
+- ANI.BT 和 Anime Garden 缓存键互不复用；
+- 更新失败只使用当前站点旧缓存；
+- 没有当前站点缓存时错误不会被其它站点数据掩盖；
+- Mikan 订阅可在 ANI.BT 列表显示 `Mikan 已订阅`；
+- 当前站和其它站都已订阅时显示组合徽标；
+- 相同站点 ID 在标题变化后仍可识别；
+- 隐藏偏好可以通过另一站点的 Bangumi/标题身份取消；
+- 订阅保存后前端即时重算跨站来源徽标；
+- 添加订阅菜单只包含 Mikan、ANI.BT、Anime Garden 和其它 RSS。
+
+## 静态检查
+
+全部通过：
+
+```text
 python -m compileall -q app tests
 node --check app/static/app.js
 node --check app/static/change-password.js
@@ -79,8 +59,57 @@ node --check app/static/navigation.js
 node --check app/static/subscription-sources.js
 ```
 
-YAML 和 HTML ID 通过独立 Python 检查脚本验证。
+YAML 解析通过：
 
-## 未执行项目
+```text
+docker-compose.yml
+docker-compose.fnos.yml
+.github/workflows/docker-publish.yml
+```
 
-当前环境没有 Docker CLI，因此未实际构建容器镜像。沙箱网络不适合验证用户所在网络的 DNS 路由，因此未把真实外部站点请求作为通过条件；DNS 失败、多镜像切换、缓存回退和 RSS 生成均通过模拟 HTTP/异常测试验证。
+页面结构：
+
+```text
+124 个 HTML id
+0 个重复 id
+```
+
+应用导入与版本：
+
+```text
+FeedDock 1.17.0
+```
+
+## 旧数据库迁移
+
+使用原始 1.16.1 代码创建 SQLite 数据库和一条 ANI.BT 订阅，再由 1.17.0 执行：
+
+```text
+Base.metadata.create_all
+ensure_schema
+backfill_subscription_identities
+```
+
+验证结果：
+
+```text
+source_type      = anibt
+source_anime_id  = 543360
+bangumi_id       = 543360
+canonical_key    = bgm:543360
+anime_preferences 表可正常写入
+```
+
+历史订阅名称、RSS URL 和启用状态保持不变。
+
+## 网络测试边界
+
+自动化测试使用与 ani-rss 源码字段一致的模拟原站响应，验证请求地址、参数和响应转换。当前沙箱没有用于验证用户 Docker 网络路由的可靠外网环境，因此没有把真实 ANI.BT、Anime Garden 或 Mikan 请求作为通过条件。
+
+部署后如遇原站 DNS 或连接错误：
+
+- 当前站点有缓存：继续显示该站点旧缓存和刷新错误；
+- 当前站点没有缓存：明确返回错误；
+- 不会再显示 Mikan 或公共周历数据冒充目标站点。
+
+当前环境没有 Docker CLI，因此没有实际构建镜像。

@@ -41,6 +41,9 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    source_anime_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    canonical_key: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
     # Metadata used to identify and organize a title. These fields are optional
     # and do not call third-party metadata APIs by themselves.
@@ -179,6 +182,20 @@ class SystemLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     details: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class AnimePreference(Base):
+    __tablename__ = "anime_preferences"
+
+    canonical_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    bangumi_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    title_normalized: Mapped[str] = mapped_column(String(255), default="", nullable=False, index=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class MikanCacheEntry(Base):

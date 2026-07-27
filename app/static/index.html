@@ -7,7 +7,7 @@
 <title>FeedDock</title>
 <link href="/static/feeddock-icon.png" rel="icon" type="image/png"/>
 <script>try{document.documentElement.dataset.themeColor=localStorage.getItem("feeddock-theme-color")||"blue"}catch(_){}</script>
-<link href="/static/styles.css?v=1.16.1" rel="stylesheet"/>
+<link href="/static/styles.css?v=1.17.0" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
@@ -20,8 +20,6 @@
 <button data-subscription-source="mikan" data-view-target="add-catalog" type="button">Mikan</button>
 <button data-subscription-source="anibt" data-view-target="add-catalog" type="button">ANI.BT</button>
 <button data-subscription-source="ag" data-view-target="add-catalog" type="button">Anime Garden（AG）</button>
-<button data-subscription-source="nyaa" data-view-target="add-catalog" type="button">Nyaa</button>
-<button data-subscription-source="subsplease" data-view-target="add-catalog" type="button">SubsPlease</button>
 <button data-subscription-source="other" data-view-target="add-subscription" type="button">其它 RSS</button>
 <hr/><button id="openCollectionImport" type="button">添加合集</button>
 </div></details>
@@ -187,7 +185,7 @@
 <div class="subscription-source-actions"><a class="button-link secondary hidden" id="subscriptionSourceOfficial" rel="noreferrer noopener" target="_blank">打开站点</a><a class="button-link secondary hidden" id="subscriptionSourceHelp" rel="noreferrer noopener" target="_blank">RSS 说明</a><button class="secondary hidden" id="useDefaultSourceFeed" type="button">使用全站 RSS</button></div>
 <p class="hint" id="subscriptionSourceCaution"></p>
 </section>
-<form class="advanced-form panel-body" id="subscriptionForm"><input name="subscription_id" type="hidden"/><input name="metadata_source" type="hidden"/><input name="metadata_overview" type="hidden"/><input name="poster_url" type="hidden"/><input name="backdrop_url" type="hidden"/><input name="metadata_confirmed" type="hidden"/><input name="metadata_review_skipped" type="hidden"/>
+<form class="advanced-form panel-body" id="subscriptionForm"><input name="subscription_id" type="hidden"/><input name="source_type" type="hidden"/><input name="source_anime_id" type="hidden"/><input name="canonical_key" type="hidden"/><input name="metadata_source" type="hidden"/><input name="metadata_overview" type="hidden"/><input name="poster_url" type="hidden"/><input name="backdrop_url" type="hidden"/><input name="metadata_confirmed" type="hidden"/><input name="metadata_review_skipped" type="hidden"/>
 <fieldset><legend>基础信息</legend><div class="form-grid">
 <label>订阅名称<input maxlength="200" name="name" placeholder="番剧名称 第二季" required=""/></label><label>参考/Bangumi 标题<input name="reference_title" placeholder="番剧名称"/></label>
 <label>TMDB 标题<input name="tmdb_title" placeholder="规范番剧名称"/></label><label>手动规范标题<input name="manual_title" placeholder="手动模式优先使用"/></label>
@@ -227,8 +225,8 @@
 <div class="import-body"><p class="muted" id="subscriptionImportHint">选择 FeedDock 导出的 JSON 文件，或直接粘贴 JSON。</p><label>JSON 文件<input accept="application/json,.json" id="subscriptionImportFile" type="file"/></label><label>订阅 JSON<textarea id="subscriptionImportJson" placeholder='{"subscriptions":[{"name":"示例","rss_url":"https://example.com/feed.xml"}]}' rows="14"></textarea></label><label>RSS 地址冲突<select id="subscriptionImportConflict"><option value="skip">跳过已有订阅</option><option value="update">更新已有订阅</option></select></label><div class="form-actions"><button id="confirmSubscriptionImport" type="button">开始导入</button><button class="secondary" id="cancelSubscriptionImport" type="button">取消</button></div></div></section>
 </div><div aria-labelledby="metadataReviewTitle" aria-modal="true" class="modal hidden" id="metadataReviewModal" role="dialog"><div class="modal-backdrop" data-close-metadata-review=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMetadataReview" type="button">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"/></label><button id="reviewSearch" type="button">搜索</button><button class="secondary" id="reviewSkip" type="button">完全跳过</button></div><div class="metadata-results muted" id="reviewResults">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
 <div aria-labelledby="mikanDetailTitle" aria-modal="true" class="modal hidden" id="mikanDetailModal" role="dialog"><div class="modal-backdrop" data-close-mikan-modal=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan" id="catalogDetailBadge">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMikanModal" type="button">×</button></div><div class="mikan-detail-body" id="mikanDetailBody"></div></section></div>
-<script defer="" src="/static/mikan-subscription-state.js?v=1.16.1"></script>
-<script defer="" src="/static/subscription-sources.js?v=1.16.1"></script>
-<script defer="" src="/static/navigation.js?v=1.16.1"></script><script defer="" src="/static/app.js?v=1.16.1"></script>
+<script defer="" src="/static/mikan-subscription-state.js?v=1.17.0"></script>
+<script defer="" src="/static/subscription-sources.js?v=1.17.0"></script>
+<script defer="" src="/static/navigation.js?v=1.17.0"></script><script defer="" src="/static/app.js?v=1.17.0"></script>
 </body>
 </html>

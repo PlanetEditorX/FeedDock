@@ -59,7 +59,7 @@ async function loadSubscriptionSources() {
 }
 
 function catalogSources() {
-  return subscriptionSources.filter((source) => ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(source.id));
+  return subscriptionSources.filter((source) => ['mikan', 'anibt', 'ag'].includes(source.id));
 }
 
 function renderCatalogSourceTabs() {
@@ -88,7 +88,7 @@ function renderCatalogSourceContext() {
 
 async function openCatalogSource(sourceId, { autoLoad = false } = {}) {
   if (!subscriptionSources.some((item) => item.id === sourceId)) await loadSubscriptionSources();
-  activeCatalogSource = ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(sourceId) ? sourceId : 'mikan';
+  activeCatalogSource = ['mikan', 'anibt', 'ag'].includes(sourceId) ? sourceId : 'mikan';
   currentMikanCatalogData = null;
   mikanWeekdayDrafts.clear();
   document.getElementById('mikanCatalog').replaceChildren();
@@ -96,7 +96,7 @@ async function openCatalogSource(sourceId, { autoLoad = false } = {}) {
   showAppView('add-catalog');
   const state = document.getElementById('mikanCatalogState');
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
-  state.textContent = `点击“读取缓存”加载 ${source.label} 番剧周历；“强制更新”会更新共享周历或站点目录。`;
+  state.textContent = `点击“读取缓存”加载 ${source.label} 独立缓存；“强制更新”只请求 ${source.label} 原站。`;
   state.className = 'hint';
   if (autoLoad) await loadMikanCatalog(document.getElementById('mikanCatalogForm'), false);
 }
@@ -215,6 +215,9 @@ function setFormValue(form, name, value) {
 function resetSubscriptionForm() {
   subscriptionForm.reset();
   setFormValue(subscriptionForm, 'subscription_id', '');
+  setFormValue(subscriptionForm, 'source_type', '');
+  setFormValue(subscriptionForm, 'source_anime_id', '');
+  setFormValue(subscriptionForm, 'canonical_key', '');
   setFormValue(subscriptionForm, 'naming_mode', 'auto');
   setFormValue(subscriptionForm, 'media_type', 'tv');
   setFormValue(subscriptionForm, 'metadata_year', 0);
@@ -269,7 +272,7 @@ function subscriptionPayload({ forPreview = false, formData = null } = {}) {
   };
   const checkbox = (name) => Boolean(subscriptionForm.elements[name]?.checked);
   const payload = {
-    name: get('name'), reference_title: get('reference_title'), tmdb_title: get('tmdb_title'),
+    name: get('name'), source_type: get('source_type'), source_anime_id: get('source_anime_id'), canonical_key: get('canonical_key'), reference_title: get('reference_title'), tmdb_title: get('tmdb_title'),
     manual_title: get('manual_title'), naming_mode: get('naming_mode') || 'auto',
     media_type: get('media_type') || 'tv', bgm_url: get('bgm_url'), air_date: get('air_date') || null,
     metadata_year: integer('metadata_year', 0), metadata_source: get('metadata_source'),
@@ -598,7 +601,7 @@ function applyDiscoveryPreset(preset) {
   if (!preset) return;
   resetSubscriptionForm();
   const fields = [
-    'name', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season', 'season_mode',
+    'name', 'source_type', 'source_anime_id', 'canonical_key', 'reference_title', 'tmdb_title', 'bgm_url', 'air_date', 'season', 'season_mode',
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
@@ -670,23 +673,75 @@ function cacheStatusText(data) {
   return parts.join(' · ');
 }
 
+function normalizeCatalogIdentityTitle(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\s\-‐‑‒–—―_:：·・~～!！?？,，.。/\\|()（）\[\]【】{}]+/g, '');
+}
+
+function subscriptionMatchesCatalogItem(subscription, item) {
+  const itemKey = String(item.canonical_key || '').trim();
+  const subscriptionKey = String(subscription.canonical_key || '').trim();
+  if (itemKey && subscriptionKey && itemKey === subscriptionKey) return true;
+
+  const subjectId = Number(item.subject_id || 0);
+  if (subjectId > 0 && Number(subscription.bangumi_id || 0) === subjectId) return true;
+
+  const itemSourceId = String(item.source_anime_id || '').trim();
+  if (
+    itemSourceId
+    && String(subscription.source_type || '') === activeCatalogSource
+    && String(subscription.source_anime_id || '').trim() === itemSourceId
+  ) return true;
+
+  const aliases = new Set(
+    [item.title, item.title_original, item.title_english, ...(item.aliases || [])]
+      .map(normalizeCatalogIdentityTitle)
+      .filter(Boolean),
+  );
+  return [subscription.name, subscription.reference_title, subscription.manual_title, subscription.tmdb_title]
+    .map(normalizeCatalogIdentityTitle)
+    .filter(Boolean)
+    .some((value) => aliases.has(value));
+}
+
 function syncMikanCatalogSubscriptionState(subscriptions) {
   if (!currentMikanCatalogData) return 0;
-  if (activeCatalogSource === 'mikan') {
-    const subscribedIds = mikanSubscriptionState.collectSubscribedBangumiIds(subscriptions);
-    const changedCount = mikanSubscriptionState.updateCatalogSubscriptionState(currentMikanCatalogData, subscribedIds);
-    if (changedCount) renderMikanCatalog(currentMikanCatalogData);
-    return changedCount;
-  }
   let changedCount = 0;
+  const currentSourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
   currentMikanCatalogData.rows.forEach((row) => row.items.forEach((item) => {
-    const aliases = new Set((item.aliases || [item.title]).map((value) => String(value).trim().toLowerCase()).filter(Boolean));
-    const subscribed = subscriptions.some((sub) => {
-      if (sub.source_type !== activeCatalogSource) return false;
-      if (activeCatalogSource === 'anibt' && Number(item.subject_id || 0) > 0 && Number(sub.bangumi_id || 0) === Number(item.subject_id)) return true;
-      return [sub.name, sub.reference_title, sub.manual_title].some((value) => aliases.has(String(value || '').trim().toLowerCase()));
+    const matches = subscriptions.filter((subscription) => subscriptionMatchesCatalogItem(subscription, item));
+    const sourceLabels = [];
+    matches.forEach((subscription) => {
+      const label = subscriptionSourceState.getSource(
+        subscriptionSources,
+        subscription.source_type || 'other',
+      ).label;
+      if (!sourceLabels.includes(label)) sourceLabels.push(label);
     });
-    if (Boolean(item.subscribed) !== subscribed) { item.subscribed = subscribed; changedCount += 1; }
+    const subscribedHere = matches.some(
+      (subscription) => String(subscription.source_type || '') === activeCatalogSource,
+    );
+    const otherLabels = sourceLabels.filter((label) => label !== currentSourceLabel);
+    const badge = subscribedHere
+      ? `✓ 已订阅${otherLabels.length ? ` · ${otherLabels.join('、')} 也已订阅` : ''}`
+      : (sourceLabels.length ? `${sourceLabels.join('、')} 已订阅` : '');
+    const next = {
+      subscribed: matches.length > 0,
+      subscribed_here: subscribedHere,
+      subscribed_sources: sourceLabels,
+      subscription_badge: badge,
+    };
+    if (
+      Boolean(item.subscribed) !== next.subscribed
+      || Boolean(item.subscribed_here) !== next.subscribed_here
+      || String(item.subscription_badge || '') !== next.subscription_badge
+      || JSON.stringify(item.subscribed_sources || []) !== JSON.stringify(next.subscribed_sources)
+    ) {
+      Object.assign(item, next);
+      changedCount += 1;
+    }
   }));
   if (changedCount) renderMikanCatalog(currentMikanCatalogData);
   return changedCount;
@@ -759,7 +814,7 @@ async function openMikanDetail(item, forceRefresh = false) {
     } else {
       const params = new URLSearchParams({
         title: item.title || '', subject_id: String(item.subject_id || 0),
-        mikan_id: String(item.mikan_id || 0),
+        source_anime_id: String(item.source_anime_id || ''), mikan_id: String(item.mikan_id || 0),
         original_title: item.title_original || '', english_title: item.title_english || '',
         aliases: (item.aliases || []).join('\n'), force_refresh: forceRefresh ? 'true' : 'false',
       });
@@ -826,7 +881,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   const titleRow = document.createElement('div');
   titleRow.className = 'mikan-anime-title-row';
   titleRow.append(text('strong', item.title));
-  if (item.subscribed) titleRow.append(text('span', '✓ 已订阅', 'mikan-subscribed-badge'));
+  if (item.subscribed) titleRow.append(text('span', item.subscription_badge || '✓ 已订阅', 'mikan-subscribed-badge'));
   info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
@@ -862,24 +917,42 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   return card;
 }
 
-async function saveMikanWeekdayFilter(data, row, hiddenIds) {
-  const result = await api('/api/discovery/mikan/catalog/filters', {
+async function saveCatalogWeekdayPreferences(data, row, hiddenKeys) {
+  const items = row.items.map((item) => ({
+    canonical_key: item.canonical_key,
+    title: item.title || '',
+    bangumi_id: Number(item.subject_id || 0),
+    hidden: hiddenKeys.has(item.canonical_key),
+    reason: '',
+  })).filter((item) => item.canonical_key);
+  await api('/api/discovery/preferences/hidden', {
     method: 'PUT',
-    body: JSON.stringify({
-      year: data.year,
-      season: data.season,
-      weekday: row.weekday,
-      hidden_bangumi_ids: [...hiddenIds].sort((a, b) => a - b),
-    }),
+    body: JSON.stringify({ items }),
   });
-  const saved = new Set(result.hidden_bangumi_ids || []);
-  row.items.forEach((item) => { item.hidden = saved.has(Number(item.bangumi_id)); });
+  if (activeCatalogSource === 'mikan') {
+    const hiddenBangumiIds = row.items
+      .filter((item) => hiddenKeys.has(item.canonical_key))
+      .map((item) => Number(item.bangumi_id || item.mikan_id || 0))
+      .filter((value) => value > 0);
+    await api('/api/discovery/mikan/catalog/filters', {
+      method: 'PUT',
+      body: JSON.stringify({
+        year: Number(data.year),
+        season: data.season,
+        weekday: row.weekday,
+        hidden_bangumi_ids: hiddenBangumiIds,
+      }),
+    });
+  }
+  row.items.forEach((item) => { item.hidden = hiddenKeys.has(item.canonical_key); });
   row.hidden_count = row.items.filter((item) => item.hidden).length;
-  data.hidden_count = data.rows.reduce(
-    (sum, currentRow) => sum + currentRow.items.filter((item) => item.hidden).length,
-    0,
-  );
-  return saved;
+  if (currentMikanCatalogData) {
+    currentMikanCatalogData.hidden_count = currentMikanCatalogData.rows.reduce(
+      (sum, currentRow) => sum + currentRow.items.filter((item) => item.hidden).length,
+      0,
+    );
+  }
+  return new Set(hiddenKeys);
 }
 
 function renderMikanCatalog(data) {
@@ -905,13 +978,13 @@ function renderMikanCatalog(data) {
 
   const hiddenSummary = hiddenCount ? ` · 已隐藏 ${hiddenCount} 部` : '';
   const sourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
-  const fallbackSummary = data.fallback_notice ? ` · ${data.fallback_notice}` : '';
-  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${fallbackSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
+  const periodSummary = data.period_notice ? ` · ${data.period_notice}` : '';
+  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${periodSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
   state.className = 'hint';
 
   for (const row of data.rows) {
     const key = mikanWeekdayKey(data, row);
-    const editing = activeCatalogSource === 'mikan' && mikanWeekdayDrafts.has(key);
+    const editing = mikanWeekdayDrafts.has(key);
     const draft = mikanWeekdayDrafts.get(key) || new Set();
     const hiddenInRow = row.items.filter((item) => item.hidden).length;
     const visibleItems = editing ? row.items : row.items.filter((item) => !item.hidden);
@@ -938,7 +1011,7 @@ function renderMikanCatalog(data) {
       showAll.addEventListener('click', async () => {
         showAll.disabled = true;
         try {
-          await saveMikanWeekdayFilter(data, row, new Set());
+          await saveCatalogWeekdayPreferences(data, row, new Set());
           mikanWeekdayDrafts.delete(key);
           renderMikanCatalog(data);
           showNotice(`${row.weekday}的全部番剧已恢复显示`);
@@ -960,7 +1033,7 @@ function renderMikanCatalog(data) {
       save.addEventListener('click', async () => {
         save.disabled = true;
         try {
-          await saveMikanWeekdayFilter(data, row, draft);
+          await saveCatalogWeekdayPreferences(data, row, draft);
           mikanWeekdayDrafts.delete(key);
           renderMikanCatalog(data);
           showNotice(`${row.weekday}过滤设置已保存`);
@@ -970,7 +1043,7 @@ function renderMikanCatalog(data) {
         }
       });
       actions.append(showAll, cancel, save);
-    } else if (activeCatalogSource === 'mikan') {
+    } else {
       const edit = text('button', '编辑过滤', 'small secondary');
       edit.type = 'button';
       edit.disabled = Boolean(data.query);
@@ -978,7 +1051,7 @@ function renderMikanCatalog(data) {
       edit.addEventListener('click', () => {
         mikanWeekdayDrafts.set(
           key,
-          new Set(row.items.filter((item) => item.hidden).map((item) => Number(item.bangumi_id))),
+          new Set(row.items.filter((item) => item.hidden).map((item) => item.canonical_key).filter(Boolean)),
         );
         renderMikanCatalog(data);
       });
@@ -1008,13 +1081,13 @@ function renderMikanCatalog(data) {
       grid.append(empty);
     } else {
       visibleItems.forEach((item) => {
-        const bangumiId = Number(item.bangumi_id);
+        const canonicalKey = item.canonical_key;
         grid.append(createMikanCard(item, {
           editing,
-          hiddenDraft: draft.has(bangumiId),
+          hiddenDraft: draft.has(canonicalKey),
           onToggle: (hidden) => {
-            if (hidden) draft.add(bangumiId);
-            else draft.delete(bangumiId);
+            if (hidden) draft.add(canonicalKey);
+            else draft.delete(canonicalKey);
             renderMikanCatalog(data);
           },
         }));
@@ -1083,7 +1156,7 @@ async function loadMikanCatalog(form, forceRefresh = false) {
 
 function populateSubscriptionForm(sub) {
   const fields = [
-    'name', 'reference_title', 'tmdb_title', 'manual_title', 'naming_mode', 'media_type',
+    'name', 'source_type', 'source_anime_id', 'canonical_key', 'reference_title', 'tmdb_title', 'manual_title', 'naming_mode', 'media_type',
     'bgm_url', 'air_date', 'metadata_year', 'metadata_source', 'metadata_overview', 'poster_url', 'backdrop_url', 'metadata_confirmed', 'metadata_review_skipped', 'tmdb_id', 'bangumi_id', 'anilist_id', 'auto_metadata', 'season', 'season_mode',
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
@@ -1111,9 +1184,9 @@ function renderSubscriptions(data) {
   if (!data.length) {
     const empty = document.createElement('div'); empty.className = 'empty-state';
     empty.append(text('h3', '还没有订阅'));
-    empty.append(text('p', '从番剧周历选择 Mikan、ANI.BT、Anime Garden、Nyaa 或 SubsPlease，也可以手动添加其它 RSS。', 'muted'));
+    empty.append(text('p', '从 Mikan、ANI.BT 或 Anime Garden 原站番剧目录选择作品，也可以手动添加其它 RSS。', 'muted'));
     const actions = document.createElement('div'); actions.className = 'form-actions';
-    ['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].forEach((sourceId, index) => {
+    ['mikan', 'anibt', 'ag'].forEach((sourceId, index) => {
       const source = subscriptionSourceState.getSource(subscriptionSources, sourceId);
       const button = text('button', source.short_label || source.label, index ? 'secondary' : '');
       button.type = 'button'; button.addEventListener('click', () => openCatalogSource(sourceId, { autoLoad: true }).catch((error) => showNotice(error.message, false))); actions.append(button);
@@ -1774,7 +1847,7 @@ document.querySelectorAll('[data-subscription-source]').forEach((button) => {
   button.addEventListener('click', () => {
     const source = button.dataset.subscriptionSource;
     if (!source) return;
-    if (['mikan', 'anibt', 'ag', 'nyaa', 'subsplease'].includes(source)) {
+    if (['mikan', 'anibt', 'ag'].includes(source)) {
       openCatalogSource(source, { autoLoad: true }).catch((error) => showNotice(error.message, false));
     } else {
       openSubscriptionEditor(source).catch((error) => showNotice(error.message, false));

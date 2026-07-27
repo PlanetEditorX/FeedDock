@@ -1,50 +1,49 @@
-# FeedDock 1.16.1 Git 提交说明
+# FeedDock 1.17.0 Git 提交说明
 
 ## 推荐提交标题
 
 ```text
-fix(discovery): 为多站点周历增加 DNS 回退
+feat(discovery): 使用原站目录并支持跨站订阅状态
 ```
 
 ## 提交正文
 
 ```text
-- 将 bangumi-data 周历从单一 GitHub Raw 地址改为多镜像顺序回退
-- 默认尝试 jsDelivr CDN、Fastly 节点和 GitHub Raw
-- DNS 解析失败后在当前刷新周期熔断对应镜像，避免每个月重复超时
-- 所有周历镜像失败时复用 Mikan 季度目录和持久化缓存
-- ANI.BT 回退模式使用官方兼容的 Mikan bangumiId 参数
-- 前端显示周历回退状态，并向资源详情传递独立 mikan_id
-- 增加镜像切换、全 DNS 失败、Mikan 缓存回退和字段保真测试
-- 增加 ANIME_CATALOG_BASE_URLS 部署配置
-- 版本升级至 1.16.1
+- ANI.BT 直接读取原站季度周历和字幕组 API
+- Anime Garden 直接读取原站活跃番剧和资源 API
+- 移除非 Mikan 目录对 bangumi-data/CDN/Mikan 回退的依赖
+- 目录与详情缓存按站点隔离，失败时仅回退当前站点旧缓存
+- 为订阅增加 source_type、source_anime_id 和 canonical_key
+- 使用 Bangumi ID、站点 ID 和标题别名关联跨站番剧
+- 显示“已订阅”“Mikan 已订阅”等来源徽标
+- 增加跨站隐藏偏好并兼容旧版 Mikan 星期过滤
+- 从添加订阅菜单移除没有原生周历的 Nyaa 和 SubsPlease
+- 增加原站适配器、缓存、身份和隐藏状态测试
 ```
 
 ## 主要文件
 
 ```text
+app/catalog_providers.py
 app/anime_catalog.py
-app/config.py
+app/anime_identity.py
 app/main.py
+app/models.py
+app/schemas.py
 app/static/app.js
+app/static/index.html
+app/subscription_sources.py
 tests/test_catalog_weekly_sources.py
-tests/test_deployment_files.py
-.env.example
-.env.fnos.example
-docker-compose.fnos.yml
-MULTI_SOURCE_WEEKLY_CATALOG.md
-README.md
-VALIDATION.md
 ```
-
-## 数据库
-
-不新增表或字段。原有订阅、下载记录、Mikan 缓存和共享周历缓存均保持兼容。
 
 ## 提交命令
 
 ```bash
-git add .
-git commit -m "fix(discovery): 为多站点周历增加 DNS 回退" \
-  -m "多镜像失败时自动复用 Mikan 季度目录，避免 ANI.BT、Anime Garden、Nyaa 和 SubsPlease 同时不可用。"
+git add -A
+git commit -m "feat(discovery): 使用原站目录并支持跨站订阅状态" \
+  -m "ANI.BT 与 Anime Garden 改为直接请求原站，增加独立缓存、跨站订阅徽标和统一隐藏偏好。"
 ```
+
+## 数据库
+
+升级自动增加三个订阅身份字段和 `anime_preferences` 表，无需手工 SQL。

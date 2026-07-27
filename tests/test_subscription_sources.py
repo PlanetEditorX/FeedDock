@@ -25,10 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class SubscriptionSourceTests(unittest.TestCase):
     def test_catalog_contains_supported_add_subscription_sites(self) -> None:
         catalog = subscription_source_catalog()
-        self.assertEqual([item["id"] for item in catalog], ["mikan", "anibt", "ag", "nyaa", "subsplease", "other"])
+        self.assertEqual([item["id"] for item in catalog], ["mikan", "anibt", "ag", "other"])
         by_id = {item["id"]: item for item in catalog}
-        self.assertEqual(by_id["anibt"]["default_feed_url"], "https://anibt.net/rss/magnets.xml")
-        self.assertEqual(by_id["ag"]["default_feed_url"], "https://api.animes.garden/feed.xml")
+        self.assertEqual(by_id["anibt"]["default_feed_url"], "")
+        self.assertEqual(by_id["ag"]["default_feed_url"], "")
         self.assertEqual(by_id["mikan"]["catalog_view"], "add-catalog")
         self.assertFalse(by_id["other"]["default_feed_url"])
 
@@ -38,8 +38,8 @@ class SubscriptionSourceTests(unittest.TestCase):
             "https://sub.mikanani.me/RSS/Bangumi?bangumiId=123": "mikan",
             "https://anibt.net/rss/anime.xml?bgmId=123": "anibt",
             "https://api.animes.garden/feed.xml": "ag",
-            "https://nyaa.si/?page=rss&q=test": "nyaa",
-            "https://subsplease.org/rss/?r=1080&t=": "subsplease",
+            "https://nyaa.si/?page=rss&q=test": "other",
+            "https://subsplease.org/rss/?r=1080&t=": "other",
             "https://example.com/feed.xml": "other",
             "https://anibt.net.example.com/feed.xml": "other",
             "not a url": "other",
@@ -117,8 +117,6 @@ class SubscriptionSourceTests(unittest.TestCase):
             ("mikan", "Mikan"),
             ("anibt", "ANI.BT"),
             ("ag", "Anime Garden（AG）"),
-            ("nyaa", "Nyaa"),
-            ("subsplease", "SubsPlease"),
             ("other", "其它 RSS"),
         ):
             self.assertIn(f'data-subscription-source="{source}"', index)

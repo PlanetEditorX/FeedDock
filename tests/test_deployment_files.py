@@ -35,9 +35,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "30"', compose)
         self.assertIn('MIKAN_THUMBNAIL_WIDTH: "240"', compose)
         self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "320"', compose)
-        self.assertIn('ANIME_CATALOG_BASE_URLS:', compose)
-        self.assertIn('cdn.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items', compose)
-        self.assertIn('fastly.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items', compose)
+        self.assertNotIn('ANIME_CATALOG_BASE_URLS:', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
     def test_frontend_has_multi_source_weekly_catalog(self) -> None:
@@ -53,13 +51,15 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("/api/discovery/mikan/", script)
         self.assertIn("/api/discovery/catalog/${activeCatalogSource}", script)
         self.assertIn('id="catalogSourceTabs"', index)
-        for source_id in ("mikan", "anibt", "ag", "nyaa", "subsplease"):
+        for source_id in ("mikan", "anibt", "ag"):
             self.assertIn(f'data-subscription-source="{source_id}"', index)
         self.assertIn('id="forceRefreshMikanCatalog"', index)
         self.assertIn("cacheStatusText", script)
         self.assertIn("applyDiscoveryPreset", script)
         self.assertIn("mikan-subscribed-badge", script)
         self.assertIn("syncMikanCatalogSubscriptionState(data)", script)
+        self.assertIn("subscriptionMatchesCatalogItem", script)
+        self.assertIn("subscribed_sources", script)
         self.assertIn("FeedDockMikanSubscriptionState", script)
         self.assertIn("collectSubscribedBangumiIds", subscription_state)
         self.assertIn("updateCatalogSubscriptionState", subscription_state)
@@ -70,7 +70,7 @@ class DeploymentFileTests(unittest.TestCase):
         )
         self.assertIn("result.desired_name || result.save_path", script)
         self.assertIn("mikan_id: String(item.mikan_id || 0)", script)
-        self.assertIn("fallback_notice", script)
+        self.assertIn("subscription_badge", script)
         self.assertNotIn("dmhy", script.lower())
 
     def test_mikan_modal_is_hidden_until_anime_is_selected(self) -> None:

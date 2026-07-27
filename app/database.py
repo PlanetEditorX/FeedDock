@@ -27,6 +27,9 @@ if settings.database_url.startswith("sqlite"):
 
 
 _SUBSCRIPTION_COLUMNS: dict[str, str] = {
+    "source_type": "VARCHAR(32) NOT NULL DEFAULT ''",
+    "source_anime_id": "VARCHAR(120) NOT NULL DEFAULT ''",
+    "canonical_key": "VARCHAR(255) NOT NULL DEFAULT ''",
     "reference_title": "TEXT NOT NULL DEFAULT ''",
     "tmdb_title": "TEXT NOT NULL DEFAULT ''",
     "bgm_url": "TEXT NOT NULL DEFAULT ''",

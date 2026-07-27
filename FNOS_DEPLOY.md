@@ -1,4 +1,4 @@
-# FeedDock v1.16.1 飞牛 OS 部署
+# FeedDock v1.17.0 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -150,7 +150,7 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.16.1 修复非 Mikan 周历对单一 GitHub Raw 域名的依赖：默认依次尝试多个 `bangumi-data` 镜像，全部失败时自动复用 Mikan 季度目录和缓存。升级不新增数据库字段，不需要手工 SQL。
+
 
 升级后建议强制刷新一次浏览器，并确认首页只显示订阅列表。下载、设置和日志现在通过顶部菜单进入。网页“系统管理”中的重启与关闭默认不可用；需要远程控制进程时，在 Compose 中显式设置：
 
@@ -163,6 +163,18 @@ environment:
 
 从更旧版本直接升级时，v1.12.0 的订阅监控字段仍会在启动时自动增量补齐，不会删除历史订阅、条目或指纹。部署后可在网页“通知”中配置 Telegram、Bark 或 Webhook；所有通知默认关闭。
 
+## 1.17.0 原站目录说明
+
+ANI.BT 和 Anime Garden 现在直接访问各自原站 API，不再需要 `ANIME_CATALOG_BASE_URLS`。飞牛容器必须能够解析并访问：
+
+```text
+anibt.net
+api.animes.garden
+Mikan 配置的主站或镜像
+```
+
+每个站点使用独立缓存。原站暂时不可用时，只会显示该站点的旧缓存，不会用 Mikan 或其它站点内容替代。升级会自动增加订阅身份字段和 `anime_preferences` 表。
+
 ## 9. 故障排查
 
 ### 容器提示 `/media` 不可写
@@ -174,18 +186,16 @@ environment:
 3. 挂载不是只读；
 4. 飞牛共享目录权限允许容器访问。
 
-### ANI.BT、Anime Garden、Nyaa、SubsPlease 提示 DNS 解析失败
+### ANI.BT 或 Anime Garden 提示 DNS 解析失败
 
-1.16.1 会自动尝试多个周历镜像，并在全部失败时回退 Mikan。升级后先强制刷新浏览器，再点击“强制更新”。
+1.17.0 会直接访问目标站点，不再访问公共周历镜像。请在 FeedDock 容器内确认对应域名可解析：
 
-需要自定义镜像时，在 Compose 中设置：
-
-```yaml
-environment:
-  ANIME_CATALOG_BASE_URLS: "https://你的镜像/data/items,https://备用镜像/data/items"
+```bash
+getent hosts anibt.net
+getent hosts api.animes.garden
 ```
 
-该配置只影响番剧周历元数据，不改变各资源站 RSS 地址。
+如果原站暂时不可用但曾成功缓存过，页面会继续显示该站点旧缓存并附带刷新错误；没有缓存时会明确报错，不会用其它站点目录代替。代理用户应在网页“代理设置”中配置可访问这些域名的代理。
 
 ### 最终下载路径仍不正确
 

@@ -28,6 +28,9 @@ _TEXT_FIELDS = (
 
 class SubscriptionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    source_type: str = Field(default="", max_length=32)
+    source_anime_id: str = Field(default="", max_length=120)
+    canonical_key: str = Field(default="", max_length=255)
     reference_title: str = ""
     tmdb_title: str = ""
     bgm_url: str = ""
@@ -89,6 +92,9 @@ class SubscriptionCreate(BaseModel):
 
 class SubscriptionUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    source_type: str | None = Field(default=None, max_length=32)
+    source_anime_id: str | None = Field(default=None, max_length=120)
+    canonical_key: str | None = Field(default=None, max_length=255)
     reference_title: str | None = None
     tmdb_title: str | None = None
     bgm_url: str | None = None
@@ -138,6 +144,18 @@ class SubscriptionUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class AnimePreferenceItem(BaseModel):
+    canonical_key: str = Field(min_length=1, max_length=255)
+    title: str = Field(default="", max_length=300)
+    bangumi_id: int = Field(default=0, ge=0)
+    hidden: bool = True
+    reason: str = Field(default="", max_length=500)
+
+
+class AnimePreferenceBatchUpdate(BaseModel):
+    items: list[AnimePreferenceItem] = Field(min_length=1, max_length=500)
+
+
 class SubscriptionBatchRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=1000)
     action: Literal["enable", "disable", "delete"]
@@ -167,6 +185,9 @@ class SubscriptionOut(BaseModel):
 
     id: int
     name: str
+    source_type: str = "other"
+    source_anime_id: str = ""
+    canonical_key: str = ""
     reference_title: str
     tmdb_title: str
     bgm_url: str
@@ -461,6 +482,9 @@ class MetadataSyncRequest(BaseModel):
 
 class DiscoverySubscriptionPresetOut(BaseModel):
     name: str
+    source_type: str = ""
+    source_anime_id: str = ""
+    canonical_key: str = ""
     reference_title: str = ""
     tmdb_title: str = ""
     bgm_url: str = ""
@@ -484,6 +508,7 @@ class DiscoverySubscriptionPresetOut(BaseModel):
     stale_days: int = Field(default=0, ge=0, le=3650)
     enabled: bool = True
     sample_title: str = ""
+    bangumi_id: int = 0
 
 
 class DiscoveryResultOut(BaseModel):
@@ -512,6 +537,12 @@ class DiscoverySearchOut(BaseModel):
 class MikanCatalogItemOut(BaseModel):
     bangumi_id: int
     title: str
+    source_type: str = "mikan"
+    source_anime_id: str = ""
+    canonical_key: str = ""
+    subject_id: int = 0
+    mikan_id: int = 0
+    aliases: list[str] = Field(default_factory=list)
     cover_url: str = ""
     cover_proxy_url: str = ""
     update_at: str = ""
@@ -519,6 +550,11 @@ class MikanCatalogItemOut(BaseModel):
     base_url: str
     hidden: bool = False
     subscribed: bool = False
+    subscribed_here: bool = False
+    subscribed_sources: list[str] = Field(default_factory=list)
+    subscription_badge: str = ""
+    available: bool = True
+    action_text: str = ""
 
 
 class MikanCatalogRowOut(BaseModel):

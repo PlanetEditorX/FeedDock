@@ -32,7 +32,6 @@ services:
       MIKAN_THUMBNAIL_WIDTH: "240"
       MIKAN_THUMBNAIL_HEIGHT: "320"
       # 非 Mikan 周历优先尝试多个镜像，全部失败时自动复用 Mikan 季度目录
-      ANIME_CATALOG_BASE_URLS: "https://cdn.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items,https://fastly.jsdelivr.net/gh/bangumi-data/bangumi-data@master/data/items,https://raw.githubusercontent.com/bangumi-data/bangumi-data/master/data/items"
 
       # 先不配置 qBittorrent
       QBIT_URL: ""

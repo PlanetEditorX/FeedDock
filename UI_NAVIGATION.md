@@ -1,4 +1,4 @@
-# FeedDock 1.16.1 界面与导航说明
+# FeedDock 1.17.0 界面与导航说明
 
 ## 设计目标
 
@@ -18,11 +18,9 @@ FeedDock 1.13.0 起将首页从“所有配置面板纵向堆叠”改为“订�
 
 #### 订阅站点入口
 
-- **Mikan**：进入原生季度目录选择番剧和字幕组；
-- **ANI.BT**：进入按星期周历，并按 Bangumi ID 生成 RSS；
-- **Anime Garden（AG）**：进入按星期周历，并生成标题过滤 RSS；
-- **Nyaa**：进入按星期周历，并生成动画分类关键词 RSS；
-- **SubsPlease**：进入按星期周历，并生成分辨率 RSS 与标题包含规则；
+- **Mikan**：读取 Mikan 原站季度目录和字幕组；
+- **ANI.BT**：读取 ANI.BT 原站季度周历、字幕组和专用 RSS；
+- **Anime Garden（AG）**：读取 Anime Garden 原站当前活跃番剧、字幕组和专用 RSS；
 - **其它 RSS**：添加任意标准 RSS、Atom 或 RDF 地址；
 - **添加合集**：批量导入一组订阅定义。
 
@@ -134,7 +132,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 {
   "format": "feeddock-subscriptions",
   "version": 1,
-  "app_version": "1.16.1",
+  "app_version": "1.17.0",
   "subscriptions": [
     {
       "name": "示例番剧",
@@ -167,6 +165,6 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 
 ## 升级说明
 
-从 1.15.0 升级到 1.16.1 不新增数据库字段；共享周历和资源详情复用现有缓存表，不需要手工 SQL。更早版本升级时，既有增量迁移仍会按顺序执行。
+升级到 1.17.0 会自动增加订阅来源、站点番剧 ID、统一身份字段和跨站隐藏偏好表；既有订阅、条目与缓存保持不变，无需手工 SQL。
 
-静态资源使用 `v=1.16.1` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
+静态资源使用 `v=1.17.0` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。

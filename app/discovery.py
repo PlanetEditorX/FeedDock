@@ -254,10 +254,15 @@ def _subscription_preset(
     source_name: str,
     rss_url: str,
     sample_title: str = "",
+    source_type: str = "",
+    source_anime_id: str = "",
 ) -> dict[str, Any]:
     cleaned_name = _clean_text(name) or "未命名番剧"
     return {
         "name": cleaned_name,
+        "source_type": source_type,
+        "source_anime_id": source_anime_id,
+        "canonical_key": "",
         "reference_title": cleaned_name,
         "tmdb_title": "",
         "bgm_url": "",
@@ -562,6 +567,8 @@ def parse_mikan_detail_html(
                 source_name=f"Mikan · {name}",
                 rss_url=rss_url,
                 sample_title=title,
+                source_type="mikan",
+                source_anime_id=str(bangumi_id),
             ),
         }
 
@@ -587,6 +594,8 @@ def parse_mikan_detail_html(
                 source_name=f"Mikan · {name}",
                 rss_url=rss_url,
                 sample_title=title,
+                source_type="mikan",
+                source_anime_id=str(bangumi_id),
             ),
         }
 
@@ -605,6 +614,8 @@ def parse_mikan_detail_html(
                 source_name=f"Mikan · {name}",
                 rss_url=rss_url,
                 sample_title=title,
+                source_type="mikan",
+                source_anime_id=str(bangumi_id),
             ),
         }
 
