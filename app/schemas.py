@@ -72,6 +72,8 @@ class SubscriptionCreate(BaseModel):
     custom_download_path: str = ""
     missing_detection: bool = False
     only_latest: bool = False
+    auto_disable_when_complete: bool = False
+    stale_days: int = Field(default=0, ge=0, le=3650)
     enabled: bool = True
 
     @field_validator(*_TEXT_FIELDS)
@@ -131,6 +133,8 @@ class SubscriptionUpdate(BaseModel):
     custom_download_path: str | None = None
     missing_detection: bool | None = None
     only_latest: bool | None = None
+    auto_disable_when_complete: bool | None = None
+    stale_days: int | None = Field(default=None, ge=0, le=3650)
     enabled: bool | None = None
 
 
@@ -180,6 +184,11 @@ class SubscriptionOut(BaseModel):
     custom_download_path: str
     missing_detection: bool
     only_latest: bool
+    auto_disable_when_complete: bool
+    stale_days: int
+    last_new_item_at: datetime | None
+    last_stale_notified_at: datetime | None
+    completion_notified_at: datetime | None
     enabled: bool
     created_at: datetime
     updated_at: datetime
@@ -336,6 +345,24 @@ class RssPollSettingsUpdate(BaseModel):
     minutes: int = Field(default=30, ge=5, le=1440)
 
 
+class NotificationSettingsUpdate(BaseModel):
+    enabled: bool = False
+    events: list[str] = Field(default_factory=list, max_length=20)
+    telegram_enabled: bool = False
+    telegram_bot_token: str | None = Field(default=None, max_length=1000)
+    clear_telegram_bot_token: bool = False
+    telegram_chat_id: str = Field(default="", max_length=300)
+    bark_enabled: bool = False
+    bark_server_url: str = Field(default="https://api.day.app", max_length=4000)
+    bark_device_key: str | None = Field(default=None, max_length=1000)
+    clear_bark_device_key: bool = False
+    webhook_enabled: bool = False
+    webhook_url: str | None = Field(default=None, max_length=4000)
+    clear_webhook_url: bool = False
+    webhook_headers_json: str | None = Field(default=None, max_length=20000)
+    clear_webhook_headers: bool = False
+
+
 class ProxySettingsUpdate(BaseModel):
     enabled: bool = False
     proxy_url: str | None = Field(default=None, max_length=2000)
@@ -402,6 +429,8 @@ class DiscoverySubscriptionPresetOut(BaseModel):
     custom_download_path: str = ""
     missing_detection: bool = False
     only_latest: bool = False
+    auto_disable_when_complete: bool = False
+    stale_days: int = Field(default=0, ge=0, le=3650)
     enabled: bool = True
     sample_title: str = ""
 

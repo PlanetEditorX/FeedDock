@@ -79,6 +79,7 @@ function resetSubscriptionForm() {
   setFormValue(subscriptionForm, 'episode_group', 0);
   setFormValue(subscriptionForm, 'episode_offset', 0);
   setFormValue(subscriptionForm, 'total_episodes', 0);
+  setFormValue(subscriptionForm, 'stale_days', 0);
   setFormValue(subscriptionForm, 'total_episodes_source', '');
   setFormValue(subscriptionForm, 'save_path_template', '{base}/{media_folder}/Season {season:02}');
   setFormValue(subscriptionForm, 'file_name_template', '{title} - S{season:02}E{episode:02}');
@@ -135,7 +136,8 @@ function subscriptionPayload({ forPreview = false, formData = null } = {}) {
     scrape_enabled: false, scrape_mode: 'off',
     save_path_template: get('save_path_template') || '{base}/{media_folder}/Season {season:02}',
     custom_download_path: get('custom_download_path'), missing_detection: checkbox('missing_detection'),
-    only_latest: checkbox('only_latest'), enabled: checkbox('enabled'),
+    only_latest: checkbox('only_latest'), auto_disable_when_complete: checkbox('auto_disable_when_complete'),
+    stale_days: integer('stale_days', 0), enabled: checkbox('enabled'),
   };
   if (forPreview) {
     payload.sample_title = get('sample_title');
@@ -384,7 +386,7 @@ function applyDiscoveryPreset(preset) {
     'primary_rss_name', 'rss_url', 'backup_rss_name', 'backup_rss_url',
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'save_path_template', 'custom_download_path',
-    'missing_detection', 'only_latest', 'enabled', 'sample_title', 'bangumi_id',
+    'missing_detection', 'only_latest', 'auto_disable_when_complete', 'stale_days', 'enabled', 'sample_title', 'bangumi_id',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
   syncMetadataSearchQuery({ force: true });
@@ -861,7 +863,7 @@ function populateSubscriptionForm(sub) {
     'include_keywords', 'exclude_keywords', 'episode_regex', 'episode_group',
     'episode_offset', 'total_episodes', 'total_episodes_locked', 'total_episodes_source',
     'rename_enabled', 'file_name_template', 'scrape_enabled', 'scrape_mode', 'save_path_template',
-    'custom_download_path', 'missing_detection', 'only_latest', 'enabled',
+    'custom_download_path', 'missing_detection', 'only_latest', 'auto_disable_when_complete', 'stale_days', 'enabled',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, sub[field]));
   syncMetadataSearchQuery({ force: true });
@@ -902,7 +904,7 @@ async function loadSubscriptions() {
     meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
     meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
-    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 刮削：外部媒体库处理`));
+    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 完结自动停用：${sub.auto_disable_when_complete ? '开启' : '关闭'} · 未更新告警：${sub.stale_days ? `${sub.stale_days} 天` : '关闭'}`));
     meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
     details.append(meta);
     details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
@@ -975,7 +977,7 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(),
+      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), loadNotificationSettings(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
@@ -996,6 +998,10 @@ function initializePasswordToggles() {
   const mappings = {
     qbit_password: 'qbit_password', tmdb_read_access_token: 'tmdb_read_access_token',
     bangumi_access_token: 'bangumi_access_token', proxy_url: 'proxy_url',
+    notification_telegram_bot_token: 'notification_telegram_bot_token',
+    notification_bark_device_key: 'notification_bark_device_key',
+    notification_webhook_url: 'notification_webhook_url',
+    notification_webhook_headers_json: 'notification_webhook_headers_json',
   };
   Object.entries(mappings).forEach(([name, secret]) => {
     const input = document.querySelector(`[name="${name}"]`);
@@ -1015,6 +1021,61 @@ async function loadAutomationSettings() {
   form.elements.download_enabled.checked = Boolean(data.download_enabled);
   form.elements.daily_time.value = data.daily_time || '02:00';
   form.elements.timezone.value = data.timezone || 'Asia/Shanghai';
+}
+
+async function loadNotificationSettings() {
+  const data = await api('/api/notifications/settings');
+  const form = document.getElementById('notificationSettingsForm');
+  form.elements.enabled.checked = Boolean(data.enabled);
+  form.elements.telegram_enabled.checked = Boolean(data.telegram_enabled);
+  form.elements.telegram_chat_id.value = data.telegram_chat_id || '';
+  form.elements.bark_enabled.checked = Boolean(data.bark_enabled);
+  form.elements.bark_server_url.value = data.bark_server_url || 'https://api.day.app';
+  form.elements.webhook_enabled.checked = Boolean(data.webhook_enabled);
+  const events = new Set(data.events || []);
+  form.querySelectorAll('input[name="events"]').forEach((input) => { input.checked = events.has(input.value); });
+  const secrets = [
+    ['notification_telegram_bot_token', data.telegram_bot_token_configured, '已保存 Token；留空保留'],
+    ['notification_bark_device_key', data.bark_device_key_configured, '已保存 Key；留空保留'],
+    ['notification_webhook_url', data.webhook_url_configured, '已保存地址；留空保留'],
+    ['notification_webhook_headers_json', data.webhook_headers_configured, '已保存请求头；留空保留'],
+  ];
+  secrets.forEach(([name, configured, placeholder]) => {
+    form.elements[name].value = '';
+    form.elements[name].type = 'password';
+    form.elements[name].placeholder = configured ? placeholder : form.elements[name].placeholder;
+  });
+  ['clear_telegram_bot_token','clear_bark_device_key','clear_webhook_url','clear_webhook_headers'].forEach((name) => { form.elements[name].checked = false; });
+  const channels = (data.configured_channels || []).join('、') || '无';
+  document.getElementById('notificationConfigState').textContent = `${data.enabled ? '已启用' : '未启用'} · 可用渠道：${channels}`;
+}
+
+function notificationPayload() {
+  const form = document.getElementById('notificationSettingsForm');
+  const valueOrNull = (name) => form.elements[name].value.trim() || null;
+  return {
+    enabled: form.elements.enabled.checked,
+    events: [...form.querySelectorAll('input[name="events"]:checked')].map((input) => input.value),
+    telegram_enabled: form.elements.telegram_enabled.checked,
+    telegram_bot_token: valueOrNull('notification_telegram_bot_token'),
+    clear_telegram_bot_token: form.elements.clear_telegram_bot_token.checked,
+    telegram_chat_id: form.elements.telegram_chat_id.value.trim(),
+    bark_enabled: form.elements.bark_enabled.checked,
+    bark_server_url: form.elements.bark_server_url.value.trim() || 'https://api.day.app',
+    bark_device_key: valueOrNull('notification_bark_device_key'),
+    clear_bark_device_key: form.elements.clear_bark_device_key.checked,
+    webhook_enabled: form.elements.webhook_enabled.checked,
+    webhook_url: valueOrNull('notification_webhook_url'),
+    clear_webhook_url: form.elements.clear_webhook_url.checked,
+    webhook_headers_json: valueOrNull('notification_webhook_headers_json'),
+    clear_webhook_headers: form.elements.clear_webhook_headers.checked,
+  };
+}
+
+async function saveNotificationSettings() {
+  const data = await api('/api/notifications/settings', { method: 'PUT', body: JSON.stringify(notificationPayload()) });
+  await loadNotificationSettings();
+  return data;
 }
 
 async function loadProxySettings() {
@@ -1303,6 +1364,9 @@ document.getElementById('automationSettingsForm').addEventListener('submit', asy
 });
 document.getElementById('runAutomationNow').addEventListener('click', async()=>{try{const r=await api('/api/automation/run',{method:'POST'});showNotice(r.message||'统一任务已执行');await reloadAll();}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreAutomation').addEventListener('click', async()=>{await Promise.all([api('/api/automation/settings',{method:'DELETE'}),api('/api/rss-poll/settings',{method:'DELETE'})]);await Promise.all([loadAutomationSettings(),loadConfig()]);showNotice('已恢复默认 RSS 轮询与即时下载');});
+document.getElementById('notificationSettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();try{await saveNotificationSettings();showNotice('通知设置已保存');}catch(e){showNotice(e.message,false);}});
+document.getElementById('testNotifications').addEventListener('click',async()=>{try{await saveNotificationSettings();const r=await api('/api/notifications/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+document.getElementById('restoreNotifications').addEventListener('click',async()=>{if(!window.confirm('确认清空网页保存的全部通知渠道和密钥？'))return;await api('/api/notifications/settings',{method:'DELETE'});await loadNotificationSettings();showNotice('通知设置已清空');});
 document.getElementById('proxySettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();const f=event.currentTarget;try{await api('/api/proxy/settings',{method:'PUT',body:JSON.stringify({enabled:f.elements.enabled.checked,proxy_url:f.elements.proxy_url.value.trim()||null,clear_proxy_url:f.elements.clear_proxy_url.checked,no_proxy:f.elements.no_proxy.value.trim()})});await loadProxySettings();showNotice('代理设置已保存');}catch(e){showNotice(e.message,false);}});
 document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});

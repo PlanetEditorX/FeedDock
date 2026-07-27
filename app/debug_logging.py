@@ -17,7 +17,7 @@ from .models import SystemLog
 
 
 _ALLOWED_LEVELS = {"INFO", "DEBUG"}
-_SENSITIVE_KEY = re.compile(r"password|passwd|token|api[_-]?key|secret|authorization|cookie", re.I)
+_SENSITIVE_KEY = re.compile(r"password|passwd|token|api[_-]?key|secret|authorization|cookie|webhook", re.I)
 _LOGGER_NAME = "feeddock"
 _logger = logging.getLogger(_LOGGER_NAME)
 _runtime_level = "INFO"

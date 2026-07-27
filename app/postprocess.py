@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 
 from .database import SessionLocal
 from .downloader import QBittorrentClient
-from .models import FeedItem, SystemLog
+from .models import FeedItem, Subscription, SystemLog
+from .notifications import send_notification
+from .subscription_monitor import evaluate_subscription_completion
 
 
 _normalize_lock = threading.Lock()
@@ -53,6 +55,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             )
         )
         client = QBittorrentClient()
+        completed_subscription_ids: set[int] = set()
         for item in items:
             stats["checked"] += 1
             result = client.normalize_single_video(
@@ -71,7 +74,21 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
 
             if result.completed:
                 stats["completed"] += 1
+                newly_completed = item.completed_at is None
                 item.completed_at = item.completed_at or datetime.now(timezone.utc)
+                if newly_completed:
+                    completed_subscription_ids.add(item.subscription_id)
+                    subscription = session.get(Subscription, item.subscription_id)
+                    if subscription is not None:
+                        send_notification(
+                            session,
+                            "download_completed",
+                            f"下载完成：{subscription.name}",
+                            f"第 {item.episode or '?'} 集下载完成。\n{item.title}",
+                            subscription=subscription,
+                            item=item,
+                            details={"progress": 100},
+                        )
                 item.scrape_status = "skipped"
                 item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
 
@@ -85,6 +102,11 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                 stats["manual_required"] += 1
             elif result.state not in {"skipped"}:
                 stats["errors"] += 1
+
+        for subscription_id in completed_subscription_ids:
+            subscription = session.get(Subscription, subscription_id)
+            if subscription is not None:
+                evaluate_subscription_completion(session, subscription)
 
         if items:
             session.add(

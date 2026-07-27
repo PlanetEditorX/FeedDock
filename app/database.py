@@ -65,6 +65,12 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "custom_download_path": "TEXT NOT NULL DEFAULT ''",
     "missing_detection": "BOOLEAN NOT NULL DEFAULT 0",
     "only_latest": "BOOLEAN NOT NULL DEFAULT 0",
+    "auto_disable_when_complete": "BOOLEAN NOT NULL DEFAULT 0",
+    "stale_days": "INTEGER NOT NULL DEFAULT 0",
+    "last_new_item_at": "DATETIME NULL",
+    "last_stale_notified_at": "DATETIME NULL",
+    "completion_notified_at": "DATETIME NULL",
+    "last_missing_signature": "TEXT NOT NULL DEFAULT ''",
 }
 
 _FEED_ITEM_COLUMNS: dict[str, str] = {

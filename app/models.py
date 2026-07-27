@@ -103,6 +103,12 @@ class Subscription(Base):
     custom_download_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
     missing_detection: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     only_latest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auto_disable_when_complete: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    stale_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_new_item_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_stale_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completion_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_missing_signature: Mapped[str] = mapped_column(Text, default="", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

@@ -1,4 +1,4 @@
-# FeedDock v1.10.1 飞牛 OS 部署
+# FeedDock v1.12.0 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -142,7 +142,9 @@ docker compose -f docker-compose.fnos.yml pull
 docker compose -f docker-compose.fnos.yml up -d
 ```
 
-v1.10.1 已更新静态资源版本参数，正常刷新页面即可加载拆分后的 Mikan 订阅状态模块；若反向代理缓存了 HTML，可执行一次强制刷新。此次更新不修改数据库结构。v1.10.0 的旧订阅路径升级逻辑仍会保留，不会删除历史指纹和订阅数据。
+v1.12.0 更新静态资源缓存参数，并在启动时为旧 SQLite 数据库增量增加订阅监控字段。迁移只执行 `ALTER TABLE ADD COLUMN`，不会删除历史订阅、条目或指纹。部署后可在网页“通知中心”配置 Telegram、Bark 或 Webhook；所有通知默认关闭。
+
+升级后建议执行一次“立即刷新 RSS”和“检查下载完成”，确认旧任务能够通过 qBittorrent Tag 更新完成状态。旧版本中未写入 Tag 的历史任务无法自动回补完成状态，但不影响后续新任务。
 
 ## 9. 故障排查
 

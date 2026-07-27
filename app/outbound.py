@@ -62,3 +62,15 @@ def external_get(
 ) -> httpx.Response:
     with external_client(url, db=db, timeout=timeout, headers=headers) as client:
         return client.get(url, **kwargs)
+
+
+def external_post(
+    url: str,
+    *,
+    db: Session | None = None,
+    timeout: int | float | None = None,
+    headers: dict[str, str] | None = None,
+    **kwargs,
+) -> httpx.Response:
+    with external_client(url, db=db, timeout=timeout, headers=headers) as client:
+        return client.post(url, **kwargs)

@@ -20,6 +20,14 @@ from .models import FeedItem, Subscription, SystemLog
 from .naming import media_folder_name, naming_context, render_desired_name
 from .rss_parser import parse_feed
 from .outbound import external_get
+from .notifications import send_notification
+from .subscription_monitor import (
+    calculate_missing_episodes as monitor_missing_episodes,
+    evaluate_missing_episodes,
+    evaluate_stale_subscription,
+    evaluate_subscription_completion,
+    record_new_feed_activity,
+)
 from .runtime_config import get_app_setting, load_automation_config, load_qbittorrent_config
 
 
@@ -295,20 +303,7 @@ def preview_subscription(subscription: Subscription, sample_title: str, db: Sess
 
 
 def calculate_missing_episodes(db: Session, subscription: Subscription) -> list[int]:
-    if not subscription.missing_detection or subscription.total_episodes <= 0:
-        return []
-    values = db.scalars(
-        select(FeedItem.episode).where(
-            FeedItem.subscription_id == subscription.id,
-            FeedItem.status == "queued",
-        )
-    )
-    downloaded: set[int] = set()
-    for value in values:
-        number = episode_number(value)
-        if number is not None and number == number.to_integral_value() and 1 <= number <= subscription.total_episodes:
-            downloaded.add(int(number))
-    return [episode for episode in range(1, subscription.total_episodes + 1) if episode not in downloaded]
+    return monitor_missing_episodes(db, subscription)
 
 
 def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
@@ -349,7 +344,7 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     )
     item.save_path = save_path
     item.desired_name = desired_name
-    item.qbit_tag = item.qbit_tag or (f"feeddock-item-{item.id}" if desired_name else "")
+    item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
     item.scrape_status = "skipped"
     item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
     result = QBittorrentClient().add_url(
@@ -358,16 +353,29 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     if result.ok:
         item.status = "queued"
         item.reason = result.message
-        item.rename_status = "pending" if item.qbit_tag else "skipped"
-        item.rename_message = (
-            "等待 qBittorrent 获取文件列表并完成下载"
-            if item.qbit_tag else "未启用规范命名"
+        item.rename_status = "pending"
+        item.rename_message = "等待 qBittorrent 获取文件列表并完成下载"
+        send_notification(
+            db,
+            "download_started",
+            f"开始下载：{subscription.name}",
+            f"第 {item.episode or '?'} 集已推送到 qBittorrent。\n{item.title}",
+            subscription=subscription,
+            item=item,
         )
     else:
         item.status = "error"
         item.reason = result.message
-        item.rename_status = "error" if item.qbit_tag else ""
-        item.rename_message = result.message if item.qbit_tag else ""
+        item.rename_status = "error"
+        item.rename_message = result.message
+        send_notification(
+            db,
+            "rss_error",
+            f"下载任务推送失败：{subscription.name}",
+            f"{item.title}\n{result.message}",
+            subscription=subscription,
+            item=item,
+        )
     return result.ok, result.message
 
 
@@ -419,6 +427,13 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                     "backup_rss_url": subscription.backup_rss_url,
                 },
             ),
+        )
+        send_notification(
+            db,
+            "rss_error",
+            f"RSS 检查失败：{subscription.name}",
+            str(exc),
+            subscription=subscription,
         )
         db.commit()
         stats["errors"] += 1
@@ -519,21 +534,27 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         desired_name = (render_desired_name(subscription, candidate["episode"])
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
-        item.qbit_tag = f"feeddock-item-{item.id}" if desired_name else ""
+        item.qbit_tag = f"feeddock-item-{item.id}"
         item.scrape_status = "skipped"
         item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
-            item.rename_status = "pending" if item.qbit_tag else "skipped"
+            item.rename_status = "pending"
             item.rename_message = "等待定时推送"
             item.scrape_message = "FeedDock 已移除刮削功能，请交由外部媒体库识别"
         else:
             ok, _ = _push_feed_item(db, item, subscription)
             stats["queued" if ok else "errors"] += 1
 
-    subscription.last_checked_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if any(candidate["matched"] for candidate in candidates):
+        record_new_feed_activity(subscription, now=now)
+    evaluate_missing_episodes(db, subscription)
+    evaluate_stale_subscription(db, subscription, now=now)
+    evaluate_subscription_completion(db, subscription, now=now)
+    subscription.last_checked_at = now
     subscription.last_error = ""
     add_log(
         db,

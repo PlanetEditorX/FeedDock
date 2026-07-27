@@ -1,6 +1,11 @@
 import unittest
+from unittest.mock import ANY, patch
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from app.rss_parser import parse_feed
+from app.database import Base
 from app.models import Subscription
 from app.rss_service import (
     apply_episode_offset,
@@ -8,6 +13,7 @@ from app.rss_service import (
     match_title,
     parse_episode,
     preview_subscription,
+    process_subscription,
     render_save_path,
 )
 
@@ -111,6 +117,30 @@ class RSSServiceTests(unittest.TestCase):
     def test_path_traversal_is_confined(self):
         sub = Subscription(name="Demo", rss_url="https://example.com/feed.xml", save_path_template="{base}/../../etc")
         self.assertEqual(render_save_path(sub, "1"), "/media/Demo/Season 01")
+
+    def test_rss_refresh_rechecks_completion_for_historical_completed_items(self):
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            subscription = Subscription(
+                name="Demo",
+                rss_url="https://example.test/feed.xml",
+                total_episodes=1,
+                auto_disable_when_complete=True,
+            )
+            db.add(subscription)
+            db.commit()
+            with (
+                patch("app.rss_service._sync_metadata_if_due"),
+                patch("app.rss_service._load_subscription_entries", return_value=([], "测试源")),
+                patch("app.rss_service.evaluate_missing_episodes"),
+                patch("app.rss_service.evaluate_stale_subscription"),
+                patch("app.rss_service.evaluate_subscription_completion") as completion,
+            ):
+                process_subscription(db, subscription)
+            completion.assert_called_once_with(db, subscription, now=ANY)
+        engine.dispose()
+
 
 
 if __name__ == "__main__":

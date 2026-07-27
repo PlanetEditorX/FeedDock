@@ -29,10 +29,17 @@ from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
 from .mikan_subscription import collect_subscribed_mikan_bangumi_ids
+from .notification_config import (
+    load_notification_config,
+    reset_notification_config,
+    save_notification_config,
+)
+from .notifications import send_notification
 from .metadata_service import MetadataService
 from .models import AdminAccount, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
+from .subscription_monitor import reset_monitor_state_for_changes
 from .rss_service import (
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
@@ -78,6 +85,7 @@ from .schemas import (
     MetadataSettingsUpdate,
     MetadataSyncRequest,
     MetadataReviewSkipRequest,
+    NotificationSettingsUpdate,
     MikanBangumiDetailOut,
     MikanCatalogOut,
     MikanWeekdayFilterOut,
@@ -541,6 +549,59 @@ def restore_proxy_settings(db: Session = Depends(get_db)) -> dict[str, str | boo
     return reset_proxy_config(db).public_dict()
 
 
+@app.get("/api/notifications/settings", dependencies=[Depends(require_admin)])
+def get_notification_settings(db: Session = Depends(get_db)) -> dict[str, object]:
+    return load_notification_config(db).public_dict()
+
+
+@app.put("/api/notifications/settings", dependencies=[Depends(require_admin)])
+def update_notification_settings(
+    payload: NotificationSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        config = save_notification_config(
+            db,
+            enabled=payload.enabled,
+            events=payload.events,
+            telegram_enabled=payload.telegram_enabled,
+            telegram_bot_token=payload.telegram_bot_token,
+            clear_telegram_bot_token=payload.clear_telegram_bot_token,
+            telegram_chat_id=payload.telegram_chat_id,
+            bark_enabled=payload.bark_enabled,
+            bark_server_url=payload.bark_server_url,
+            bark_device_key=payload.bark_device_key,
+            clear_bark_device_key=payload.clear_bark_device_key,
+            webhook_enabled=payload.webhook_enabled,
+            webhook_url=payload.webhook_url,
+            clear_webhook_url=payload.clear_webhook_url,
+            webhook_headers_json=payload.webhook_headers_json,
+            clear_webhook_headers=payload.clear_webhook_headers,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config.public_dict()
+
+
+@app.delete("/api/notifications/settings", dependencies=[Depends(require_admin)])
+def restore_notification_settings(db: Session = Depends(get_db)) -> dict[str, object]:
+    return reset_notification_config(db).public_dict()
+
+
+@app.post("/api/notifications/test", dependencies=[Depends(require_admin)])
+def test_notifications(db: Session = Depends(get_db)) -> dict[str, object]:
+    result = send_notification(
+        db,
+        "download_started",
+        "FeedDock 通知测试",
+        "通知渠道连接正常。这是一条手动测试消息。",
+        details={"test": True},
+        force=True,
+    )
+    db.commit()
+    return {"ok": result.ok, "message": result.message, "sent": result.sent, "errors": result.errors}
+
+
 @app.post("/api/proxy/test", dependencies=[Depends(require_admin)])
 def test_proxy(db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
@@ -555,6 +616,7 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
     qbit = load_qbittorrent_config(db)
     metadata = load_metadata_config(db)
     proxy = load_proxy_config(db)
+    notifications = load_notification_config(db)
     values = {
         "qbit_password": qbit.password,
         "tmdb_read_access_token": metadata.tmdb_read_access_token,
@@ -562,6 +624,10 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
         "emby_api_key": metadata.emby_api_key,
         "tmm_api_key": metadata.tmm_api_key,
         "proxy_url": proxy.url,
+        "notification_telegram_bot_token": notifications.telegram_bot_token,
+        "notification_bark_device_key": notifications.bark_device_key,
+        "notification_webhook_url": notifications.webhook_url,
+        "notification_webhook_headers_json": notifications.webhook_headers_json,
     }
     if secret_name not in values:
         raise HTTPException(status_code=404, detail="未知密钥字段")
@@ -877,7 +943,9 @@ def update_subscription(
         raise HTTPException(status_code=404, detail="订阅不存在")
     try:
         request.state.debug_stage = "subscription.apply-values"
-        for key, value in _subscription_values(payload, db).items():
+        values = _subscription_values(payload, db)
+        reset_monitor_state_for_changes(subscription, values)
+        for key, value in values.items():
             setattr(subscription, key, value)
         request.state.debug_stage = "subscription.commit"
         db.commit()

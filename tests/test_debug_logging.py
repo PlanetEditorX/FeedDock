@@ -34,6 +34,15 @@ class DebugLoggingTests(unittest.TestCase):
         self.assertNotIn("user:password", rendered)
         self.assertIn("***:***@", rendered)
 
+    def test_webhook_urls_and_headers_are_redacted(self):
+        rendered = safe_json({
+            "notification_webhook_url": "https://hooks.example.test/path?token=abc",
+            "notification_webhook_headers_json": '{"Authorization":"Bearer abc"}',
+        })
+        self.assertNotIn("hooks.example.test", rendered)
+        self.assertNotIn("Bearer abc", rendered)
+        self.assertIn("***", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

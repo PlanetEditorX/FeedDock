@@ -265,5 +265,30 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("setFormValue(subscriptionForm, 'scrape_enabled', false)", script)
         self.assertIn("setFormValue(subscriptionForm, 'name', displayTitle)", script)
 
+    def test_notification_and_subscription_monitoring_are_wired_end_to_end(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
+        postprocess = (ROOT / "app/postprocess.py").read_text(encoding="utf-8")
+        notifications = (ROOT / "app/notifications.py").read_text(encoding="utf-8")
+        monitor = (ROOT / "app/subscription_monitor.py").read_text(encoding="utf-8")
+
+        self.assertIn('id="notificationSettingsForm"', index)
+        self.assertIn('name="auto_disable_when_complete"', index)
+        self.assertIn('name="stale_days"', index)
+        self.assertIn('/api/notifications/settings', script)
+        self.assertIn('/api/notifications/test', script)
+        self.assertIn('def update_notification_settings', main)
+        self.assertIn('def test_notifications', main)
+        self.assertIn('item.qbit_tag = f"feeddock-item-{item.id}"', rss_service)
+        self.assertIn('evaluate_subscription_completion(db, subscription, now=now)', rss_service)
+        self.assertIn('"download_completed"', postprocess)
+        self.assertIn('def _safe_channel_error', notifications)
+        self.assertIn('def evaluate_missing_episodes', monitor)
+        self.assertIn('def evaluate_stale_subscription', monitor)
+        self.assertIn('def evaluate_subscription_completion', monitor)
+
+
 if __name__ == "__main__":
     unittest.main()

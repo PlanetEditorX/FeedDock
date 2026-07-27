@@ -1,364 +1,276 @@
 # FeedDock
 
-当前版本：`1.10.1`
+当前版本：`1.12.0`
 
-## v1.10.1：Mikan 目录订阅状态优化
+FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
 
-- 已订阅番剧显示 `✓ 已订阅` 标识。
-- 主 RSS 和备用 RSS 均参与识别，`bangumiId` 参数大小写不敏感。
-- 新增、编辑或删除订阅后，当前目录即时同步，无需重新请求 Mikan。
-- 订阅状态解析拆分为独立的后端和前端模块，并增加专用边界测试。
-- 详细设计与验证见 [`MIKAN_SUBSCRIPTION_STATUS.md`](MIKAN_SUBSCRIPTION_STATUS.md)。
+## v1.12.0：通知中心与订阅健康监控
 
-## v1.10.0：季度识别、规范命名、定时窗口与代理
+本版本在分析 `wushuo894/ani-rss` 的订阅生命周期、通知和下载完成机制后，选择了最适合 FeedDock 当前架构的高价值功能：
 
-### 登录与密钥显示
+- 新增 Telegram、Bark、通用 Webhook 通知中心；
+- 可按事件启用：开始下载、下载完成、遗漏集数、订阅完结、RSS/推送错误、长期未更新；
+- 新增“全部下载完成后自动停用订阅”；
+- 新增按订阅设置的“连续未更新告警天数”；
+- 遗漏和长期未更新通知具有持久化去重，重启后不会重复轰炸；
+- 所有 qBittorrent 任务都写入唯一标签，未开启规范命名时也可检测下载完成；
+- 通知失败仅记录 WARNING 日志，不阻断 RSS、任务推送或完成状态更新；
+- 新增 SQLite 增量迁移和专用单元测试。
 
-- “首次成功登录后强制修改密码”提示只在管理员仍使用初始密码时显示；密码修改完成后，后续登录页不再显示。
-- 登录、修改密码以及管理页面中的 qBittorrent 密码、TMDB/Bangumi Token、代理地址均提供小眼睛按钮。
-- 已保存密钥默认不回传到页面，只有管理员主动点击小眼睛时才通过受保护接口读取。
+深入对比和取舍见 [`ANI_RSS_GAP_ANALYSIS.md`](ANI_RSS_GAP_ANALYSIS.md)，配置细节见 [`NOTIFICATIONS_AND_MONITORING.md`](NOTIFICATIONS_AND_MONITORING.md)。
 
-### TMDB 季度识别
+## 主要能力
 
-每个订阅支持三种季度模式：
+### 订阅与发现
 
-- `title`：从“第二季”“第2期”“Season 2”“S02”等标题文字识别；这是新订阅默认值。
-- `latest`：选择 TMDB 返回的最高且已播出的正季，自动排除 Season 0 特别篇。
-- `manual`：始终使用手动填写的季编号。
+- Mikan 季度番剧目录、标题搜索、持久缓存和本地 WebP 封面；
+- 目录中标记 `✓ 已订阅`，保存、编辑、删除订阅后即时同步；
+- 主 RSS 与备用 RSS；
+- 包含、排除、全局排除规则；
+- 自定义集数正则、捕获组和集数偏移；
+- 总集数、总集数锁定、只下载最新集和遗漏检测；
+- TMDB、Bangumi、AniList 元数据搜索和人工确认。
 
-TMDB 详情会返回全部季度、每季首播日期和集数。选择结果后，FeedDock 会把最终采用的季度写回订阅。
+### 下载与命名
 
-### 元数据人工确认
+- 推送 qBittorrent；
+- 自定义下载根目录、媒体目录模板和文件名模板；
+- 通过唯一 qBittorrent Tag 跟踪磁力元数据、进度和完成状态；
+- 单视频任务可规范化视频名及同名字幕；
+- 多视频合集不猜测文件对应关系，保留原名并提示手动处理；
+- RSS 可即时推送，也可等待每日统一时间执行。
 
-新增订阅时，如果尚未在表单中确认元数据，会自动打开确认窗口。窗口可切换：
+### 通知与监控
 
-1. TMDB：最适合 Emby 识别及季度结构；
-2. Bangumi：适合中文名、日文名、简介和动画话数；
-3. AniList：公开动漫 API，可作为 TMDB/Bangumi 匹配不准时的备选；
-4. 完全跳过：保留手动标题，仅使用本地命名，不再强制匹配。
-
-### 外部媒体库识别
-
-FeedDock 不再写入本地 NFO/图片，也不再调用 tinyMediaManager。它只负责把下载目录和文件名规范化，例如保留 `标题 (年份)`、季度目录和 `[tmdbid=...]`，后续识别交给飞牛影视、Emby、Jellyfin 或其他外部媒体库完成。
-
-### 每日统一执行时间
-
-可开启下载等待：RSS 先记录为“等待定时推送”，每天指定时间统一发送给 qBittorrent。
-
-默认时间为 `02:00`，时区默认 `Asia/Shanghai`。管理页面提供“立即执行一次”按钮。
-
-### 全局代理
-
-支持：
-
-- `http://`、`https://`；
-- `socks5://`、`socks5h://`；
-- 带用户名密码的代理 URL；
-- `NO_PROXY` 风格的排除列表。
-
-代理应用于 RSS、Mikan、封面、TMDB、Bangumi、AniList、GitHub 更新检查等外部请求。qBittorrent 等本地服务建议加入排除列表。
-
-# FeedDock
-
-FeedDock 是一个自托管的 RSS 番剧订阅管理器。它读取你配置的 RSS，将匹配条目推送给 qBittorrent，并提供 Mikan 季度目录、持久过滤、封面缓存、TMDB/Bangumi 元数据匹配、规范目录和文件名、总集数同步。
-
-当前版本：`1.10.1`
-
-## v1.10.0 修正与增强
-
-- 选择 TMDB/Bangumi 条目后，订阅名称、来源标题和卡片统一显示 `标题 (年份)`。
-- 无法从示例标题识别集数时，预览使用明确标注的 `S01E01` 演示值，不再生成 `Eunknown`；真实下载仍必须识别到真实集数才自动改名。
-- qBittorrent 下载根目录和订阅根目录强制使用同一个容器路径，默认 `/media`；子目录结构只由模板控制。
-- 订阅卡片显示元数据海报、简介、来源 ID、总集数和最终媒体目录。
-- qBittorrent 报告 100% 下载完成后只更新完成状态，不再执行本地 NFO/图片生成或 TMM 调用。
-- 最近条目支持安全清理（保留去重指纹），系统日志支持清空。
-- 新订阅和本次升级后的旧订阅默认关闭 FeedDock 刮削，由外部媒体库识别。
-- 飞牛默认以 `PUID=0`、`PGID=0` 运行，并在启动时实际检查 `/data`、`/media` 可写性。
-- 保留手动/TMDB/Bangumi/自动命名、板块折叠记忆、总集数锁定、Mikan 本地缩略图缓存等现有功能。
+- Telegram Bot；
+- Bark 官方服务或自建 Bark Server；
+- 通用 JSON Webhook，可配置自定义请求头；
+- 通知密钥默认不返回浏览器，管理员主动点击“小眼睛”时才读取；
+- 下载完成通知与规范命名相互独立；
+- 完结自动停用以 qBittorrent 已确认 `100%` 的整数集数为准；
+- 长期未更新以“最近一次发现新的匹配 RSS 条目”为基准；
+- 遗漏集数超过 10 集时仍在页面显示，但不主动通知，以降低初始配置误报。
 
 ## 工作流程
 
 ```text
-Mikan/RSS
-   ↓
-标题与集数识别
-   ↓
-TMDB 或 Bangumi 元数据匹配
-   ↓
-生成规范目录和文件名
-   ↓
-推送 qBittorrent（savepath + rename + 唯一 tag）
-   ↓
-qBittorrent 获取磁力元数据后，通过 WebUI API 重命名视频和同名字幕
-   ↓
-qBittorrent 达到 100% 后记录完成状态，外部媒体库自行识别
+Mikan / RSS
+    ↓
+标题、规则和集数解析
+    ↓
+写入条目并生成保存路径 / 目标文件名
+    ↓
+即时或定时推送 qBittorrent（唯一 Tag）
+    ↓
+每 2 分钟检查任务元数据、进度和完成状态
+    ↓
+可选：发送完成通知、判断整季完成并自动停用
+    ↓
+外部媒体库识别规范目录和文件名
 ```
 
-FeedDock 不提供媒体资源，也不会绕过 qBittorrent 直接移动正在做种的文件。
-
-## 推荐目录结构
-
-电视剧/季度番剧：
-
-```text
-/media/
-└── 金牌得主 (2025) [tmdbid=123456]/
-    └── Season 02/
-        ├── 金牌得主 - S02E01.mkv
-        ├── 金牌得主 - S02E01.zh-CN.ass
-        └── season.nfo
-```
-
-剧场版/电影：
-
-```text
-/media/
-└── 电影标题 (2026) [tmdbid=123456]/
-    ├── 电影标题 (2026).mkv
-    ├── movie.nfo
-    ├── poster.jpg
-    └── backdrop.jpg
-```
+FeedDock 不提供、存储或分发任何媒体资源，也不会绕过 qBittorrent 直接移动正在做种的文件。
 
 ## 快速启动
 
+### 1. 准备配置
+
 ```bash
-cd /你的/FeedDock目录
 cp .env.example .env
+```
+
+至少修改：
+
+```dotenv
+ADMIN_PASSWORD=替换为强密码
+QBIT_URL=http://你的-qBittorrent:8080
+QBIT_USERNAME=admin
+QBIT_PASSWORD=替换为真实密码
+DOWNLOAD_PATH=/media
+```
+
+`DOWNLOAD_PATH` 必须是 qBittorrent 能识别的路径。Docker 部署时，FeedDock 和 qBittorrent 应把同一个宿主机目录挂载到相同容器路径，推荐统一为 `/media`。
+
+### 2. 启动
+
+使用外部 qBittorrent：
+
+```bash
 docker compose up -d --build
 ```
 
-打开：`http://服务器地址:7789`
+同时启动示例 qBittorrent：
 
-首次账号由环境变量决定。飞牛默认 Compose 使用：
-
-```text
-用户名：admin
-密码：password
+```bash
+docker compose --profile with-qbit up -d --build
 ```
 
-首次登录后必须修改密码，密码保存在 `/data/feeddock.db`。
+管理页面默认地址：`http://服务器地址:7789`。
 
-## 元数据配置
+首次成功登录后必须修改初始密码。新密码和网页保存的配置位于 `/data/feeddock.db`。
 
-网页打开“元数据设置”。
+## 通知中心配置
 
-### TMDB
+管理页面的“通知中心”支持三个渠道，可同时启用：
 
-填写 TMDB API Read Access Token。TMDB 用于：
+### Telegram
 
-- Emby 最稳定的名称和外部 ID；
-- 电视剧季度详情；
-- 当前季度总集数；
-- 中文简介、海报和背景图。
+1. 创建 Bot 并取得 Bot Token；
+2. 获取目标用户、群组或频道的 Chat ID；
+3. 填写 Token 和 Chat ID；
+4. 勾选 Telegram 和需要的事件；
+5. 点击“保存并测试”。
 
-### Bangumi
+### Bark
 
-Bangumi 公开读取通常不要求 Token，可直接搜索。它用于：
+- 默认服务地址：`https://api.day.app`；
+- 自建 Bark Server 时替换服务地址；
+- 填写 Device Key 后测试。
 
-- 中文名和日文原名；
-- 动画条目、放送日期和话数；
-- 动漫专属简介与封面。
+### 通用 Webhook
 
-### 推荐匹配顺序
+FeedDock 使用 `POST application/json`，基础结构如下：
 
-1. 先用 Bangumi 找到准确动漫条目。
-2. 再用 TMDB 搜索并选择正确电视剧/电影条目。
-3. 命名来源选择 `TMDB` 或 `自动`。
-4. 保存前点击“预览规则和命名”。
-
-自动模式的名称优先级：
-
-```text
-手动规范标题 > TMDB 标题 > Bangumi 标题 > 原订阅名称
+```json
+{
+  "event": "download_completed",
+  "title": "下载完成：示例番剧",
+  "message": "第 3 集下载完成。",
+  "subscription": {
+    "id": 1,
+    "name": "示例番剧",
+    "enabled": true,
+    "total_episodes": 12
+  },
+  "item": {
+    "id": 10,
+    "title": "原始 RSS 标题",
+    "episode": "3",
+    "status": "queued",
+    "save_path": "/media/示例番剧/Season 01"
+  },
+  "details": {},
+  "timestamp": "2026-07-27T00:00:00+00:00"
+}
 ```
 
-## 自动获取总集数
+自定义请求头使用 JSON 对象，例如：
 
-选择元数据搜索结果时，FeedDock 会立即读取详情：
+```json
+{"Authorization":"Bearer your-token"}
+```
 
-- TMDB 电视剧：读取指定 `Season N` 的 episode 列表数量；
-- TMDB 电影：总数为 1；
-- Bangumi：优先读取条目话数，缺失时读取 episode API 总数。
+## 订阅健康设置
 
-勾选“锁定总集数”后，任何自动同步都不会覆盖手动值。
+每个订阅新增两个选项：
 
-勾选“定期自动同步元数据”后，RSS 轮询时会按照 `METADATA_AUTO_SYNC_HOURS` 检查是否需要更新，第三方网站临时故障不会阻断 RSS 下载。
+- **全部下载完成后自动停用**：需要已知且大于 0 的总集数。只有第 `1..总集数` 的整数集均被 qBittorrent 确认完成时才停用；`.5` 特别集不用于满足整季完成条件。
+- **连续未更新告警（天）**：`0` 表示关闭。达到阈值后通知一次；发现新的匹配条目后重置，之后再次达到阈值才会再次通知。
 
-## qBittorrent 规范重命名
+“遗漏检测”会把已推送和等待定时推送的集数视为已跟踪。缺失集合发生变化时才通知；超过 10 集的缺失集合只展示不推送，避免刚创建订阅时把尚未播出的整季当作异常。
 
-默认文件模板：
+## 元数据与规范命名
+
+推荐命名：
+
+```text
+/media/
+└── 番剧名称 (2026) [tmdbid=123456]/
+    └── Season 01/
+        ├── 番剧名称 - S01E01.mkv
+        └── 番剧名称 - S01E01.zh-CN.ass
+```
+
+默认目录模板：
+
+```text
+{base}/{media_folder}/Season {season:02}
+```
+
+默认文件名模板：
 
 ```text
 {title} - S{season:02}E{episode:02}
 ```
 
-默认保存路径模板：
+可用变量包括 `{base}`、`{media_folder}`、`{title}`、`{season}`、`{episode}`、`{year}` 和 `{tmdb_id}`。
 
-```text
-{base}/{media_folder}/Season {season:02}
-```
+## 调度与代理
 
-可用变量：
-
-```text
-{base}
-{subscription}
-{reference_title}
-{tmdb_title}
-{manual_title}
-{title}
-{media_folder}
-{season}
-{season:02}
-{episode}
-{episode:02}
-{episode_pad}
-{year}
-{tmdb_id}
-{bangumi_id}
-{media_type}
-```
-
-处理逻辑：
-
-1. 添加任务时传递 `savepath`、`rename` 和唯一标签 `feeddock-item-ID`。
-2. 每 2 分钟查询一次等待规范化的任务。
-3. 磁力元数据未完成时保持 `pending`。
-4. 只有一个视频文件时，通过 qBittorrent `renameFile` 改名。
-5. 同目录且与视频原文件同前缀的字幕同步改名。
-6. 多视频合集不会猜测集数，状态标记为 `manual_required`。
-
-顶部“规范化文件名”按钮可以立即执行一次检查。
-
-## 外部媒体库识别
-
-FeedDock 不再负责本地刮削。只要目录和文件名规范，飞牛影视、Emby、Jellyfin 等外部媒体库通常可以自行识别。
-
-飞牛示例：
-
-```yaml
-volumes:
-  - "/vol1/1000/应用/feeddock/data:/data"
-  - "/vol2/1000/影视:/media"
-
-environment:
-  PUID: "0"
-  PGID: "0"
-  DOWNLOAD_PATH: "/media"
-  MEDIA_LOCAL_ROOT: "/media"
-```
-
-qBittorrent 与 FeedDock 必须把同一宿主机目录挂载到相同容器路径，推荐统一使用 `/media`：
-
-```yaml
-DOWNLOAD_PATH: "/media"
-MEDIA_LOCAL_ROOT: "/media"
-```
-
-然后订阅路径使用：
-
-```text
-{base}/{media_folder}/Season {season:02}
-```
-
-qBittorrent 报告任务 100% 完成后，FeedDock 只记录完成状态并保留规范命名结果。
-
-## 板块收缩与记忆
-
-所有主板块标题右侧都有“收起/展开”。状态保存在浏览器：
-
-```text
-localStorage: feeddock.panelState.v1
-```
-
-页面刷新、重新登录和容器重启不会丢失。同一账号在不同浏览器中分别保存状态。
-
-## Mikan 缓存
-
-目录缓存保存在 SQLite，封面缓存目录为：
-
-```text
-/data/mikan-image-cache
-```
-
-加载顺序：
-
-```text
-浏览器缓存 → FeedDock 本地图片 → Mikan 官网
-```
-
-只要本地图片有效，即使超过浏览器缓存时间也不会主动重新访问 Mikan。仅在文件缺失、为空、损坏或图片 URL 改变时重新获取。
-
-## 清理最近条目与日志
-
-- “清理条目”只把历史条目标记为隐藏，保留 RSS 指纹，因此同一旧条目不会再次下载。
-- “清理日志”会删除全部系统日志。
-- 新产生的条目和日志会继续正常显示。
-
-## 飞牛权限
-
-默认 Compose 使用：
-
-```yaml
-PUID: "0"
-PGID: "0"
-UMASK: "002"
-TAKE_OWNERSHIP: "false"
-```
-
-容器以 root 运行可规避飞牛共享目录常见的 UID/GID 不一致问题。入口脚本不会递归修改整个影视库所有者，只会测试 `/data` 和 `/media` 是否可写；不可写时容器会直接输出明确错误。确认宿主机挂载目录正确后，也可改为普通 UID/GID，并自行授予目录读写权限。
+- RSS 轮询间隔可在网页设置，最小 5 分钟；
+- 下载完成状态每 2 分钟检查一次；
+- 可把下载任务推迟到每天指定时间统一推送；
+- 外部请求代理支持 HTTP、HTTPS、SOCKS5/SOCKS5H 和 `NO_PROXY` 风格排除列表；
+- RSS、Mikan、元数据、GitHub 更新检查和通知渠道均使用统一代理策略；qBittorrent 局域网地址建议加入排除列表。
 
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.10.1
+FEEDDOCK_BUILD_VERSION=1.12.0
+APP_PORT=7789
+ADMIN_USER=admin
+ADMIN_PASSWORD=change-this-to-a-strong-password
+POLL_INTERVAL_MINUTES=30
+REQUEST_TIMEOUT_SECONDS=20
+QBIT_URL=http://192.168.1.20:8080
+QBIT_USERNAME=admin
+QBIT_PASSWORD=
+QBIT_CATEGORY=rss
+DOWNLOAD_PATH=/media
 METADATA_LANGUAGE=zh-CN
-METADATA_AUTO_SYNC_HOURS=24
 TMDB_READ_ACCESS_TOKEN=
 BANGUMI_ACCESS_TOKEN=
 MEDIA_LOCAL_ROOT=/media
-EMBY_URL=
-EMBY_API_KEY=
-MIKAN_THUMBNAIL_WIDTH=240
-MIKAN_THUMBNAIL_HEIGHT=320
+AUTOMATION_TIME=02:00
+AUTOMATION_TIMEZONE=Asia/Shanghai
+OUTBOUND_PROXY_URL=
+OUTBOUND_NO_PROXY=localhost,127.0.0.1,host.docker.internal
+LOG_LEVEL=INFO
 ```
 
-敏感 Token 可以在网页中保存，数据库位于 `/data/feeddock.db`。接口返回只显示是否已配置，不返回密钥原文。
+通知配置当前保存在网页数据库中，不需要写入 `.env`。
 
 ## 数据库升级
 
-启动时会对 SQLite 执行兼容迁移，不删除旧订阅和下载去重指纹。旧订阅仍默认不开启自动重命名；FeedDock 刮削会迁移为关闭。所有订阅的下载根目录会同步为当前 qBittorrent 根目录。
+启动时会对 SQLite 执行仅新增字段的兼容迁移，不删除订阅、条目或历史指纹。v1.12.0 新增：
 
-新增字段包括：
+- `auto_disable_when_complete`；
+- `stale_days`；
+- `last_new_item_at`；
+- `last_stale_notified_at`；
+- `completion_notified_at`；
+- `last_missing_signature`。
 
-- `naming_mode`、`media_type`、`manual_title`；
-- `tmdb_id`、`bangumi_id`、`metadata_year`；
-- `total_episodes_locked`、`total_episodes_source`；
-- `rename_enabled`、`file_name_template`、`scrape_enabled`；
-- 下载条目的 `desired_name`、`qbit_tag`、`torrent_hash` 和规范化状态。
+网页通知配置保存在 `app_settings` 表。升级不需要手工 SQL。
 
-## 开发验证
+## 安全说明
+
+- 密码、Token、Device Key、Webhook 地址和请求头默认不回传；
+- DEBUG 日志对密码、Token、API Key、Authorization、Cookie 和 Webhook 配置做脱敏；
+- Webhook 可向任意配置地址发送订阅和条目元数据，请只使用可信 HTTPS 服务；
+- 通知发送失败只记录日志，不会改变下载任务结果。
+
+## 开发与验证
 
 ```bash
-cd /你的/FeedDock目录
 python -m pip install -r requirements.txt
-python -m pytest -q
+python -m unittest discover -s tests -v
 python -m compileall -q app
 node --check app/static/app.js
+node --check app/static/mikan-subscription-state.js
 ```
 
-详细飞牛部署见 [FNOS_DEPLOY.md](FNOS_DEPLOY.md)，功能设计与限制见 [METADATA_NAMING.md](METADATA_NAMING.md)。
+完整验证结果见 [`VALIDATION.md`](VALIDATION.md)。
 
+## 相关文档
 
-## 清理最近条目与日志
+- [`ANI_RSS_GAP_ANALYSIS.md`](ANI_RSS_GAP_ANALYSIS.md)：上游功能差异、优先级和未采纳项；
+- [`NOTIFICATIONS_AND_MONITORING.md`](NOTIFICATIONS_AND_MONITORING.md)：通知、去重、完结与长期未更新规则；
+- [`MIKAN_SUBSCRIPTION_STATUS.md`](MIKAN_SUBSCRIPTION_STATUS.md)：Mikan 已订阅标识模块；
+- [`METADATA_NAMING.md`](METADATA_NAMING.md)：元数据与命名规则；
+- [`FNOS_DEPLOY.md`](FNOS_DEPLOY.md)：飞牛 OS 部署；
+- [`DEBUG_LOGGING.md`](DEBUG_LOGGING.md)：DEBUG 日志使用方法。
 
-- “清理条目”只隐藏历史显示，不删除 RSS 去重指纹，因此旧条目不会重新下载。
-- “清理日志”会删除全部系统日志。
-- 新产生的条目和日志会继续正常显示。
+## License
 
-## DEBUG 调试日志
-
-“系统日志”板块可以在 `INFO` 与 `DEBUG` 之间切换。DEBUG 会额外记录 API 请求、添加/编辑订阅的处理阶段、请求编号、异常类型和完整 Python traceback。500 错误会在页面中显示请求编号，展开对应 ERROR 日志即可查看具体失败位置。
-
-日志同时写入网页、Docker 标准输出和 `/data/logs/feeddock.log`。敏感密码、Token、API Key、Cookie 和代理认证信息会自动隐藏。详细操作见 [DEBUG_LOGGING.md](DEBUG_LOGGING.md)。
+项目许可证见 [`LICENSE`](LICENSE)。请只处理你有权访问的 RSS 与媒体文件。
