@@ -1,38 +1,26 @@
-# FeedDock 1.17.3 验证报告
+# FeedDock 1.17.4 验证报告
 
 ## 功能验证
 
-- “刷新全部订阅”点击后直接执行，不再显示二次确认；
-- qBittorrent 返回 `Ok.` 但标签回查为空时判定失败；
-- 标签回查成功时保存实际任务名称、状态和哈希；
-- HTTP/HTTPS `.torrent` 由 FeedDock 下载后以原始文件上传；
-- Magnet 继续通过 URL 添加，并执行相同标签回查；
-- 历史 `queued` 记录超过两分钟仍找不到任务时转为可重试错误；
-- 日志不包含完整 magnet、Torrent URL 或 passkey。
+- 刷新菜单向下偏移，刷新操作点击后自动收起；
+- “刷新全部订阅”没有二次确认；
+- “同步订阅元数据”调用独立后台接口，不读取 RSS；
+- 批量元数据同步记录开始、逐订阅结果和汇总日志；
+- 默认元数据配置启用下载完成后自动刮削；
+- 下载完成时元数据同步成功后条目进入 `scrape_status=completed`；
+- 元数据同步失败只进入刮削错误状态，不改变下载完成状态；
+- 已完成且原先跳过的条目，在新开启自动刮削或 `bangumi.ini` 后进入待处理状态。
 
 ## 自动化测试
 
-- Python `unittest`：147 项通过；
-- 覆盖 qBittorrent `Ok.` 假成功、任务标签回查、原始 Torrent 文件上传；
-- 覆盖新订阅首次刷新、推送日志、失败重试和并发等待；
-- 覆盖旧版假成功任务自动转为可重试错误；
-- 覆盖登录、订阅管理、原站番剧目录、跨站状态、通知、设置和数据库兼容。
-
-## 静态检查
-
-- Python 全项目编译通过；
-- 6 个 JavaScript 文件通过 `node --check`；
+- 149 项测试通过；
+- 15 个子测试通过；
+- Python 编译通过；
+- JavaScript 语法检查通过；
 - Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
-- 主页面 126 个 HTML ID 均唯一；
-- 运行版本和静态资源缓存参数均为 `1.17.3`；
-- `git diff --check` 通过。
+- 页面 HTML ID 唯一；
+- 运行版本与静态资源缓存参数均为 `1.17.4`。
 
-## 外部服务边界
+## 环境限制
 
-当前环境未连接用户的真实 qBittorrent 和私有 RSS 站点。qBittorrent WebUI API 行为通过本地模拟服务验证，包含登录、添加、按标签查询任务、保存哈希和未查到任务的失败路径。
-
-官方 qBittorrent WebUI API 支持通过 `torrents` 字段上传原始 Torrent 文件，也支持使用 `tag` 参数查询任务列表。FeedDock 1.17.3 同时使用这两项能力确认任务真实存在。
-
-## 数据库
-
-不新增数据库字段，不需要手工迁移。现有 `feed_items.torrent_hash` 用于保存 qBittorrent 回查得到的任务哈希。
+当前环境没有真实 qBittorrent、TMDB、Bangumi 或 AniList 服务，外部元数据同步通过模拟服务验证。未执行真实 Docker 镜像构建。

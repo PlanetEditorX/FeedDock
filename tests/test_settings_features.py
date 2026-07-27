@@ -23,7 +23,7 @@ from app.settings_config import (
 )
 from app.subscription_monitor import evaluate_subscription_completion
 from app.metadata_service import MetadataService
-from app.runtime_config import save_metadata_config
+from app.runtime_config import load_metadata_config, save_metadata_config
 
 
 class _FakeHttpResponse:
@@ -87,6 +87,9 @@ class ApplicationSettingsTests(unittest.TestCase):
         }
         values.update(overrides)
         return save_application_preferences(self.db, **values)
+
+    def test_download_completion_metadata_scrape_is_enabled_by_default(self):
+        self.assertTrue(load_metadata_config(self.db).auto_scrape_enabled)
 
     def test_preferences_persist_and_tracker_cache_is_deduplicated(self):
         saved = self.save_preferences()

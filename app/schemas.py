@@ -390,7 +390,7 @@ class MetadataSettingsUpdate(BaseModel):
     metadata_language: str = Field(default="zh-CN", max_length=20)
     tmdb_api_base: str = Field(default="https://api.themoviedb.org", max_length=2000)
     tmdb_image_base: str = Field(default="https://image.tmdb.org", max_length=2000)
-    auto_scrape_enabled: bool = False
+    auto_scrape_enabled: bool = True
     follow_days: int = Field(default=14, ge=1, le=3650)
     bangumi_ini_enabled: bool = False
     media_local_root: str = Field(default="", max_length=2000)

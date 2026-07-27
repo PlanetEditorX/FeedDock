@@ -283,8 +283,9 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .nav-refresh { color: var(--accent); }
 .nav-menu { position: relative; }
 .nav-menu[open] > summary { background: var(--panel-2); }
-.nav-popover { position: absolute; top: calc(100% + 9px); right: 0; z-index: 30; min-width: 190px; display: grid; gap: 3px; padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: rgba(22, 27, 34, .98); box-shadow: 0 18px 60px #000a; }
+.nav-popover { position: absolute; top: calc(100% + 14px); right: 0; z-index: 30; min-width: 190px; display: grid; gap: 3px; padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: rgba(22, 27, 34, .98); box-shadow: 0 18px 60px #000a; }
 .nav-popover-wide { min-width: 210px; }
+.nav-popover-refresh { top: calc(100% + 18px); }
 .nav-popover button { width: 100%; padding: 9px 10px; border: 0; background: transparent; color: var(--text); text-align: left; font-weight: 600; }
 .nav-popover button:hover, .nav-popover button.is-active { background: var(--panel-2); filter: none; }
 .nav-popover hr { width: 100%; margin: 5px 0; border: 0; border-top: 1px solid var(--line); }
@@ -321,7 +322,7 @@ button:disabled { cursor: not-allowed; }
   .topbar { align-items: flex-start; flex-wrap: wrap; }
   .primary-nav { order: 3; width: 100%; justify-content: flex-start; overflow-x: auto; padding-bottom: 3px; }
   .user-chip { margin-left: auto; }
-  .nav-popover { position: fixed; top: 72px; right: 16px; left: 16px; min-width: 0; }
+  .nav-popover { position: fixed; top: 132px; right: 16px; left: 16px; min-width: 0; }
   .system-action-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {

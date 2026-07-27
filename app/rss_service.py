@@ -463,6 +463,19 @@ def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Sess
     return False
 
 
+
+
+def _pending_scrape_state(db: Session) -> tuple[str, str]:
+    config = load_metadata_config(db)
+    actions: list[str] = []
+    if config.auto_scrape_enabled:
+        actions.append("同步元数据")
+    if config.bangumi_ini_enabled:
+        actions.append("生成 bangumi.ini")
+    if not actions:
+        return "skipped", "未启用下载完成后自动刮削"
+    return "pending", f"等待下载完成后{'并'.join(actions)}"
+
 def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> tuple[bool, str]:
     preferences = load_application_preferences(db)
     save_path = item.save_path or render_save_path(subscription, item.episode, db)
@@ -474,8 +487,7 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     item.save_path = save_path
     item.desired_name = desired_name
     item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
-    item.scrape_status = "pending" if load_metadata_config(db).bangumi_ini_enabled else "skipped"
-    item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+    item.scrape_status, item.scrape_message = _pending_scrape_state(db)
     add_log(
         db,
         "INFO",
@@ -803,15 +815,14 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
         item.qbit_tag = f"feeddock-item-{item.id}"
-        item.scrape_status = "pending" if load_metadata_config(db).bangumi_ini_enabled else "skipped"
-        item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+        item.scrape_status, item.scrape_message = _pending_scrape_state(db)
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
             item.rename_status = "pending"
             item.rename_message = "等待定时推送"
-            item.scrape_message = "等待下载完成后生成 bangumi.ini" if item.scrape_status == "pending" else "交由外部媒体库识别"
+            item.scrape_status, item.scrape_message = _pending_scrape_state(db)
             add_log(
                 db,
                 "INFO",

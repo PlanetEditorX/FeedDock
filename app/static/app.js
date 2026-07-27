@@ -1272,7 +1272,7 @@ async function loadItems() {
       item.rename_status || (item.desired_name ? '等待处理' : '未启用'),
       item.desired_name || '',
       item.rename_message || '',
-      item.scrape_message ? `Sidecar：${item.scrape_message}` : '',
+      item.scrape_message ? `刮削：${item.scrape_message}` : '',
       item.trackers_message ? `Trackers：${item.trackers_message}` : '',
     ].filter(Boolean).join('\n');
     row.append(text('td', handling, item.rename_status === 'error' || item.scrape_status === 'error' || item.trackers_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
@@ -1712,9 +1712,19 @@ document.getElementById('previewSubscription').addEventListener('click', async (
 document.getElementById('cancelSubscriptionEdit').addEventListener('click', () => { resetSubscriptionForm(); showAppView('subscriptions'); });
 
 document.getElementById('refreshNow').addEventListener('click', async () => {
+  navigation.closeMenus(document);
   try {
     const result = await api('/api/actions/refresh', { method: 'POST' });
     showNotice(`${result.message}，可在日志中查看检查与下载器推送进度`);
+    window.setTimeout(reloadAll, 2500);
+  } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('refreshMetadata').addEventListener('click', async () => {
+  navigation.closeMenus(document);
+  try {
+    const result = await api('/api/actions/refresh-metadata', { method: 'POST' });
+    showNotice(`${result.message}，可在日志中查看每个订阅的同步结果`);
     window.setTimeout(reloadAll, 2500);
   } catch (error) { showNotice(error.message, false); }
 });

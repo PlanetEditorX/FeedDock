@@ -396,7 +396,7 @@ def _environment_metadata_config() -> MetadataConfig:
         language=settings.metadata_language,
         tmdb_api_base=settings.tmdb_api_base,
         tmdb_image_base=settings.tmdb_image_base,
-        auto_scrape_enabled=False,
+        auto_scrape_enabled=True,
         follow_days=14,
         bangumi_ini_enabled=False,
         media_local_root=str(settings.media_local_root or settings.download_path),
@@ -486,7 +486,7 @@ def save_metadata_config(
     metadata_language: str,
     tmdb_api_base: str = "",
     tmdb_image_base: str = "",
-    auto_scrape_enabled: bool = False,
+    auto_scrape_enabled: bool = True,
     follow_days: int = 14,
     bangumi_ini_enabled: bool = False,
     media_local_root: str = "",
@@ -567,7 +567,14 @@ def save_metadata_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
-    if bangumi_ini_enabled and not current.bangumi_ini_enabled:
+    if (auto_scrape_enabled and not current.auto_scrape_enabled) or (
+        bangumi_ini_enabled and not current.bangumi_ini_enabled
+    ):
+        pending_actions: list[str] = []
+        if auto_scrape_enabled and not current.auto_scrape_enabled:
+            pending_actions.append("同步元数据")
+        if bangumi_ini_enabled and not current.bangumi_ini_enabled:
+            pending_actions.append("补写 bangumi.ini")
         db.execute(
             update(FeedItem)
             .where(
@@ -577,7 +584,7 @@ def save_metadata_config(
             )
             .values(
                 scrape_status="pending",
-                scrape_message="等待补写 bangumi.ini",
+                scrape_message=f"等待{'并'.join(pending_actions)}",
             )
         )
     db.commit()

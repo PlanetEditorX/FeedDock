@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from .config import settings
 from .database import SessionLocal
+from .debug_logging import format_exception_details, log_event
 from .downloader import QBittorrentClient
 from .media_sidecar import write_bangumi_ini
+from .metadata_service import MetadataService
 from .models import FeedItem, Subscription, SystemLog
 from .notifications import send_notification
 from .runtime_config import load_metadata_config
@@ -28,8 +31,24 @@ _ACTIVE_RENAME_STATES = {
 }
 
 
+def _add_log(db: Session, level: str, message: str, details: str = "") -> None:
+    normalized = level.upper()
+    safe_details = details[:50000]
+    log_event(normalized, message, safe_details, persist=False)
+    db.add(SystemLog(level=normalized, message=message, details=safe_details))
+
+
+def _metadata_sync_due(subscription: Subscription) -> bool:
+    last = subscription.metadata_last_synced_at
+    if last is None:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last >= timedelta(hours=settings.metadata_auto_sync_hours)
+
+
 def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow_scrape: bool = True) -> dict[str, Any]:
-    """Normalize tagged torrents and mark completed downloads without scraping."""
+    """Normalize tagged torrents, detect completion, and run configured post-download metadata work."""
 
     if not _normalize_lock.acquire(blocking=False):
         return {"ok": False, "message": "已有下载完成检查正在运行", "checked": 0}
@@ -134,18 +153,74 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                             details={"progress": 100},
                         )
                 subscription = session.get(Subscription, item.subscription_id)
-                if subscription is not None:
-                    sidecar = write_bangumi_ini(subscription, item, load_metadata_config(session))
-                    item.scrape_status = sidecar.state
-                    item.scrape_message = sidecar.message[:2000]
-                    if sidecar.state == "completed":
+                metadata_config = load_metadata_config(session)
+                should_process_scrape = allow_scrape and item.scrape_status != "completed" and (
+                    metadata_config.auto_scrape_enabled or metadata_config.bangumi_ini_enabled
+                )
+                if subscription is not None and should_process_scrape:
+                    completed_actions: list[str] = []
+                    scrape_errors: list[str] = []
+                    if metadata_config.auto_scrape_enabled:
+                        if _metadata_sync_due(subscription):
+                            try:
+                                record = MetadataService(
+                                    timeout=load_application_preferences(session).rss.timeout_seconds
+                                ).sync(session, subscription, "auto")
+                                completed_actions.append(f"元数据已同步（{record.provider}）")
+                                _add_log(
+                                    session,
+                                    "INFO",
+                                    f"下载完成后元数据已同步：{subscription.name}",
+                                    (
+                                        f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                                        f"来源：{record.provider}\n元数据 ID：{record.id}"
+                                    ),
+                                )
+                            except Exception as exc:
+                                scrape_errors.append(f"元数据同步失败：{exc}")
+                                _add_log(
+                                    session,
+                                    "WARNING",
+                                    f"下载完成后元数据同步失败：{subscription.name}",
+                                    format_exception_details(
+                                        exc,
+                                        stage="postprocess.metadata",
+                                        context={
+                                            "subscription_id": subscription.id,
+                                            "item_id": item.id,
+                                            "subscription_name": subscription.name,
+                                        },
+                                    ),
+                                )
+                        else:
+                            completed_actions.append("元数据已是最新")
+
+                    if metadata_config.bangumi_ini_enabled:
+                        sidecar = write_bangumi_ini(subscription, item, metadata_config)
+                        if sidecar.state == "completed":
+                            completed_actions.append("bangumi.ini 已生成")
+                        elif sidecar.state == "error":
+                            scrape_errors.append(sidecar.message)
+                        elif sidecar.message:
+                            completed_actions.append(sidecar.message)
+
+                    if scrape_errors:
+                        item.scrape_status = "error"
+                        item.scrape_message = "；".join(scrape_errors)[:2000]
+                        stats["errors"] += 1
+                    else:
+                        item.scrape_status = "completed"
+                        item.scrape_message = "；".join(completed_actions)[:2000] or "下载完成后刮削已完成"
                         item.scraped_at = datetime.now(timezone.utc)
                         stats["scraped"] += 1
-                    elif sidecar.state == "error":
-                        stats["errors"] += 1
-                else:
+                elif subscription is None:
                     item.scrape_status = "skipped"
                     item.scrape_message = "订阅不存在"
+                elif not should_process_scrape and not (
+                    metadata_config.auto_scrape_enabled or metadata_config.bangumi_ini_enabled
+                ):
+                    item.scrape_status = "skipped"
+                    item.scrape_message = "未启用下载完成后自动刮削"
 
                 if result.state == "manual_required":
                     stats["manual_required"] += 1

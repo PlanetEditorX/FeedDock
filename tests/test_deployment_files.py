@@ -139,11 +139,18 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("node --check app/static/navigation.js", workflow)
 
 
-    def test_refresh_confirmation_initial_refresh_and_log_copy(self) -> None:
+    def test_refresh_actions_initial_refresh_and_log_copy(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
         self.assertNotIn("window.confirm('是否刷新全部订阅？')", script)
+        self.assertIn('id="refreshMetadata"', index)
+        self.assertIn("同步订阅元数据", index)
+        self.assertIn(".nav-popover-refresh { top: calc(100% + 18px); }", styles)
+        self.assertIn("/api/actions/refresh-metadata", script)
+        self.assertIn('def manual_metadata_refresh', main)
         self.assertIn("订阅已保存，正在自动刷新一次", script)
         self.assertNotIn("500 错误可按提示中的请求编号", script)
         self.assertIn("background_tasks.add_task", main)

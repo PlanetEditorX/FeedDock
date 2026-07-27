@@ -193,7 +193,7 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("已移除", result.message)
 
-    def test_download_completion_skips_scrape(self):
+    def test_download_completion_runs_default_metadata_scrape(self):
         engine = create_engine("sqlite:///:memory:", future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -224,18 +224,30 @@ class MetadataNamingTests(unittest.TestCase):
                     True, "completed", "下载已完成", "abc", True, 100
                 )
             )
+            fake_metadata = SimpleNamespace(
+                sync=lambda *_args, **_kwargs: SimpleNamespace(provider="bangumi", id=123)
+            )
+            metadata_config = SimpleNamespace(
+                auto_scrape_enabled=True,
+                bangumi_ini_enabled=False,
+                media_local_root="/media",
+            )
             from app.postprocess import normalize_pending_items
-            with patch("app.postprocess.QBittorrentClient", return_value=fake_qbit):
+            with (
+                patch("app.postprocess.QBittorrentClient", return_value=fake_qbit),
+                patch("app.postprocess.MetadataService", return_value=fake_metadata),
+                patch("app.postprocess.load_metadata_config", return_value=metadata_config),
+            ):
                 result = normalize_pending_items(db)
 
             db.refresh(item)
             self.assertEqual(result["completed"], 1)
-            self.assertEqual(result["scraped"], 0)
+            self.assertEqual(result["scraped"], 1)
             self.assertEqual(item.download_progress, 100)
-            self.assertEqual(item.scrape_status, "skipped")
-            self.assertIn("已移除", item.scrape_message)
+            self.assertEqual(item.scrape_status, "completed")
+            self.assertIn("元数据已同步", item.scrape_message)
             self.assertIsNotNone(item.completed_at)
-            self.assertIsNone(item.scraped_at)
+            self.assertIsNotNone(item.scraped_at)
 
     def test_missing_legacy_qbittorrent_task_becomes_retryable_error(self):
         engine = create_engine("sqlite:///:memory:", future=True)
