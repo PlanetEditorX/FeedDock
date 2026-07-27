@@ -16,7 +16,7 @@ from unittest.mock import patch
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
 from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
 from app.naming import media_folder_name, remote_to_local_path, render_desired_name
-from app.scraper import ScrapeResult, scrape_subscription, trigger_tmm_scrape
+from app.scraper import ScrapeResult, scrape_completed_item, scrape_subscription, trigger_tmm_scrape
 
 
 class _Response:
@@ -191,7 +191,7 @@ class MetadataNamingTests(unittest.TestCase):
         sub = self.subscription(scrape_enabled=True, scrape_mode="tmm", save_path_template="{base}/{media_folder}/Season {season:02}")
         result = trigger_tmm_scrape(SimpleNamespace(), sub)
         self.assertFalse(result.ok)
-        self.assertIn("已移除", result.message)
+        self.assertIn("尚未启用", result.message)
 
     def test_download_completion_runs_default_metadata_scrape(self):
         engine = create_engine("sqlite:///:memory:", future=True)
@@ -237,6 +237,10 @@ class MetadataNamingTests(unittest.TestCase):
                 patch("app.postprocess.QBittorrentClient", return_value=fake_qbit),
                 patch("app.postprocess.MetadataService", return_value=fake_metadata),
                 patch("app.postprocess.load_metadata_config", return_value=metadata_config),
+                patch(
+                    "app.postprocess.scrape_completed_item",
+                    return_value=ScrapeResult(True, "已写入媒体库元数据：4 个文件", "/media/show", ["tvshow.nfo"]),
+                ),
             ):
                 result = normalize_pending_items(db)
 
@@ -284,15 +288,70 @@ class MetadataNamingTests(unittest.TestCase):
             self.assertEqual(item.status, "error")
             self.assertIn("重试下载", item.reason)
 
-    def test_local_scraper_is_disabled_without_writing_nfo(self):
+    def test_local_scraper_writes_nfo_and_artwork(self):
         with tempfile.TemporaryDirectory() as tmp:
-            sub = self.subscription(metadata_overview="简介", poster_url="", backdrop_url="", bgm_url="", total_episodes=12)
-            result = scrape_subscription(SimpleNamespace(), sub)
-            self.assertTrue(result.ok)
-            self.assertIn("已移除", result.message)
             root = Path(tmp) / "金牌得主 (2025) [tmdbid=123]"
-            self.assertFalse((root / "tvshow.nfo").exists())
-            self.assertFalse((root / "Season 02" / "season.nfo").exists())
+            season = root / "Season 02"
+            season.mkdir(parents=True)
+            video = season / "金牌得主 - S02E03.mkv"
+            video.write_bytes(b"video")
+
+            sub = self.subscription(
+                id=1,
+                anilist_id=789,
+                metadata_source="tmdb",
+                metadata_rating=8.6,
+                metadata_overview="简介",
+                poster_url="https://image.example/poster.jpg",
+                backdrop_url="https://image.example/fanart.jpg",
+                total_episodes=12,
+            )
+            item = SimpleNamespace(
+                id=2,
+                episode="3",
+                title="金牌得主 第二季 - 03",
+                desired_name="金牌得主 - S02E03",
+                save_path=str(season),
+                published_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
+            )
+            config = SimpleNamespace(media_local_root=tmp)
+            image_response = SimpleNamespace(
+                content=b"\xff\xd8\xffimage-bytes",
+                headers={"Content-Type": "image/jpeg"},
+                raise_for_status=lambda: None,
+            )
+            with patch("app.scraper.external_get", return_value=image_response):
+                result = scrape_completed_item(SimpleNamespace(), sub, item, config)
+
+            self.assertTrue(result.ok, result.message)
+            self.assertTrue((root / "tvshow.nfo").exists())
+            self.assertTrue((season / "season.nfo").exists())
+            self.assertTrue(video.with_suffix(".nfo").exists())
+            self.assertTrue((root / "poster.jpg").exists())
+            self.assertTrue((root / "fanart.jpg").exists())
+            self.assertTrue((season / "poster.jpg").exists())
+            self.assertTrue((root / "season02-poster.jpg").exists())
+            self.assertTrue((root / ".feeddock-scrape.json").exists())
+            tvshow = (root / "tvshow.nfo").read_text(encoding="utf-8")
+            self.assertIn("<title>金牌得主</title>", tvshow)
+            self.assertIn('<uniqueid type="tmdb" default="true">123</uniqueid>', tvshow)
+            self.assertIn('<uniqueid type="bangumi">456</uniqueid>', tvshow)
+            episode = video.with_suffix(".nfo").read_text(encoding="utf-8")
+            self.assertIn("<season>2</season>", episode)
+            self.assertIn("<episode>3</episode>", episode)
+
+    def test_local_scraper_rejects_paths_outside_media_root(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            sub = self.subscription(id=1, metadata_overview="", poster_url="", backdrop_url="")
+            item = SimpleNamespace(
+                id=2, episode="1", title="Episode", desired_name="Episode",
+                save_path=outside, published_at=None,
+            )
+            result = scrape_completed_item(
+                SimpleNamespace(), sub, item, SimpleNamespace(media_local_root=tmp)
+            )
+            self.assertFalse(result.ok)
+            self.assertIn("不在允许的媒体根目录", result.message)
 
 
 if __name__ == "__main__":

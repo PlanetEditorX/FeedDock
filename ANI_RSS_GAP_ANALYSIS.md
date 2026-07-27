@@ -30,9 +30,9 @@ FeedDock 目标版本：1.12.0
 | 后端 | Java 17、Spring Boot，多 Maven 模块 | Python、FastAPI、SQLAlchemy |
 | 前端 | 独立 Vue/Vite UI 模块 | 原生 HTML/CSS/JavaScript |
 | 下载器 | qBittorrent、Transmission、Aria2、OpenList | qBittorrent |
-| 主要定位 | 全链路追番、刮削、洗版、上传 | 轻量 RSS 管理、Mikan 发现、规范命名 |
+| 主要定位 | 全链路追番、刮削、洗版、上传 | 轻量 RSS 管理、原站发现、规范命名与受限本地刮削 |
 | 数据迁移 | Java 应用内部升级逻辑 | SQLite 启动时增量 `ALTER TABLE` |
-| 媒体处理 | 包含刮削、移动、洗版等高权限操作 | 明确交给外部媒体库，避免直接移动做种文件 |
+| 媒体处理 | 包含刮削、移动、洗版等高权限操作 | 仅在统一媒体根目录写 NFO/图片，不移动或删除做种文件 |
 
 因此不能直接复制 ani-rss 的 Controller、Service、Vue 页面或下载器实现。FeedDock 需要保留轻量部署、单数据库、可审计和低破坏性的特征。
 
@@ -178,7 +178,7 @@ FeedDock 当前明确不直接移动或删除做种文件。贸然加入洗版�
 
 #### 5.5 内置刮削、自动上传和文件移动
 
-FeedDock 已选择“规范命名 + 外部媒体库识别”的边界。恢复 NFO、图片、OpenList 上传或下载完成后移动，会增加媒体库写权限、失败恢复和多平台路径映射复杂度，不适合作为本次补齐目标。
+FeedDock 1.17.5 已恢复受统一媒体根目录约束的 NFO 与图片写入，但仍不实现 OpenList 上传、下载完成后移动、自动洗版或删除旧文件。后几类能力会增加做种状态、硬链接、误删除和多平台路径映射风险。
 
 #### 5.6 Trackers 自动追加
 

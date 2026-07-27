@@ -36,7 +36,7 @@ def write_bangumi_ini(
     config: MetadataConfig,
 ) -> SidecarResult:
     if not config.bangumi_ini_enabled:
-        return SidecarResult(True, "skipped", "未启用 bangumi.ini；FeedDock 已移除内置 NFO/图片刮削")
+        return SidecarResult(True, "skipped", "未启用 bangumi.ini")
     bangumi_id = int(subscription.bangumi_id or 0)
     if bangumi_id <= 0:
         return SidecarResult(True, "skipped", "订阅没有 Bangumi ID")

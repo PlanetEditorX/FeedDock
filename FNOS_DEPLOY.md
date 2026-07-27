@@ -1,4 +1,4 @@
-# FeedDock v1.17.4 飞牛 OS 部署
+# FeedDock v1.17.5 飞牛 OS 部署
 
 ## 新增可选配置
 
@@ -14,7 +14,7 @@ environment:
   FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "false"
 ```
 
-网页保存的设置优先于 Compose。FeedDock 不再调用 tinyMediaManager 或写本地 NFO/海报；可选的 `bangumi.ini` 只写入 Bangumi ID。代理只用于外部请求，本地服务应放入不使用代理列表。
+网页保存的设置优先于 Compose。FeedDock 会在统一媒体根目录写入 NFO、海报和背景图；可选的 `bangumi.ini` 额外写入 Bangumi ID。当前不调用 tinyMediaManager。代理只用于外部请求，本地服务应放入不使用代理列表。
 
 # FeedDock 飞牛 OS 部署说明
 
@@ -108,7 +108,7 @@ qBittorrent 下载根目录
 - TMDB Image 默认 `https://image.tmdb.org`；
 - 密钥支持 32 位 v3 API Key 或 v4 Read Access Token；
 - Bangumi Token 公开读取通常可留空；
-- 自动刮削表示同步标题、评分、海报地址和总集数，不会下载 NFO 或图片；
+- 自动刮削会同步标题、简介、评分和总集数，并在统一媒体目录写入 NFO、海报与背景图；
 - 本地媒体挂载目录会自动同步为 `/media`，不可单独修改。
 
 选择搜索结果后，订阅名称会自动写成：
@@ -119,20 +119,22 @@ qBittorrent 下载根目录
 
 订阅卡片会显示海报、简介、TMDB/Bangumi ID、总集数和媒体目录。
 
-## 6. 下载完成后外部识别
+## 6. 下载完成后本地刮削与媒体库识别
 
-FeedDock 不再生成 NFO/图片，也不调用 tinyMediaManager。开启 `bangumi.ini` 后可在番剧根目录写入 Bangumi ID。工作流程：
+默认开启本地刮削。工作流程：
 
 ```text
 推送 qBittorrent（可配置重试、并发和做种时长）
 → 获取任务哈希并追加已缓存 Tracker
 → 获取种子文件列表并安全规范文件名
 → 等待 qBittorrent 进度达到 100%
-→ 可选写入 bangumi.ini 并记录完成状态
-→ 飞牛影视/Emby/Jellyfin 等外部媒体库自行识别
+→ 同步外部元数据
+→ 写入 tvshow/movie/season/episode NFO、poster 和 fanart
+→ 可选写入 bangumi.ini
+→ 飞牛影视/Emby/Jellyfin 扫描同一媒体目录
 ```
 
-多视频合集不会自动猜测每个文件对应的集数。“下载”页面的“检查下载完成”可以立即执行一次检查，后台默认每 2 分钟检查一次。
+多视频合集不会自动猜测每个文件对应的集数，因此只写入剧集根目录与季级元数据，单集 NFO 会跳过。“下载”页面的“检查下载完成”可以立即执行一次检查，后台默认每 2 分钟检查一次。历史下载可使用“刷新 → 刮削已完成媒体”补写。
 
 ## 7. 清理界面记录
 
@@ -222,4 +224,4 @@ FeedDock 已经找到任务，但 qBittorrent 尚未达到 100%。可以在最�
 
 ### 外部媒体库没有识别
 
-确认飞牛影视、Emby 或 Jellyfin 已扫描同一个宿主机影视目录，并检查目录名、年份、季度目录和文件名是否符合媒体库识别习惯。
+先检查媒体目录内是否已经生成 `tvshow.nfo`/`movie.nfo`、海报和背景图，再确认飞牛影视、Emby 或 Jellyfin 已扫描同一个宿主机影视目录。若没有生成文件，请在日志中查找“媒体库元数据写入失败”，重点检查 `/media` 是否可写及容器路径是否一致。

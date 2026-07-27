@@ -150,7 +150,11 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("同步订阅元数据", index)
         self.assertIn(".nav-popover-refresh { top: calc(100% + 18px); }", styles)
         self.assertIn("/api/actions/refresh-metadata", script)
+        self.assertIn('id="scrapeCompletedMedia"', index)
+        self.assertIn("刮削已完成媒体", index)
+        self.assertIn("/api/actions/scrape-completed", script)
         self.assertIn('def manual_metadata_refresh', main)
+        self.assertIn('def manual_media_scrape', main)
         self.assertIn("订阅已保存，正在自动刷新一次", script)
         self.assertNotIn("500 错误可按提示中的请求编号", script)
         self.assertIn("background_tasks.add_task", main)
@@ -231,7 +235,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("def update_mikan_weekday_filter", main)
         self.assertIn("save_mikan_weekday_hidden_filter", runtime)
 
-    def test_metadata_naming_ui_remains_and_scraping_ui_is_removed(self) -> None:
+    def test_metadata_naming_and_local_scraping_ui_are_wired(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
@@ -244,6 +248,8 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('/api/metadata/detail', script)
         self.assertIn('/api/actions/normalize-torrents', script)
         self.assertIn('def metadata_detail', main)
+        self.assertIn('写入 NFO 与图片', index)
+        self.assertIn('tvshow.nfo', index)
         self.assertNotIn('id="refreshEmby"', index)
         self.assertNotIn('id="testTmm"', index)
         self.assertNotIn('tinyMediaManager HTTP API 地址', index)
@@ -275,6 +281,7 @@ class DeploymentFileTests(unittest.TestCase):
         database = (ROOT / "app/database.py").read_text(encoding="utf-8")
         rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
         self.assertIn("migration:1.11.1:media-folder-paths", database)
+        self.assertIn("migration:1.17.5:local-scrape-backfill", database)
         self.assertIn("{base}/{media_folder}/Season {season:02}", database)
         self.assertIn("_LEGACY_DEFAULT_SAVE_PATH_TEMPLATES", rss_service)
 

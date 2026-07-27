@@ -16,6 +16,7 @@ from .metadata_service import MetadataService
 from .models import FeedItem, Subscription, SystemLog
 from .notifications import send_notification
 from .runtime_config import load_metadata_config
+from .scraper import scrape_completed_item
 from .settings_config import load_application_preferences
 from .subscription_monitor import evaluate_subscription_completion
 
@@ -194,6 +195,33 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                                 )
                         else:
                             completed_actions.append("元数据已是最新")
+
+                        local_scrape = scrape_completed_item(
+                            session, subscription, item, metadata_config
+                        )
+                        if local_scrape.ok:
+                            completed_actions.append(local_scrape.message)
+                            _add_log(
+                                session,
+                                "INFO",
+                                f"媒体库元数据已写入：{subscription.name}",
+                                (
+                                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                                    f"媒体目录：{local_scrape.local_path}\n"
+                                    f"文件：{', '.join(local_scrape.files or [])}"
+                                )[:50000],
+                            )
+                        else:
+                            scrape_errors.append(local_scrape.message)
+                            _add_log(
+                                session,
+                                "WARNING",
+                                f"媒体库元数据写入失败：{subscription.name}",
+                                (
+                                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                                    f"错误：{local_scrape.message}"
+                                ),
+                            )
 
                     if metadata_config.bangumi_ini_enabled:
                         sidecar = write_bangumi_ini(subscription, item, metadata_config)

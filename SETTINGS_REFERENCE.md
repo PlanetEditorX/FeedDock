@@ -1,6 +1,6 @@
-# FeedDock 1.15.0 设置说明
+# FeedDock 1.17.5 设置说明
 
-FeedDock 1.15.0 延续 1.14.0 的设置体系，并将 ani-rss 中适合当前架构的页面、刮削、下载、RSS 和 Tracker 策略接入现有 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.17.5 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 
@@ -18,11 +18,11 @@ FeedDock 1.15.0 延续 1.14.0 的设置体系，并将 ani-rss 中适合当前�
 
 ## 刮削设置
 
-FeedDock 的“自动刮削”表示自动同步外部元数据，不会下载海报文件、NFO 或直接修改媒体库数据库。
+FeedDock 的“自动刮削”包含两步：同步外部元数据，并将标准 NFO、海报与背景图写入统一媒体根目录。FeedDock 不直接修改媒体服务器数据库。
 
 ### 自动刮削
 
-开启后，对最近仍在追更的订阅定期执行元数据同步。单个订阅自身的“定期自动同步元数据”开关仍可独立启用，不受全局追更天数限制。
+开启后，下载完成检查会同步到期的外部元数据，并向实际媒体目录写入 NFO 与图片。对最近仍在追更的订阅，RSS 检查仍会按追更窗口定期同步元数据。
 
 ### 追更天数
 
@@ -161,4 +161,4 @@ Tracker 缓存存入 SQLite。功能不会删除任务已有 Tracker，也不会
 
 ## 下载完成后自动刮削
 
-该选项默认开启。qBittorrent 下载完成后，FeedDock 会同步订阅的标题、评分、海报和总集数。同步失败仅影响刮削状态，不改变下载完成状态。`bangumi.ini` 仍由独立开关控制。
+该选项默认开启。qBittorrent 下载完成后，FeedDock 会同步标题、简介、评分、海报地址和总集数，并写入 `tvshow.nfo`/`movie.nfo`、季 NFO、剧集同名 NFO、海报与背景图。失败仅影响刮削状态，不改变下载完成状态。历史完成任务可通过“刷新 → 刮削已完成媒体”补写；`bangumi.ini` 仍由独立开关控制。

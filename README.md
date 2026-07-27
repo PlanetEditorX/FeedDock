@@ -1,20 +1,21 @@
 # FeedDock
 
-当前版本：`1.17.4`
+当前版本：`1.17.5`
 
-FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名，并把任务推送到 qBittorrent。媒体文件识别和刮削交由飞牛影视、Emby、Jellyfin 等外部媒体库完成。
+FeedDock 是一个面向自托管/NAS 环境的 RSS 番剧订阅管理器。它负责发现番剧、解析集数、执行匹配规则、生成规范目录与文件名、把任务推送到 qBittorrent，并在下载完成后向媒体目录写入标准 NFO、海报和背景图。飞牛影视、Emby、Jellyfin 等媒体服务器仍负责扫描媒体目录并建立自身索引。
 
-## v1.17.4：元数据刷新与下载完成后自动刮削
+## v1.17.5：本地媒体库 NFO 与图片刮削
 
-- 刷新菜单整体下移，点击操作后立即收起，不再遮挡顶部导航；
-- “刷新全部订阅”继续直接执行，不显示二次确认；
-- 新增“同步订阅元数据”，可批量更新标题、评分、海报、总集数和关联 ID；
-- 新安装和恢复默认设置时，下载完成后自动刮削默认开启；
-- 下载完成检查会同步订阅元数据，并按需生成 `bangumi.ini`；
-- 元数据同步失败只影响刮削状态，不会把已完成下载误标为下载失败；
-- 批量同步和下载完成刮削均记录逐订阅日志。
+- 修正 1.17.4 中“自动刮削”仅同步数据库、没有写入媒体库的问题；
+- 下载完成后默认先同步 TMDB、Bangumi 或 AniList 元数据，再写入标准旁车文件；
+- 电视番剧写入 `tvshow.nfo`、`season.nfo`、与视频同名的剧集 NFO、`poster`、`fanart` 和季海报；
+- 电影写入 `movie.nfo`、与视频同名的 NFO、`poster` 和 `fanart`；
+- 新增“刷新 → 刮削已完成媒体”，可为历史下载批量补写；
+- 1.17.4 及更早版本的已完成条目会在升级时一次性进入刮削补写队列；
+- 所有写入路径必须位于 qBittorrent 与 FeedDock 共用的媒体根目录内；
+- 媒体服务器仍需扫描媒体目录，FeedDock 不直接修改 Emby/Jellyfin/飞牛影视数据库。
 
-详细说明见 [`METADATA_REFRESH_AND_AUTO_SCRAPE.md`](METADATA_REFRESH_AND_AUTO_SCRAPE.md)。
+详细说明见 [`LOCAL_MEDIA_SCRAPING.md`](LOCAL_MEDIA_SCRAPING.md)。
 
 ## v1.17.3：qBittorrent 任务确认与种子文件直传
 
@@ -298,7 +299,7 @@ FeedDock 使用 `POST application/json`，基础结构如下：
 ## 重要环境变量
 
 ```dotenv
-FEEDDOCK_BUILD_VERSION=1.17.4
+FEEDDOCK_BUILD_VERSION=1.17.5
 APP_PORT=7789
 ADMIN_USER=admin
 ADMIN_PASSWORD=change-this-to-a-strong-password

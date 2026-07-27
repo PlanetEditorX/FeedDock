@@ -469,7 +469,7 @@ def _pending_scrape_state(db: Session) -> tuple[str, str]:
     config = load_metadata_config(db)
     actions: list[str] = []
     if config.auto_scrape_enabled:
-        actions.append("同步元数据")
+        actions.append("同步元数据并写入 NFO/图片")
     if config.bangumi_ini_enabled:
         actions.append("生成 bangumi.ini")
     if not actions:

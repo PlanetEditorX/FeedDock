@@ -38,7 +38,7 @@ from .notification_config import (
 )
 from .notifications import send_notification
 from .metadata_service import MetadataService
-from .metadata_tasks import refresh_all_metadata
+from .metadata_tasks import refresh_all_metadata, scrape_completed_media
 from .models import AdminAccount, AnimePreference, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
@@ -1463,6 +1463,12 @@ def manual_refresh(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
 def manual_metadata_refresh(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
     background_tasks.add_task(refresh_all_metadata)
     return {"ok": True, "message": "订阅元数据同步任务已启动"}
+
+
+@app.post("/api/actions/scrape-completed", dependencies=[Depends(require_admin)])
+def manual_media_scrape(background_tasks: BackgroundTasks) -> dict[str, bool | str]:
+    background_tasks.add_task(scrape_completed_media)
+    return {"ok": True, "message": "媒体库刮削任务已启动"}
 
 
 @app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])

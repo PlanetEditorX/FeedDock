@@ -117,8 +117,9 @@ def ensure_schema() -> None:
     _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
     _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
 
-    # Scraping is no longer handled by FeedDock. Existing installs keep the
-    # columns for compatibility, but all subscriptions are migrated to skip it.
+    # Historical migration from the release that removed the original scraper.
+    # Keep the marker so older databases upgrade deterministically; FeedDock
+    # 1.17.5 introduces a new confined NFO/artwork writer below.
     marker = "migration:1.11.0:scrape-disabled"
     with engine.begin() as connection:
         existing = connection.execute(
@@ -159,6 +160,30 @@ def ensure_schema() -> None:
                     "legacy_template": "{base}/{subscription}/Season {season}",
                     "legacy_padded_template": "{base}/{subscription}/Season {season:02}",
                 },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
+
+    # Releases through 1.17.4 used the word “scrape” for database-only metadata
+    # synchronization. Mark completed downloads once so the new local scraper
+    # can backfill NFO and artwork after upgrade.
+    marker = "migration:1.17.5:local-scrape-backfill"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(
+                text(
+                    "UPDATE feed_items SET scrape_status = 'pending', "
+                    "scrape_message = '等待写入 NFO 与图片' "
+                    "WHERE completed_at IS NOT NULL"
+                )
             )
             connection.execute(
                 text(

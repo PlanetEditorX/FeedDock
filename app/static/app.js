@@ -479,7 +479,7 @@ async function loadMetadataSettings() {
   form.elements.media_local_root.value = data.media_local_root || currentDownloadRoot;
   form.elements.clear_tmdb_token.checked = false;
   form.elements.clear_bangumi_token.checked = false;
-  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · 自动刮削 ${data.auto_scrape_enabled ? '已启用' : '未启用'} · bangumi.ini ${data.bangumi_ini_enabled ? '已启用' : '未启用'}`;
+  document.getElementById('metadataConfigState').textContent = `TMDB ${data.tmdb_token_configured ? '已配置' : '未配置'} · NFO/图片刮削 ${data.auto_scrape_enabled ? '已启用' : '未启用'} · bangumi.ini ${data.bangumi_ini_enabled ? '已启用' : '未启用'}`;
 }
 
 function metadataSettingsPayload() {
@@ -1725,6 +1725,15 @@ document.getElementById('refreshMetadata').addEventListener('click', async () =>
   try {
     const result = await api('/api/actions/refresh-metadata', { method: 'POST' });
     showNotice(`${result.message}，可在日志中查看每个订阅的同步结果`);
+    window.setTimeout(reloadAll, 2500);
+  } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('scrapeCompletedMedia').addEventListener('click', async () => {
+  navigation.closeMenus(document);
+  try {
+    const result = await api('/api/actions/scrape-completed', { method: 'POST' });
+    showNotice(`${result.message}，可在日志中查看 NFO 与图片写入结果`);
     window.setTimeout(reloadAll, 2500);
   } catch (error) { showNotice(error.message, false); }
 });
