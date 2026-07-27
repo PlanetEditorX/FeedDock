@@ -1,6 +1,6 @@
-# FeedDock 1.17.10 设置说明
+# FeedDock 1.17.11 设置说明
 
-FeedDock 1.17.10 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
+FeedDock 1.17.11 延续现有设置体系，并将页面、真实本地刮削、下载、RSS 和 Tracker 策略接入 FastAPI、SQLite 与 qBittorrent 流程。网页保存的设置位于 SQLite `app_settings` 表，并优先于 Compose 默认值。
 
 ## 页面设置
 
@@ -173,3 +173,8 @@ Tracker 缓存存入 SQLite。功能不会删除任务已有 Tracker，也不会
 ## 下载完成后自动刮削
 
 该选项默认开启。qBittorrent 下载完成后，FeedDock 会同步标题、简介、评分、海报地址和总集数，并写入 `tvshow.nfo`/`movie.nfo`、季 NFO、剧集同名 NFO、海报与背景图。失败仅影响刮削状态，不改变下载完成状态。历史完成任务可通过“刷新 → 刮削已完成媒体”补写；`bangumi.ini` 仍由独立开关控制。
+
+
+## 1.17.11 RSS 快速更新与免责声明
+
+订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。

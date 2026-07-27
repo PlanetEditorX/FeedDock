@@ -249,6 +249,9 @@ function resetSubscriptionForm() {
   renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, 'other'));
   document.getElementById('saveSubscription').textContent = '保存订阅';
   document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
+  document.getElementById('saveRssOnly').classList.add('hidden');
+  document.getElementById('saveRssAndRefresh').classList.add('hidden');
+  subscriptionForm.elements.rss_url.closest('details').open = false;
   subscriptionPreviewBox.textContent = '尚未预览。';
   subscriptionPreviewBox.className = 'preview-box muted';
 }
@@ -1155,7 +1158,7 @@ async function loadMikanCatalog(form, forceRefresh = false) {
   }
 }
 
-function populateSubscriptionForm(sub) {
+function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   const fields = [
     'name', 'source_type', 'source_anime_id', 'canonical_key', 'reference_title', 'tmdb_title', 'manual_title', 'naming_mode', 'media_type',
     'bgm_url', 'air_date', 'metadata_year', 'metadata_source', 'metadata_overview', 'poster_url', 'backdrop_url', 'metadata_confirmed', 'metadata_review_skipped', 'tmdb_id', 'bangumi_id', 'anilist_id', 'auto_metadata', 'season', 'season_mode',
@@ -1173,9 +1176,20 @@ function populateSubscriptionForm(sub) {
   document.getElementById('subscriptionFormTitle').textContent = `编辑订阅：${sub.name}`;
   document.getElementById('saveSubscription').textContent = '保存修改';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
+  document.getElementById('saveRssOnly').classList.remove('hidden');
+  document.getElementById('saveRssAndRefresh').classList.remove('hidden');
+  const rssDetails = subscriptionForm.elements.rss_url.closest('details');
+  rssDetails.open = focusRss;
   subscriptionPreviewBox.textContent = '请点击“预览规则和路径”确认修改后的结果。';
   subscriptionPreviewBox.className = 'preview-box muted';
   showAppView('add-subscription');
+  if (focusRss) {
+    window.requestAnimationFrame(() => {
+      rssDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      subscriptionForm.elements.rss_url.focus();
+      subscriptionForm.elements.rss_url.select();
+    });
+  }
 }
 
 function renderSubscriptions(data) {
@@ -1240,11 +1254,12 @@ function renderSubscriptions(data) {
     content.append(details);
     const controls = document.createElement('div'); controls.className = 'card-actions';
     const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
+    const updateRss = text('button', '更新 RSS', 'secondary'); updateRss.addEventListener('click', () => populateSubscriptionForm(sub, { focusRss: true }));
     const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
     const scrape = text('button', '刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape`, { method: 'POST' }); showNotice(`${result.message}，共 ${result.items} 个已完成条目`); window.setTimeout(reloadAll, 2500); } catch (error) { showNotice(error.message, false); } });
     const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
     const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); selectedSubscriptionIds.delete(sub.id); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
-    controls.append(edit, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
+    controls.append(edit, updateRss, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
   }
   updateSubscriptionSelectionSummary();
 }
@@ -1656,6 +1671,43 @@ document.getElementById('globalRulesForm').addEventListener('submit', async (eve
     await api('/api/rules/global', { method: 'PUT', body: JSON.stringify({ exclude_rules: value }) });
     showNotice('全局规则已保存');
   } catch (error) { showNotice(error.message, false); }
+});
+
+function quickRssPayload() {
+  const rssInput = subscriptionForm.elements.rss_url;
+  if (!rssInput.reportValidity()) throw new Error('请填写有效的主 RSS 地址');
+  const backupInput = subscriptionForm.elements.backup_rss_url;
+  if (backupInput.value.trim() && !backupInput.reportValidity()) throw new Error('请填写有效的备用 RSS 地址');
+  const detected = subscriptionSourceState.detectSource(subscriptionSources, rssInput.value.trim());
+  return {
+    primary_rss_name: subscriptionForm.elements.primary_rss_name.value.trim(),
+    rss_url: rssInput.value.trim(),
+    backup_rss_name: subscriptionForm.elements.backup_rss_name.value.trim(),
+    backup_rss_url: backupInput.value.trim() || null,
+    source_type: detected.id,
+  };
+}
+
+async function saveRssFields({ refresh = false } = {}) {
+  const id = Number(subscriptionForm.elements.subscription_id.value || 0);
+  if (!id) throw new Error('请先保存订阅，再单独更新 RSS');
+  const saved = await api(`/api/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(quickRssPayload()) });
+  populateSubscriptionForm(saved, { focusRss: true });
+  if (refresh) {
+    const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+    showNotice(result.message || 'RSS 已保存，当前订阅检查已启动');
+  } else {
+    showNotice('RSS 已保存');
+  }
+  await loadSubscriptions();
+}
+
+document.getElementById('saveRssOnly').addEventListener('click', async () => {
+  try { await saveRssFields(); } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('saveRssAndRefresh').addEventListener('click', async () => {
+  try { await saveRssFields({ refresh: true }); } catch (error) { showNotice(error.message, false); }
 });
 
 subscriptionForm.addEventListener('submit', async (event) => {

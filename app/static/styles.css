@@ -388,3 +388,14 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .network-diagnostics li + li { margin-top: 0.3rem; }
 .network-diagnostics.network-ok { border-color: color-mix(in srgb, #138a53 55%, var(--border)); }
 .network-diagnostics.network-error { border-color: color-mix(in srgb, #c83b3b 55%, var(--border)); }
+
+
+/* 1.17.11: legal notice and focused RSS updates */
+.rss-quick-actions { margin-top: .25rem; }
+.legal-summary { display: grid; gap: .75rem; }
+.legal-summary > p { margin: 0; }
+.legal-summary details { border: 1px solid var(--border); border-radius: 12px; padding: .8rem 1rem; }
+.legal-summary summary { cursor: pointer; font-weight: 700; }
+.legal-terms { display: grid; gap: .35rem; margin-top: .8rem; }
+.legal-terms h3 { margin: .65rem 0 0; font-size: 1rem; }
+.legal-terms p { margin: 0; color: var(--muted); line-height: 1.65; }

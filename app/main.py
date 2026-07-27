@@ -1317,6 +1317,23 @@ def update_subscription(
         raise
 
 
+@app.post("/api/subscriptions/{subscription_id}/refresh", dependencies=[Depends(require_admin)])
+def refresh_single_subscription(
+    subscription_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, bool | int | str]:
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    background_tasks.add_task(refresh_subscription, subscription_id, trigger="rss-updated")
+    return {
+        "ok": True,
+        "subscription_id": subscription_id,
+        "message": f"RSS 已保存，正在检查订阅：{subscription.name}",
+    }
+
+
 @app.post(
     "/api/subscriptions/{subscription_id}/metadata/apply",
     response_model=SubscriptionOut,

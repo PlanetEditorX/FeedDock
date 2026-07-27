@@ -165,6 +165,15 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("准备推送到下载器", rss_service)
         self.assertIn("qBittorrent 已确认任务", rss_service)
         self.assertIn("刷新全部订阅完成", rss_service)
+        self.assertIn('id="saveRssOnly"', index)
+        self.assertIn('id="saveRssAndRefresh"', index)
+        self.assertIn("更新 RSS", script)
+        self.assertIn("/api/subscriptions/${id}/refresh", script)
+        self.assertIn('data-panel-id="legal-disclaimer"', index)
+        disclaimer = (ROOT / "DISCLAIMER.md").read_text(encoding="utf-8")
+        self.assertIn("技术中立", disclaimer)
+        self.assertIn("依法不得免责", disclaimer)
+        self.assertIn("故意或者重大过失", disclaimer)
 
     def test_subscription_submit_keeps_form_reference_across_await(self) -> None:
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

@@ -66,6 +66,23 @@ class SubscriptionSourceTests(unittest.TestCase):
         )
         self.assertEqual(values["bangumi_id"], 543360)
 
+    def test_rss_update_reclassifies_source_and_source_anime_id(self) -> None:
+        from app.schemas import SubscriptionUpdate
+
+        existing = Subscription(
+            name="Demo",
+            rss_url="https://mikanime.tv/RSS/Bangumi?bangumiId=3822&subgroupid=370",
+            source_type="mikan",
+            source_anime_id="3822",
+        )
+        values = _subscription_values(
+            SubscriptionUpdate(rss_url="https://anibt.net/rss/anime.xml?bgmId=543360&groupSlug=pre-s"),
+            existing=existing,
+        )
+        self.assertEqual(values["source_type"], "anibt")
+        self.assertEqual(values["source_anime_id"], "543360")
+        self.assertEqual(values["bangumi_id"], 543360)
+
     def test_subscription_output_exposes_stable_source_fields(self) -> None:
         engine = create_engine("sqlite+pysqlite:///:memory:")
         Base.metadata.create_all(engine)

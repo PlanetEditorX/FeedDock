@@ -1,55 +1,41 @@
-# FeedDock 1.17.10 验证报告
+# FeedDock 1.17.11 验证报告
 
-## 修复场景
+## 功能范围
 
-本次针对以下飞牛部署进行验证：
+- 新增完整 `DISCLAIMER.md`；
+- 系统设置展示免责声明摘要与完整条款；
+- 订阅卡片新增“更新 RSS”；
+- 编辑页面支持“仅保存 RSS”和“保存 RSS 并立即检查”；
+- 新增单订阅刷新接口；
+- RSS 地址变化后重新识别来源与原站番剧 ID。
 
-```text
-qBittorrent 保存根目录：/vol2/1000/影视
-FeedDock 容器挂载目录：/media
-数据库旧值 media_local_root：/vol2/1000/影视
-Compose 未显式配置 MEDIA_LOCAL_ROOT
-```
-
-升级后：
-
-- `MEDIA_LOCAL_ROOT` 的容器默认值为 `/media`；
-- 已存在的 `migration:1.17.7:separate-media-paths` 标记不会阻止本次修复；
-- 新迁移把旧数据库中的 `media_local_root` 改为 `/media`；
-- 运行时读取配置时也会识别并修正相同的旧值；
-- `/vol2/1000/影视/<相对目录>` 成功映射到 `/media/<相对目录>`；
-- 映射后的真实临时目录通过存在性与目录类型检查。
-
-## 兼容性
-
-- 显式配置 `MEDIA_LOCAL_ROOT` 时始终尊重用户配置；
-- Docker 中 `/media` 是实际挂载点时自动选择 `/media`；
-- qBittorrent 使用 `/vol*`、`/volume*`、`/mnt*` 或 `/share*` 等宿主机/NAS 路径时自动选择容器挂载根目录；
-- 裸机或测试环境使用相同普通路径时，不会被错误强制切换为 `/media`；
-- 保存刮削设置时，本地路径留空会选择正确的容器根目录，而不是 qBittorrent 路径。
-
-## 自动化与静态验证
-
-- **168 项自动化测试全部通过，另有 15 个子测试通过**；
-- Python 全项目编译通过；
-- 6 个 JavaScript 文件语法检查通过；
-- Docker Compose、飞牛 Compose 和 GitHub Actions YAML 解析通过；
-- 128 个页面 HTML ID 均唯一；
-- FastAPI 运行版本为 `1.17.10`；
-- `VERSION`、Docker 构建版本、静态资源缓存参数和 `update.json` 一致；
-- 旧数据库迁移脚本实测得到 `media_local_root=/media`；
-- `git diff --check` 通过。
-
-## 数据库兼容
-
-本次不增加数据库表或字段。仅在现有 `app_settings` 表增加迁移标记：
+## 自动化测试
 
 ```text
-migration:1.17.10:default-media-local-root
+169 passed, 15 subtests passed
 ```
 
-订阅、RSS 指纹、下载记录、torrent hash、刮削状态及用户媒体文件均不受影响。
+覆盖内容包括：
+
+- 新订阅自动刷新保持原有行为；
+- 单订阅刷新接口只调度指定订阅；
+- Mikan RSS 更新为 ANI.BT RSS 时重新识别来源与 `source_anime_id`；
+- 快速 RSS 按钮、免责声明面板和完整免责声明文件存在；
+- 现有订阅、下载、刮削、更新、通知、目录和鉴权回归测试。
+
+## 静态检查
+
+- Python `compileall`：通过；
+- 6 个 JavaScript 文件 `node --check`：通过；
+- `docker-compose.yml`、`docker-compose.fnos.yml`、GitHub Actions YAML：通过；
+- HTML ID：130 个，无重复；
+- 静态资源版本参数：`1.17.11`；
+- `git diff --check`：通过。
+
+## 法律文本说明
+
+免责声明参考官方公开的《中华人民共和国民法典》《中华人民共和国网络安全法》《信息网络传播权保护条例》和《网络信息内容生态治理规定》。该文本是开源项目的一般说明，不构成法律意见；具体部署、运营或商业分发前仍应结合适用法域接受专业审查。
 
 ## 环境限制
 
-当前环境没有真实飞牛 Docker 服务，因此没有直接重建用户容器。路径映射使用真实 `/media` 临时目录验证，旧数据库迁移使用临时 SQLite 数据库验证。
+当前验证环境未连接真实 RSS 原站或生产 qBittorrent，因此快速更新后的网络刷新通过 FastAPI 后台任务和模拟适配器验证；保存、来源重识别、调度和日志链路均已覆盖。

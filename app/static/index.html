@@ -7,7 +7,7 @@
 <title>FeedDock</title>
 <link href="/static/feeddock-icon.png" rel="icon" type="image/png"/>
 <script>try{document.documentElement.dataset.themeColor=localStorage.getItem("feeddock-theme-color")||"blue"}catch(_){}</script>
-<link href="/static/styles.css?v=1.17.10" rel="stylesheet"/>
+<link href="/static/styles.css?v=1.17.11" rel="stylesheet"/>
 </head>
 <body>
 <header class="topbar">
@@ -65,6 +65,18 @@
 <div class="system-grid panel-body"><div><span>当前版本</span><strong id="currentVersion">—</strong></div><div><span>最新版本</span><strong id="latestVersion">未检查</strong></div><div><span>部署镜像</span><strong id="deployedImage">—</strong></div><div><span>更新器</span><strong id="updaterState">—</strong></div></div>
 <p class="hint panel-body">优先读取 update.json 静态版本清单并使用缓存；仅在清单不可用且没有缓存时，最多每天调用一次 GitHub API。在线更新需要 Watchtower HTTP API。</p>
 </section>
+<section class="panel legal-panel hidden" data-app-view="settings-system" data-panel-id="legal-disclaimer">
+<div class="panel-head"><div><h2>免责声明与使用条款</h2><p>FeedDock 是本地自托管自动化工具，不提供、托管或审核第三方种子与媒体内容。</p></div></div>
+<div class="panel-body legal-summary"><p><strong>技术中立：</strong>开发者只维护通用功能，不参与第三方 RSS、种子、磁力链接或媒体内容的选择、控制、编辑、推荐与传播。技术中立不代表任何用途当然合法。</p><p><strong>用户责任：</strong>使用者应自行确认内容来源、授权与用途合法，遵守第三方服务条款，保护凭据并为数据、设备、网络和媒体目录做好备份与安全管理。</p><p><strong>第三方风险：</strong>不保证链接有效性、内容完整性、下载速度、元数据准确性或第三方服务持续可用。网络政策、API 限流、源站变化和技术更新可能导致功能中断。</p>
+<details><summary>阅读完整免责声明</summary><div class="legal-terms">
+<h3>1. 工具性质</h3><p>FeedDock 不经营 Tracker，不提供种子索引、资源搜索、内容上传、托管、分发、在线播放或媒体库服务，也不预置受版权保护作品。</p>
+<h3>2. 合法使用</h3><p>使用者只能在获得合法授权、符合法定许可或其他合法情形下处理内容，不得利用本工具规避技术保护措施、实施侵权、危害网络安全或传播违法信息。</p>
+<h3>3. 风险与免责</h3><p>在适用法律允许的最大范围内，软件按现状提供。开发者不对第三方内容造成的设备损害、恶意软件、数据丢失、账号限制、流量费用、错误下载、错误刮削、服务中断或法律纠纷承担保证责任。</p>
+<h3>4. 例外追责与依法不得免责</h3><p>本声明不排除因故意或重大过失造成人身损害、因故意或重大过失造成财产损失，以及法律明确不得排除的其他责任。</p>
+<h3>5. 知识产权与通知</h3><p>第三方内容、商标与服务的权利归各自权利人。FeedDock 为本地自托管工具，开发者通常无法访问或删除用户实例中的内容；权利人应联系实际内容提供方、实例运营者或托管方。</p>
+<h3>6. 维护与终止</h3><p>如主管机关、司法机关、第三方平台或权利人提出合法要求，或某项功能可能违反法律、平台规则、技术中立原则或被大规模用于违法用途，开发者可停止维护、移除集成、撤下发布物或关闭其控制的在线服务。</p>
+<h3>7. 完整文本</h3><p>完整条款、隐私与安全提示、适用法律说明见项目根目录 <code>DISCLAIMER.md</code>。该文本不构成法律意见。</p>
+</div></details></div></section>
 <section class="panel hidden" data-app-view="settings-page" data-panel-id="page-settings">
 <div class="panel-head"><div><h2>页面设置</h2><p>主题会在浏览器加载页面前应用；订阅排序在首页和批量管理中共用。</p></div></div>
 <form class="form-grid panel-body" id="pageSettingsForm">
@@ -201,7 +213,7 @@
 <label>来源<select id="metadataSearchProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label>
 <label class="metadata-query">搜索词<input id="metadataSearchQuery" placeholder="请输入订阅名称"/></label><button class="secondary" id="searchMetadata" type="button">搜索</button>
 </div><div class="metadata-results muted" id="metadataSearchResults">尚未搜索。</div></fieldset>
-<details class="subscription-advanced"><summary>RSS 来源</summary><div class="advanced-section-body form-grid"><label>主 RSS 名称<input name="primary_rss_name" placeholder="LoliHouse"/></label><label class="wide">主 RSS 地址<input name="rss_url" placeholder="https://mikanime.tv/RSS/Bangumi?..." required="" type="url"/></label><label>备用 RSS 名称<input name="backup_rss_name" placeholder="可选"/></label><label class="wide">备用 RSS 地址<input name="backup_rss_url" placeholder="主 RSS 失败或无条目时使用" type="url"/></label></div></details>
+<details class="subscription-advanced"><summary>RSS 来源</summary><div class="advanced-section-body form-grid"><label>主 RSS 名称<input name="primary_rss_name" placeholder="LoliHouse"/></label><label class="wide">主 RSS 地址<input name="rss_url" placeholder="https://mikanime.tv/RSS/Bangumi?..." required="" type="url"/></label><label>备用 RSS 名称<input name="backup_rss_name" placeholder="可选"/></label><label class="wide">备用 RSS 地址<input name="backup_rss_url" placeholder="主 RSS 失败或无条目时使用" type="url"/></label><div class="form-actions wide rss-quick-actions"><button class="secondary hidden" id="saveRssOnly" type="button">仅保存 RSS</button><button class="secondary hidden" id="saveRssAndRefresh" type="button">保存 RSS 并立即检查</button></div><p class="hint wide">编辑订阅时可只保存此处四个 RSS 字段；“立即检查”会在保存后只刷新当前订阅。</p></div></details>
 <details class="subscription-advanced"><summary>匹配与排除</summary><div class="advanced-section-body form-grid"><label>匹配<textarea name="include_keywords" placeholder="留空表示不限制" rows="5"></textarea></label><label>排除<textarea name="exclude_keywords" placeholder="一行一条" rows="5"></textarea></label></div></details>
 <details class="subscription-advanced"><summary>集数规则</summary><div class="advanced-section-body form-grid"><label class="wide">参考 RSS 标题<input name="sample_title" placeholder="粘贴真实标题用于预览"/></label><label>自定义集数正则<input name="episode_regex" placeholder="例如：\d+(\.5)?"/></label><label>捕获组<input max="20" min="0" name="episode_group" type="number" value="0"/></label><label>集数偏移<input max="10000" min="-10000" name="episode_offset" type="number" value="0"/></label><label>总集数<input max="10000" min="0" name="total_episodes" type="number" value="0"/></label><label>集数来源<input name="total_episodes_source" placeholder="TMDB/Bangumi/手动" readonly=""/></label><label class="checkbox-label"><input name="total_episodes_locked" type="checkbox"/>锁定总集数，禁止自动覆盖</label></div></details>
 <details class="subscription-advanced"><summary>规范命名与下载</summary><div class="advanced-section-body form-grid">
@@ -226,8 +238,8 @@
 <div class="import-body"><p class="muted" id="subscriptionImportHint">选择 FeedDock 导出的 JSON 文件，或直接粘贴 JSON。</p><label>JSON 文件<input accept="application/json,.json" id="subscriptionImportFile" type="file"/></label><label>订阅 JSON<textarea id="subscriptionImportJson" placeholder='{"subscriptions":[{"name":"示例","rss_url":"https://example.com/feed.xml"}]}' rows="14"></textarea></label><label>RSS 地址冲突<select id="subscriptionImportConflict"><option value="skip">跳过已有订阅</option><option value="update">更新已有订阅</option></select></label><div class="form-actions"><button id="confirmSubscriptionImport" type="button">开始导入</button><button class="secondary" id="cancelSubscriptionImport" type="button">取消</button></div></div></section>
 </div><div aria-labelledby="metadataReviewTitle" aria-modal="true" class="modal hidden" id="metadataReviewModal" role="dialog"><div class="modal-backdrop" data-close-metadata-review=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge">确认</span><h2 id="metadataReviewTitle">确认番剧元数据</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMetadataReview" type="button">×</button></div><div class="metadata-search-row"><label>来源<select id="reviewProvider"><option value="tmdb">TMDB</option><option value="bangumi">Bangumi</option><option value="anilist">AniList</option></select></label><label class="metadata-query">搜索词<input id="reviewQuery"/></label><button id="reviewSearch" type="button">搜索</button><button class="secondary" id="reviewSkip" type="button">完全跳过</button></div><div class="metadata-results muted" id="reviewResults">请选择来源并搜索；每个来源都可单独尝试，也可以跳过。</div></section></div>
 <div aria-labelledby="mikanDetailTitle" aria-modal="true" class="modal hidden" id="mikanDetailModal" role="dialog"><div class="modal-backdrop" data-close-mikan-modal=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan" id="catalogDetailBadge">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMikanModal" type="button">×</button></div><div class="mikan-detail-body" id="mikanDetailBody"></div></section></div>
-<script defer="" src="/static/mikan-subscription-state.js?v=1.17.10"></script>
-<script defer="" src="/static/subscription-sources.js?v=1.17.10"></script>
-<script defer="" src="/static/navigation.js?v=1.17.10"></script><script defer="" src="/static/app.js?v=1.17.10"></script>
+<script defer="" src="/static/mikan-subscription-state.js?v=1.17.11"></script>
+<script defer="" src="/static/subscription-sources.js?v=1.17.11"></script>
+<script defer="" src="/static/navigation.js?v=1.17.11"></script><script defer="" src="/static/app.js?v=1.17.11"></script>
 </body>
 </html>

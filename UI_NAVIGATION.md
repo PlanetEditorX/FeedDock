@@ -1,4 +1,4 @@
-# FeedDock 1.17.10 界面与导航说明
+# FeedDock 1.17.11 界面与导航说明
 
 ## 设计目标
 
@@ -134,7 +134,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 {
   "format": "feeddock-subscriptions",
   "version": 1,
-  "app_version": "1.17.10",
+  "app_version": "1.17.11",
   "subscriptions": [
     {
       "name": "示例番剧",
@@ -169,10 +169,15 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 
 升级到 1.17.0 会自动增加订阅来源、站点番剧 ID、统一身份字段和跨站隐藏偏好表；既有订阅、条目与缓存保持不变，无需手工 SQL。
 
-静态资源使用 `v=1.17.10` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
+静态资源使用 `v=1.17.11` 缓存参数。升级后建议强制刷新一次浏览器，特别是反向代理仍缓存旧 HTML 时。
 
 ## 刷新菜单
 
 - 刷新全部订阅：直接启动 RSS 刷新，不显示二次确认。
 - 同步订阅元数据：更新全部订阅的外部元数据，不读取 RSS。
 - 菜单向下偏移，并在点击操作后自动收起。
+
+
+## 1.17.11 RSS 快速更新与免责声明
+
+订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。

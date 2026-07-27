@@ -236,6 +236,12 @@ class AuthFlowTests(unittest.TestCase):
             self.assertEqual(created_subscription.json()["name"], "Frontend regression feed")
             self.assertFalse(created_subscription.json()["scrape_enabled"])
             self.assertEqual(created_subscription.json()["custom_download_path"], "/media")
+            created_id = created_subscription.json()["id"]
+            with patch("app.main.refresh_subscription") as targeted_refresh:
+                targeted = client.post(f"/api/subscriptions/{created_id}/refresh")
+                self.assertEqual(targeted.status_code, 200, targeted.text)
+                self.assertIn("正在检查订阅", targeted.json()["message"])
+                targeted_refresh.assert_called_once_with(created_id, trigger="rss-updated")
             subscriptions = client.get("/api/subscriptions")
             self.assertEqual(subscriptions.status_code, 200)
             self.assertTrue(

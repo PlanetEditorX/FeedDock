@@ -928,13 +928,15 @@ def refresh_subscription(
 ) -> dict[str, int | bool | str]:
     """Refresh one subscription, used after creation and by future targeted actions."""
 
+    created_trigger = trigger == "subscription-created"
+    operation_label = "新订阅自动刷新" if created_trigger else "订阅刷新"
     acquired = _refresh_lock.acquire(timeout=300)
     if not acquired:
         with SessionLocal() as db:
             add_log(
                 db,
                 "WARNING",
-                "新订阅自动刷新等待超时",
+                f"{operation_label}等待超时",
                 f"订阅 ID：{subscription_id}；触发来源：{trigger}",
             )
             db.commit()
@@ -949,7 +951,7 @@ def refresh_subscription(
                 add_log(
                     db,
                     "INFO",
-                    f"跳过新订阅自动刷新：{subscription.name}",
+                    f"跳过{operation_label}：{subscription.name}",
                     "订阅当前为停用状态",
                 )
                 db.commit()
@@ -957,7 +959,7 @@ def refresh_subscription(
             add_log(
                 db,
                 "INFO",
-                f"新订阅自动刷新开始：{subscription.name}",
+                f"{operation_label}开始：{subscription.name}",
                 f"订阅 ID：{subscription.id}；触发来源：{trigger}",
             )
             db.commit()
@@ -965,14 +967,14 @@ def refresh_subscription(
             add_log(
                 db,
                 "INFO" if not result["errors"] else "WARNING",
-                f"新订阅自动刷新完成：{subscription.name}",
+                f"{operation_label}完成：{subscription.name}",
                 (
                     f"新增 {result['new']}，推送 {result['queued']}，"
                     f"跳过 {result['skipped']}，错误 {result['errors']}"
                 ),
             )
             db.commit()
-            return {"ok": not bool(result["errors"]), "message": "新订阅自动刷新完成", **result}
+            return {"ok": not bool(result["errors"]), "message": f"{operation_label}完成", **result}
     finally:
         _refresh_lock.release()
 

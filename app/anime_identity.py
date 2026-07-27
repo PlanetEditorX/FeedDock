@@ -111,16 +111,22 @@ def item_identity(item: dict[str, Any]) -> str:
 
 
 def prepare_subscription_identity(values: dict[str, Any], existing: Subscription | None = None) -> dict[str, Any]:
-    source_type = str(values.get("source_type") or (existing.source_type if existing else "") or "").strip().lower()
+    rss_url_was_updated = "rss_url" in values
     rss_url = str(values.get("rss_url") or (existing.rss_url if existing else "") or "")
-    if not source_type:
-        source_type = classify_subscription_source(rss_url)
-    if source_type not in {"mikan", "anibt", "ag", "other"}:
-        source_type = classify_subscription_source(rss_url)
+    source_type = str(values.get("source_type") or (existing.source_type if existing else "") or "").strip().lower()
+    detected_source_type = classify_subscription_source(rss_url)
+    if rss_url_was_updated and existing and rss_url != existing.rss_url:
+        if not source_type or source_type == (existing.source_type or ""):
+            source_type = detected_source_type
+    if not source_type or source_type not in {"mikan", "anibt", "ag", "other"}:
+        source_type = detected_source_type
     values["source_type"] = source_type
 
+    source_anime_id_was_updated = "source_anime_id" in values
     source_anime_id = str(values.get("source_anime_id") or (existing.source_anime_id if existing else "") or "").strip()
-    if not source_anime_id:
+    if rss_url_was_updated and existing and rss_url != existing.rss_url and not source_anime_id_was_updated:
+        source_anime_id = source_anime_id_from_url(source_type, rss_url)
+    elif not source_anime_id:
         source_anime_id = source_anime_id_from_url(source_type, rss_url)
     values["source_anime_id"] = source_anime_id
 
