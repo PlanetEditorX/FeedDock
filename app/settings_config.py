@@ -14,7 +14,18 @@ from .models import AppSetting, Subscription
 
 
 PAGE_THEME_COLORS = {"blue", "indigo", "green", "orange", "rose"}
-SUBSCRIPTION_SORT_MODES = {"rating", "pinyin", "updated", "created", "weekday"}
+SUBSCRIPTION_SORT_MODES = {"weekday", "updated", "created", "name", "rating", "pinyin"}
+
+
+
+def normalize_subscription_sort(value: str, fallback: str = "updated") -> str:
+    """Normalize persisted and legacy subscription sort identifiers."""
+
+    mode = str(value or "").strip().lower()
+    if mode == "pinyin":
+        return "name"
+    return mode if mode in SUBSCRIPTION_SORT_MODES else fallback
+
 
 _SETTING_KEYS = {
     "page_theme_color",
@@ -192,10 +203,10 @@ def load_application_preferences(db: Session) -> ApplicationPreferences:
         return fallback
 
     theme = rows.get("page_theme_color", fallback.page.theme_color).strip().lower()
-    sort_mode = rows.get("subscription_sort_mode", fallback.page.subscription_sort).strip().lower()
+    sort_mode = normalize_subscription_sort(rows.get("subscription_sort_mode", fallback.page.subscription_sort), fallback.page.subscription_sort)
     page = PagePreferences(
         theme_color=theme if theme in PAGE_THEME_COLORS else fallback.page.theme_color,
-        subscription_sort=sort_mode if sort_mode in SUBSCRIPTION_SORT_MODES else fallback.page.subscription_sort,
+        subscription_sort=sort_mode,
     )
     download = DownloadPolicy(
         retry_count=_integer(rows.get("download_retry_count"), fallback.download.retry_count, 0, 10),
@@ -260,8 +271,8 @@ def save_application_preferences(
     theme = theme_color.strip().lower()
     if theme not in PAGE_THEME_COLORS:
         raise ValueError("主题色无效")
-    sort_mode = subscription_sort.strip().lower()
-    if sort_mode not in SUBSCRIPTION_SORT_MODES:
+    sort_mode = normalize_subscription_sort(subscription_sort, "")
+    if not sort_mode:
         raise ValueError("订阅排序方式无效")
     if not 0 <= retry_count <= 10:
         raise ValueError("失败重试次数必须在 0 到 10 之间")
@@ -305,6 +316,17 @@ def save_application_preferences(
 
 def reset_application_preferences(db: Session) -> ApplicationPreferences:
     db.execute(delete(AppSetting).where(AppSetting.key.in_(_SETTING_KEYS)))
+    db.commit()
+    return load_application_preferences(db)
+
+
+def save_subscription_sort_preference(db: Session, subscription_sort: str) -> ApplicationPreferences:
+    """Persist only the list sort order without touching unrelated settings forms."""
+
+    sort_mode = normalize_subscription_sort(subscription_sort, "")
+    if not sort_mode:
+        raise ValueError("订阅排序方式无效")
+    _write_values(db, {"subscription_sort_mode": sort_mode})
     db.commit()
     return load_application_preferences(db)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,8 +26,14 @@ class BuildInfo:
     source: str
 
 
+_UNEXPANDED_BUILD_ARG = re.compile(r'^\$\{?[A-Z][A-Z0-9_]*\}?$')
+
+
 def _clean(value: object) -> str:
-    return str(value or '').strip()
+    cleaned = str(value or '').strip()
+    if _UNEXPANDED_BUILD_ARG.fullmatch(cleaned):
+        return ''
+    return cleaned
 
 
 def _build_info_path() -> Path:

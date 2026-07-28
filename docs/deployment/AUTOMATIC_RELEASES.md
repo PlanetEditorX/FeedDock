@@ -163,3 +163,29 @@ docker compose -f docker-compose.fnos.yml up -d --force-recreate feeddock
 ```
 
 安装包含 `/app/.feeddock-build.json` 的新镜像后，页面“本地元数据”应显示“镜像构建文件”。
+
+## 页面显示 `${APP_VERSION}` 或 `${APP_REVISION}`
+
+这表示镜像构建信息文件写入了未展开的 Docker ARG 占位符。旧 Dockerfile 使用单引号包裹完整 JSON，Shell 不会展开其中的变量，因此页面会显示：
+
+```text
+${APP_VERSION}
+${APP_REVISION}
+```
+
+修复后的 Dockerfile 将变量作为 `printf` 参数传入，并在运行时拒绝未展开的占位符。发布修复镜像后，需要至少执行一次拉取并强制重建：
+
+```bash
+docker compose pull feeddock
+docker compose up -d --force-recreate feeddock
+docker exec feeddock cat /app/.feeddock-build.json
+```
+
+飞牛 Compose：
+
+```bash
+docker compose -f docker-compose.fnos.yml pull feeddock
+docker compose -f docker-compose.fnos.yml up -d --force-recreate feeddock
+```
+
+构建信息应为实际值，不应再包含 `$`、`{` 或 `APP_VERSION` 等占位符文本。

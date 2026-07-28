@@ -93,12 +93,14 @@ from .settings_config import (
     normalize_tracker_text,
     reset_application_preferences,
     save_application_preferences,
+    save_subscription_sort_preference,
     save_tracker_cache,
 )
 from .scheduler import scheduler, start_scheduler, stop_scheduler
 from .schemas import (
     AnimePreferenceBatchUpdate,
     ApplicationPreferencesUpdate,
+    SubscriptionSortUpdate,
     AuthStatusOut,
     AutomationSettingsUpdate,
     ChangePasswordRequest,
@@ -586,6 +588,18 @@ def update_application_settings(
             trackers_enabled=payload.trackers_enabled,
             trackers_update_url=payload.trackers_update_url,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config.public_dict()
+
+
+@app.put("/api/application/settings/subscription-sort", dependencies=[Depends(require_admin)])
+def update_subscription_sort(
+    payload: SubscriptionSortUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        config = save_subscription_sort_preference(db, payload.subscription_sort)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return config.public_dict()

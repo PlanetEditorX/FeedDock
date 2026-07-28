@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base
 from app.main import batch_subscriptions, export_subscriptions, import_subscriptions, system_status
-from app.settings_config import save_application_preferences
+from app.settings_config import load_application_preferences, save_application_preferences, save_subscription_sort_preference
 from fastapi import HTTPException
 from app.models import Subscription
 from app.schemas import SubscriptionBatchRequest, SubscriptionCreate, SubscriptionImportRequest
@@ -143,6 +143,38 @@ class SubscriptionManagementTests(unittest.TestCase):
         status = system_status()
         self.assertFalse(status["actions_allowed"])
         self.assertIn("默认禁用", status["message"])
+
+    def test_subscription_sort_preference_is_persisted_without_other_settings(self) -> None:
+        saved = save_subscription_sort_preference(self.db, "weekday")
+        self.assertEqual(saved.page.subscription_sort, "weekday")
+        self.assertEqual(load_application_preferences(self.db).page.subscription_sort, "weekday")
+
+        migrated = save_subscription_sort_preference(self.db, "pinyin")
+        self.assertEqual(migrated.page.subscription_sort, "name")
+
+    def test_subscription_sorting_module_supports_all_requested_modes(self) -> None:
+        module_path = ROOT / "app/static/subscription-sorting.js"
+        script = textwrap.dedent(
+            f"""
+            const assert = require('node:assert/strict');
+            const sorting = require({str(module_path)!r});
+            const rows = [
+              {{ id: 1, name: '周日', air_date: '2026-07-26', updated_at: '2026-01-01', created_at: '2026-01-03', metadata_rating: 7 }},
+              {{ id: 2, name: '周一', air_date: '2026-07-27', updated_at: '2026-01-03', created_at: '2026-01-01', metadata_rating: 8 }},
+              {{ id: 3, name: '周三', air_date: '2026-07-29', updated_at: '2026-01-02', created_at: '2026-01-02', metadata_rating: 9 }},
+            ];
+            assert.deepEqual(sorting.sortSubscriptions(rows, 'weekday').map((row) => row.id), [2, 3, 1]);
+            assert.deepEqual(sorting.sortSubscriptions(rows, 'updated').map((row) => row.id), [2, 3, 1]);
+            assert.deepEqual(sorting.sortSubscriptions(rows, 'created').map((row) => row.id), [1, 3, 2]);
+            assert.deepEqual(sorting.sortSubscriptions(rows, 'rating').map((row) => row.id), [3, 2, 1]);
+            assert.equal(sorting.normalizeMode('pinyin'), 'name');
+            assert.equal(sorting.weekdayIndex('2026-07-26'), 7);
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script], cwd=ROOT, capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_navigation_module_and_index_structure(self) -> None:
         module_path = ROOT / "app/static/navigation.js"

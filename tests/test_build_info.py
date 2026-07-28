@@ -39,6 +39,34 @@ class BuildInfoTests(unittest.TestCase):
         self.assertEqual(info.revision, 'new-revision')
         self.assertTrue(info.source.startswith('image-file:'))
 
+    def test_unexpanded_docker_build_arguments_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / 'build.json'
+            path.write_text(
+                json.dumps(
+                    {
+                        'version': '${APP_VERSION}',
+                        'revision': '${APP_REVISION}',
+                        'created_at': '${APP_CREATED_AT}',
+                    }
+                ),
+                encoding='utf-8',
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    'FEEDDOCK_BUILD_INFO_FILE': str(path),
+                    'APP_VERSION': 'fallback-version',
+                    'APP_REVISION': 'fallback-revision',
+                },
+                clear=False,
+            ):
+                info = load_build_info()
+
+        self.assertEqual(info.version, 'fallback-version')
+        self.assertEqual(info.revision, 'fallback-revision')
+        self.assertEqual(info.source, 'environment')
+
     def test_environment_is_used_for_source_checkout_without_image_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing = Path(tmpdir) / 'missing.json'

@@ -4,10 +4,12 @@ const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 const mikanSubscriptionState = window.FeedDockMikanSubscriptionState;
 const navigation = window.FeedDockNavigation;
 const subscriptionSourceState = window.FeedDockSubscriptionSources;
+const subscriptionSorting = window.FeedDockSubscriptionSorting;
 const notificationSettingsModule = window.FeedDockNotificationSettings;
 if (!mikanSubscriptionState) throw new Error('Mikan subscription state module is unavailable');
 if (!navigation) throw new Error('Navigation module is unavailable');
 if (!subscriptionSourceState) throw new Error('Subscription source module is unavailable');
+if (!subscriptionSorting) throw new Error('Subscription sorting module is unavailable');
 if (!notificationSettingsModule) throw new Error('Notification settings module is unavailable');
 const notificationSettings = notificationSettingsModule.create({ api, showNotice });
 // The notification module owns /api/notifications/settings, /api/notifications/preview and /api/notifications/test.
@@ -147,33 +149,7 @@ function filteredSubscriptions(subscriptions) {
     if (state === 'error' && !sub.last_error) return false;
     return true;
   });
-  const pinyin = (left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN-u-co-pinyin', { sensitivity: 'base', numeric: true });
-  filtered.sort((left, right) => {
-    if (subscriptionSortMode === 'rating') {
-      return (Number(right.metadata_rating || 0) - Number(left.metadata_rating || 0)) || pinyin(left, right);
-    }
-    if (subscriptionSortMode === 'pinyin') {
-      return pinyin(left, right);
-    }
-    if (subscriptionSortMode === 'weekday') {
-      const getWeekday = (sub) => {
-        if (!sub.air_date) return 8;
-        const d = new Date(sub.air_date);
-        if (isNaN(d.getTime())) return 8;
-        const day = d.getDay();
-        return day === 0 ? 7 : day;
-      };
-      const wl = getWeekday(left);
-      const wr = getWeekday(right);
-      if (wl !== wr) return wl - wr;
-      return pinyin(left, right);
-    }
-    if (subscriptionSortMode === 'created') {
-      return String(right.created_at || '').localeCompare(String(left.created_at || '')) || pinyin(left, right);
-    }
-    return String(right.updated_at || '').localeCompare(String(left.updated_at || '')) || pinyin(left, right);
-  });
-  return filtered;
+  return subscriptionSorting.sortSubscriptions(filtered, subscriptionSortMode);
 }
 
 
@@ -441,13 +417,15 @@ function initializeCollapsiblePanels() {
 async function loadApplicationSettings() {
   const data = await api('/api/application/settings');
   applicationPreferences = data;
-  subscriptionSortMode = data.page?.subscription_sort || 'updated';
+  subscriptionSortMode = subscriptionSorting.normalizeMode(data.page?.subscription_sort || 'updated');
   const theme = data.page?.theme_color || 'blue';
   document.documentElement.dataset.themeColor = theme;
   try { localStorage.setItem('feeddock-theme-color', theme); } catch (_) {}
   const page = document.getElementById('pageSettingsForm');
   page.elements.theme_color.value = theme;
   page.elements.subscription_sort.value = subscriptionSortMode;
+  const listSort = document.getElementById('subscriptionSortMode');
+  if (listSort) listSort.value = subscriptionSortMode;
   const downloader = document.getElementById('downloaderForm');
   downloader.elements.retry_count.value = data.download?.retry_count ?? 2;
   downloader.elements.concurrent_limit.value = data.download?.concurrent_limit ?? 3;
@@ -470,6 +448,28 @@ async function loadApplicationSettings() {
   trackers.elements.trackers_update_url.value = data.trackers?.update_url || 'https://cf.trackerslist.com/best.txt';
   document.getElementById('trackersState').textContent = `已缓存 ${data.trackers?.tracker_count || 0} 个 Tracker${data.trackers?.updated_at ? ` · 更新于 ${fmtDate(data.trackers.updated_at)}` : ''}`;
   renderSubscriptions(currentSubscriptions);
+}
+
+async function saveSubscriptionSort(mode) {
+  const previous = subscriptionSortMode;
+  subscriptionSortMode = subscriptionSorting.normalizeMode(mode);
+  document.getElementById('pageSettingsForm').elements.subscription_sort.value = subscriptionSortMode;
+  document.getElementById('subscriptionSortMode').value = subscriptionSortMode;
+  renderSubscriptions(currentSubscriptions);
+  try {
+    const data = await api('/api/application/settings/subscription-sort', {
+      method: 'PUT',
+      body: JSON.stringify({ subscription_sort: subscriptionSortMode }),
+    });
+    applicationPreferences = data;
+    showNotice('订阅排序已保存');
+  } catch (error) {
+    subscriptionSortMode = previous;
+    document.getElementById('pageSettingsForm').elements.subscription_sort.value = previous;
+    document.getElementById('subscriptionSortMode').value = previous;
+    renderSubscriptions(currentSubscriptions);
+    showNotice(error.message, false);
+  }
 }
 
 function applicationSettingsPayload() {
@@ -1299,6 +1299,8 @@ function renderSubscriptions(data) {
     meta.append(text('span', `原订阅名：${sub.name}`));
     meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
     meta.append(text('span', `评分：${Number(sub.metadata_rating || 0) > 0 ? Number(sub.metadata_rating).toFixed(1) : '—'}`));
+    const weekday = subscriptionSorting.weekdayIndex(sub.air_date);
+    meta.append(text('span', `首播：${sub.air_date || '—'}${weekday <= 7 ? ` · 星期${'一二三四五六日'[weekday - 1]}` : ''}`));
     meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
     meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
     meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
@@ -2152,6 +2154,7 @@ document.querySelector('.app-brand').addEventListener('keydown', (event) => {
 
 document.getElementById('subscriptionSearch').addEventListener('input', () => renderSubscriptions(currentSubscriptions));
 document.getElementById('subscriptionStateFilter').addEventListener('change', () => renderSubscriptions(currentSubscriptions));
+document.getElementById('subscriptionSortMode').addEventListener('change', (event) => saveSubscriptionSort(event.currentTarget.value));
 document.getElementById('toggleManagementMode').addEventListener('click', () => setManagementMode(!subscriptionManagementMode));
 document.getElementById('selectAllSubscriptions').addEventListener('change', (event) => {
   filteredSubscriptions(currentSubscriptions).forEach((sub) => {
