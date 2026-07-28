@@ -44,6 +44,18 @@
     setMenuExpanded(menu, menu.open);
   }
 
+  function setMobileNavExpanded(doc = document, expanded = false) {
+    const nav = doc.getElementById?.('primaryNavigation');
+    const toggle = doc.getElementById?.('mobileNavToggle');
+    const isExpanded = Boolean(expanded);
+    nav?.classList.toggle('is-open', isExpanded);
+    toggle?.setAttribute('aria-expanded', String(isExpanded));
+    toggle?.setAttribute('aria-label', isExpanded ? '关闭导航菜单' : '打开导航菜单');
+    doc.body?.classList.toggle('mobile-nav-open', isExpanded);
+    if (!isExpanded) closeMenus(doc);
+    return isExpanded;
+  }
+
   function showView(value, options = {}) {
     const doc = options.document || document;
     const view = normalizeView(value);
@@ -61,6 +73,7 @@
       element.classList.toggle('is-active', element.dataset.viewTarget === view);
     });
     closeMenus(doc);
+    setMobileNavExpanded(doc, false);
     if (options.updateHash !== false && typeof history !== 'undefined') {
       history.replaceState(null, '', `#${view}`);
     }
@@ -74,6 +87,11 @@
   }
 
   function initialize(doc = document) {
+    const mobileToggle = doc.getElementById?.('mobileNavToggle');
+    mobileToggle?.addEventListener('click', () => {
+      const nav = doc.getElementById?.('primaryNavigation');
+      setMobileNavExpanded(doc, !nav?.classList.contains('is-open'));
+    });
     doc.querySelectorAll('.nav-menu').forEach((menu) => {
       setMenuExpanded(menu, menu.open);
       menu.addEventListener('toggle', () => handleMenuToggle(menu, doc));
@@ -95,11 +113,14 @@
     });
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', () => showView(window.location.hash, { document: doc, updateHash: false }));
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 760) setMobileNavExpanded(doc, false);
+      });
       showView(window.location.hash, { document: doc, updateHash: false, scroll: false });
     } else {
       showView(DEFAULT_VIEW, { document: doc, updateHash: false, scroll: false });
     }
   }
 
-  return { DEFAULT_VIEW, VIEW_META, normalizeView, setMenuExpanded, closeMenus, handleMenuToggle, showView, initialize };
+  return { DEFAULT_VIEW, VIEW_META, normalizeView, setMenuExpanded, closeMenus, handleMenuToggle, setMobileNavExpanded, showView, initialize };
 });

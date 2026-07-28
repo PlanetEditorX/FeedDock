@@ -1481,13 +1481,15 @@ async function loadItems() {
   const status = document.getElementById('statusFilter').value;
   const data = await api(`/api/items?limit=100${status ? `&status=${encodeURIComponent(status)}` : ''}`);
   const tbody = document.getElementById('items'); tbody.replaceChildren();
-  if (!data.length) { const row = document.createElement('tr'); const cell = text('td', '暂无记录'); cell.colSpan = 7; row.append(cell); tbody.append(row); return; }
+  if (!data.length) { const row = document.createElement('tr'); const cell = text('td', '暂无记录'); cell.colSpan = 7; cell.className = 'empty-table-cell'; row.append(cell); tbody.append(row); return; }
   for (const item of data) {
-    const row = document.createElement('tr'); row.append(text('td', fmtDate(item.created_at)));
-    const titleCell = document.createElement('td');
+    const row = document.createElement('tr');
+    const createdCell = text('td', fmtDate(item.created_at)); createdCell.dataset.label = '时间'; row.append(createdCell);
+    const titleCell = document.createElement('td'); titleCell.dataset.label = '标题';
     if (item.source_url) { const link = text('a', item.title); link.href = item.source_url; link.target = '_blank'; link.rel = 'noreferrer noopener'; titleCell.append(link); } else titleCell.textContent = item.title;
-    row.append(titleCell); row.append(text('td', item.episode || '—'));
-    const statusCell = document.createElement('td'); statusCell.append(text('span', ({ queued: '已推送', scheduled: '等待定时推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
+    row.append(titleCell);
+    const episodeCell = text('td', item.episode || '—'); episodeCell.dataset.label = '集数'; row.append(episodeCell);
+    const statusCell = document.createElement('td'); statusCell.dataset.label = '状态'; statusCell.append(text('span', ({ queued: '已推送', scheduled: '等待定时推送', skipped: '已跳过', error: '错误', discovered: '发现' })[item.status] || item.status, `badge ${item.status}`));
     if (item.status === 'queued') statusCell.append(text('small', ` ${item.download_progress || 0}%`, 'muted')); row.append(statusCell);
     const handling = [
       item.rename_status || (item.desired_name ? '等待处理' : '未启用'),
@@ -1496,8 +1498,9 @@ async function loadItems() {
       item.scrape_message ? `刮削：${item.scrape_message}` : '',
       item.trackers_message ? `Trackers：${item.trackers_message}` : '',
     ].filter(Boolean).join('\n');
-    row.append(text('td', handling, item.rename_status === 'error' || item.scrape_status === 'error' || item.trackers_status === 'error' ? 'error-text' : '')); row.append(text('td', item.reason || '—'));
-    const actionCell = document.createElement('td');
+    const handlingCell = text('td', handling, item.rename_status === 'error' || item.scrape_status === 'error' || item.trackers_status === 'error' ? 'error-text' : ''); handlingCell.dataset.label = '命名'; row.append(handlingCell);
+    const reasonCell = text('td', item.reason || '—'); reasonCell.dataset.label = '说明'; row.append(reasonCell);
+    const actionCell = document.createElement('td'); actionCell.dataset.label = '操作';
     if (item.status === 'error') { const retry = text('button', '重试下载', 'small secondary'); retry.addEventListener('click', async () => { const result = await api(`/api/items/${item.id}/retry`, { method: 'POST' }); showNotice(result.message, result.ok); await reloadAll(); }); actionCell.append(retry); }
     else if (item.scrape_status === 'error' || item.trackers_status === 'error') { const retry = text('button', '重试处理', 'small secondary'); retry.addEventListener('click', async () => { const result = await api('/api/actions/normalize-torrents', { method: 'POST' }); showNotice(result.message || '处理完成', result.ok); await reloadAll(); }); actionCell.append(retry); }
     row.append(actionCell); tbody.append(row);
