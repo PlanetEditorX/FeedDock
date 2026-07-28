@@ -59,20 +59,23 @@ class MobileLayoutTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_recent_download_toolbar_preserves_single_line_button_labels(self) -> None:
+    def test_recent_download_toolbar_preserves_control_widths(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertIn('class="actions recent-items-actions"', index)
         self.assertIn("#recent-items .panel-head > .recent-items-actions", styles)
-        self.assertIn("display: grid;", styles)
-        self.assertIn("minmax(180px, 360px)", styles)
-        self.assertIn("#recent-items .recent-items-actions > #openQbit { min-width: 160px; }", styles)
-        self.assertIn("#recent-items .recent-items-actions > #normalizeTorrents { min-width: 150px; }", styles)
-        self.assertIn("#recent-items .recent-items-actions > #clearRecentItems { min-width: 110px; }", styles)
+        self.assertIn("display: flex;", styles)
+        self.assertIn("flex-wrap: nowrap;", styles)
+        self.assertIn("flex: 0 0 auto !important;", styles)
         self.assertIn("white-space: nowrap;", styles)
-        self.assertIn("flex: none;", styles)
-        self.assertIn("@media (max-width: 1100px)", styles)
-        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", styles)
+        self.assertIn("min-width: 160px;", styles)
+        self.assertIn("min-width: 150px;", styles)
+        self.assertIn("min-width: 110px;", styles)
+        self.assertIn("flex: 0 0 240px !important;", styles)
+        self.assertIn("width: 240px !important;", styles)
+        self.assertIn("max-width: 240px !important;", styles)
+        self.assertIn("@media (max-width: 1200px)", styles)
+        self.assertNotIn("minmax(180px, 1fr)", styles)
 
     def test_download_table_has_mobile_card_labels(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")

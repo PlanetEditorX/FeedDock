@@ -657,39 +657,47 @@ button, .button-link, input, select, textarea, summary { touch-action: manipulat
   .modal-card { max-height: 100dvh; }
 }
 
-/* Keep recent-download controls in dedicated columns so the status filter cannot squeeze buttons. */
+/* Keep recent-download controls at intrinsic widths. The status filter must never grow
+   into free space or shrink the adjacent action buttons. */
 #recent-items .panel-head > .recent-items-actions {
-  display: grid;
-  flex: 1 1 700px;
-  grid-template-columns:
-    minmax(160px, max-content)
-    minmax(180px, 360px)
-    minmax(150px, max-content)
-    minmax(110px, max-content);
-  gap: 10px;
-  min-width: 630px;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  width: auto;
+  min-width: 0;
+  max-width: none;
   align-items: center;
-  justify-content: start;
+  justify-content: flex-start;
+  gap: 10px;
 }
 #recent-items .recent-items-actions > button,
 #recent-items .recent-items-actions > .button-link {
-  width: 100%;
-  flex: none;
+  flex: 0 0 auto !important;
+  width: auto !important;
   white-space: nowrap;
   writing-mode: horizontal-tb;
   justify-content: center;
 }
-#recent-items .recent-items-actions > #openQbit { min-width: 160px; }
-#recent-items .recent-items-actions > #normalizeTorrents { min-width: 150px; }
-#recent-items .recent-items-actions > #clearRecentItems { min-width: 110px; }
+#recent-items .recent-items-actions > #openQbit {
+  min-width: 160px;
+}
+#recent-items .recent-items-actions > #normalizeTorrents {
+  min-width: 150px;
+}
+#recent-items .recent-items-actions > #clearRecentItems {
+  min-width: 110px;
+}
 #recent-items .recent-items-actions > #statusFilter {
-  width: 100%;
-  min-width: 180px;
-  max-width: 360px;
+  flex: 0 0 240px !important;
+  width: 240px !important;
+  min-width: 240px !important;
+  max-width: 240px !important;
 }
 
-/* Move the whole control group below the heading before its columns become cramped. */
-@media (max-width: 1100px) {
+/* When the complete toolbar no longer fits beside the heading, move the whole
+   action group below it. Individual controls keep their own widths and wrap as
+   complete units instead of squeezing one another. */
+@media (max-width: 1200px) {
   #recent-items .panel-head {
     flex-wrap: wrap;
   }
@@ -703,34 +711,23 @@ button, .button-link, input, select, textarea, summary { touch-action: manipulat
     order: 3;
     flex: 1 0 100%;
     width: 100%;
-    min-width: 0;
-    grid-template-columns:
-      minmax(160px, max-content)
-      minmax(180px, 1fr)
-      minmax(150px, max-content)
-      minmax(110px, max-content);
-  }
-  #recent-items .recent-items-actions > #statusFilter {
-    max-width: none;
+    flex-wrap: wrap;
   }
 }
 
-/* Tablet layouts use two control columns; labels remain on one line inside each button. */
-@media (max-width: 760px) {
+/* On phones, stack controls to the available width. Button text remains on one line. */
+@media (max-width: 520px) {
   #recent-items .panel-head > .recent-items-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
   #recent-items .recent-items-actions > button,
   #recent-items .recent-items-actions > .button-link,
   #recent-items .recent-items-actions > #statusFilter {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-  }
-}
-
-@media (max-width: 520px) {
-  #recent-items .panel-head > .recent-items-actions {
-    grid-template-columns: 1fr;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
   }
 }
