@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -152,6 +152,17 @@ from .network_diagnostics import diagnose_dns
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _render_static_page(filename: str) -> HTMLResponse:
+    """Render an HTML shell with a cache key tied to the running image build."""
+
+    asset_version = (settings.app_revision[:12] or settings.app_version or "dev").replace("/", "-")
+    html = (STATIC_DIR / filename).read_text(encoding="utf-8").replace(
+        "__FEEDDOCK_ASSET_VERSION__",
+        asset_version,
+    )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 def _set_session_cookie(response: Response, account: AdminAccount) -> None:
@@ -413,7 +424,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
         return RedirectResponse("/login", status_code=303)
     if account.must_change_password:
         return RedirectResponse("/change-password", status_code=303)
-    return FileResponse(STATIC_DIR / "index.html")
+    return _render_static_page("index.html")
 
 
 @app.get("/login", include_in_schema=False)
@@ -422,7 +433,7 @@ def login_page(request: Request, db: Session = Depends(get_db)) -> Response:
     if account:
         target = "/change-password" if account.must_change_password else "/"
         return RedirectResponse(target, status_code=303)
-    return FileResponse(STATIC_DIR / "login.html")
+    return _render_static_page("login.html")
 
 
 @app.get("/change-password", include_in_schema=False)
@@ -430,7 +441,7 @@ def change_password_page(request: Request, db: Session = Depends(get_db)) -> Res
     account = resolve_admin(request, db)
     if not account:
         return RedirectResponse("/login", status_code=303)
-    return FileResponse(STATIC_DIR / "change-password.html")
+    return _render_static_page("change-password.html")
 
 
 @app.get("/health")

@@ -2,13 +2,21 @@
 
 ## 未发布
 
+### 镜像版本同步修复
+
+- 当前版本、revision 和构建时间改为优先读取镜像内 `/app/.feeddock-build.json`，避免 Watchtower 复用旧容器环境变量后显示旧版本。
+- Dockerfile 不再将构建版本作为最终镜像 `ENV`，仅保留 OCI 标签和不可变构建信息文件。
+- 同 revision 且本地版本仅来自环境变量时，不再误报“发现新镜像”，而是提示重新创建容器。
+- 系统更新页面新增“本地元数据”来源。
+- 登录页、修改密码页和主页面的静态资源缓存参数改为按运行镜像 revision 动态生成。
+
 ### 容器镜像更新检测
 
 - 在线更新检查改为直接读取 `FEEDDOCK_IMAGE` 对应容器仓库的 OCI manifest 和镜像 config。
 - 使用 `org.opencontainers.image.revision` 比较当前运行镜像与远端标签，不再依赖静态版本清单或 GitHub Release。
 - 页面新增当前构建、远端构建、远端 digest 和镜像平台信息。
 - 删除 `update.json` 及 GitHub Release API 备用检查配置。
-- Docker 构建写入 `APP_VERSION`、`APP_REVISION`、`APP_CREATED_AT` 和对应 OCI 标签。
+- Docker 构建写入 OCI 标签和镜像内不可变构建信息文件。
 
 ### 镜像发布流程
 

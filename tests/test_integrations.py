@@ -198,11 +198,25 @@ class IntegrationTests(unittest.TestCase):
             image=self.registry_image,
             current_version="1.18.0",
             current_revision="remote-revision-abcdef",
+            current_build_source="image-file:/app/.feeddock-build.json",
             timeout=3,
         )
         status = service.check(force=True)
         self.assertTrue(status.update_available)
         self.assertIn("同一代码 revision", status.message)
+
+    def test_same_revision_with_stale_environment_version_is_not_false_update(self):
+        service = UpdateService(
+            image=self.registry_image,
+            current_version="1.17.12",
+            current_revision="remote-revision-abcdef",
+            current_build_source="environment",
+            timeout=3,
+        )
+        status = service.check(force=True)
+        self.assertFalse(status.update_available)
+        self.assertFalse(status.metadata_consistent)
+        self.assertIn("版本标识来自容器环境变量", status.message)
 
     def test_private_registry_credentials_are_used_for_token_exchange(self):
         FakeServicesHandler.requests.clear()

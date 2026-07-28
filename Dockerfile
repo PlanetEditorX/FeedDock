@@ -10,10 +10,7 @@ LABEL org.opencontainers.image.title="FeedDock" \
       org.opencontainers.image.revision="${APP_REVISION}" \
       org.opencontainers.image.created="${APP_CREATED_AT}"
 
-ENV APP_VERSION=${APP_VERSION} \
-    APP_REVISION=${APP_REVISION} \
-    APP_CREATED_AT=${APP_CREATED_AT} \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
@@ -24,6 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY docker-entrypoint.py /usr/local/bin/feeddock-entrypoint
+# Persist build metadata inside the image. Unlike container environment values,
+# this file cannot be inherited from the previous container by Watchtower.
+RUN printf '%s\n' \
+      '{"version":"${APP_VERSION}","revision":"${APP_REVISION}","created_at":"${APP_CREATED_AT}"}' \
+      > /app/.feeddock-build.json
 RUN mkdir -p /data /media \
     && chown -R 0:0 /app /data /media \
     && chmod +x /usr/local/bin/feeddock-entrypoint

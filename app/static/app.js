@@ -602,6 +602,11 @@ async function loadUpdateStatus(showResult = false) {
     return digest.startsWith('sha256:') ? `sha256:${digest.slice(7, 19)}` : digest.slice(0, 19);
   };
   document.getElementById('currentVersion').textContent = data.current_version || '—';
+  document.getElementById('currentVersion').title = data.current_build_source || '';
+  const buildSource = String(data.current_build_source || '');
+  document.getElementById('currentBuildSource').textContent = buildSource.startsWith('image-file:')
+    ? '镜像构建文件'
+    : (buildSource === 'environment' ? '容器环境变量（兼容）' : (buildSource || '—'));
   document.getElementById('latestVersion').textContent = data.latest_version || '—';
   document.getElementById('currentRevision').textContent = shortHash(data.current_revision);
   document.getElementById('latestRevision').textContent = shortHash(data.latest_revision);

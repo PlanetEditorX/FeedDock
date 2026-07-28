@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .build_info import load_build_info
+
 
 def _as_int(name: str, default: int, minimum: int = 1) -> int:
     raw = os.getenv(name, str(default)).strip()
@@ -34,6 +36,8 @@ class Settings:
     app_name: str
     app_version: str
     app_revision: str
+    app_created_at: str
+    app_build_source: str
     data_dir: Path
     database_url: str
     admin_user: str
@@ -87,10 +91,14 @@ def load_settings() -> Settings:
     data_dir.mkdir(parents=True, exist_ok=True)
     db_path = data_dir / "feeddock.db"
 
+    build_info = load_build_info()
+
     return Settings(
         app_name=os.getenv("APP_NAME", "FeedDock"),
-        app_version=os.getenv("APP_VERSION", "dev"),
-        app_revision=os.getenv("APP_REVISION", "").strip(),
+        app_version=build_info.version,
+        app_revision=build_info.revision,
+        app_created_at=build_info.created_at,
+        app_build_source=build_info.source,
         data_dir=data_dir,
         database_url=os.getenv("DATABASE_URL", f"sqlite:///{db_path}"),
         admin_user=os.getenv("ADMIN_USER", "admin").strip() or "admin",
@@ -101,7 +109,7 @@ def load_settings() -> Settings:
         request_timeout_seconds=_as_int("REQUEST_TIMEOUT_SECONDS", 20),
         rss_user_agent=os.getenv(
             "RSS_USER_AGENT",
-            f"FeedDock/{os.getenv('APP_VERSION', 'dev')} (+self-hosted RSS automation)",
+            f"FeedDock/{build_info.version} (+self-hosted RSS automation)",
         ),
         qbit_url=os.getenv("QBIT_URL", "").strip().rstrip("/"),
         qbit_username=os.getenv("QBIT_USERNAME", "admin").strip(),

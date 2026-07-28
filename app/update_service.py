@@ -39,6 +39,9 @@ class UpdateStatus:
     latest_digest: str = ""
     platform_digest: str = ""
     image_platform: str = ""
+    current_build_source: str = ""
+    current_created_at: str = ""
+    metadata_consistent: bool = True
 
     def as_dict(self) -> dict[str, str | bool]:
         return {
@@ -60,6 +63,9 @@ class UpdateStatus:
             "latest_digest": self.latest_digest,
             "platform_digest": self.platform_digest,
             "image_platform": self.image_platform,
+            "current_build_source": self.current_build_source,
+            "current_created_at": self.current_created_at,
+            "metadata_consistent": self.metadata_consistent,
         }
 
 
@@ -129,9 +135,10 @@ class UpdateService:
     """Check the deployed tag directly against its container registry metadata.
 
     Update availability no longer depends on a repository-hosted version manifest or a GitHub Release.
-    The running image carries its source revision through ``APP_REVISION``. The
-    remote tag's OCI config carries the same standard revision label, so the two
-    builds can be compared without mounting the Docker socket into FeedDock.
+    The running image carries immutable version and revision metadata in
+    ``/app/.feeddock-build.json``. The remote tag's OCI config carries the same
+    standard labels, so the two builds can be compared without mounting the
+    Docker socket into FeedDock.
     """
 
     def __init__(
@@ -140,6 +147,8 @@ class UpdateService:
         image: str | None = None,
         current_version: str | None = None,
         current_revision: str | None = None,
+        current_build_source: str | None = None,
+        current_created_at: str | None = None,
         watchtower_url: str | None = None,
         watchtower_token: str | None = None,
         timeout: int | None = None,
@@ -151,6 +160,16 @@ class UpdateService:
         self.image = settings.deployed_image if image is None else image.strip()
         self.current_version = settings.app_version if current_version is None else current_version.strip()
         self.current_revision = settings.app_revision if current_revision is None else current_revision.strip()
+        self.current_build_source = (
+            settings.app_build_source
+            if current_build_source is None
+            else current_build_source.strip()
+        )
+        self.current_created_at = (
+            settings.app_created_at
+            if current_created_at is None
+            else current_created_at.strip()
+        )
         self.watchtower_url = settings.watchtower_url if watchtower_url is None else watchtower_url.rstrip("/")
         self.watchtower_token = settings.watchtower_token if watchtower_token is None else watchtower_token
         self.timeout = timeout or settings.request_timeout_seconds
@@ -189,6 +208,8 @@ class UpdateService:
             deployed_image=self.image,
             can_apply_update=can_apply,
             current_revision=self.current_revision,
+            current_build_source=self.current_build_source,
+            current_created_at=self.current_created_at,
             message="未检查远端容器镜像",
         )
 
@@ -229,18 +250,35 @@ class UpdateService:
                 and self.current_version
                 and is_newer_version(metadata.version, self.current_version)
             )
-            result.update_available = revision_changed or version_changed
+            immutable_local_metadata = self.current_build_source.startswith("image-file:")
+
             if revision_changed:
+                result.update_available = True
                 result.message = (
                     "发现新容器镜像："
                     f"{_short_revision(self.current_revision)} → {_short_revision(metadata.revision)}"
                 )
-            elif version_changed:
+            elif version_changed and immutable_local_metadata:
+                # Same source commit, but a later immutable image build can still
+                # contain a refreshed base image or dependency layer.
+                result.update_available = True
                 result.message = (
                     "发现同一代码 revision 的新镜像构建："
                     f"{self.current_version} → {metadata.version}"
                 )
+            elif version_changed:
+                # Older deployments may expose APP_VERSION through the previous
+                # container configuration. Treat it as a metadata inconsistency,
+                # not proof that the running image is outdated.
+                result.update_available = False
+                result.metadata_consistent = False
+                result.message = (
+                    "当前代码 revision 已与远端一致，但本地版本标识来自容器环境变量："
+                    f"{self.current_version} ≠ {metadata.version}；"
+                    "请重新创建容器以刷新镜像内构建信息"
+                )
             else:
+                result.update_available = False
                 result.message = "当前运行镜像与远端标签一致"
         elif metadata.version and self.current_version:
             result.update_available = is_newer_version(metadata.version, self.current_version)

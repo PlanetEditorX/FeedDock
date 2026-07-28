@@ -380,6 +380,9 @@ class UpdateStatusOut(BaseModel):
     latest_digest: str = ""
     platform_digest: str = ""
     image_platform: str = ""
+    current_build_source: str = ""
+    current_created_at: str = ""
+    metadata_consistent: bool = True
 
 
 class QBittorrentSettingsUpdate(BaseModel):

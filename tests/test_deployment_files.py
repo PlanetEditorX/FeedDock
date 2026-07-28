@@ -129,6 +129,18 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("ARG APP_VERSION=dev", dockerfile)
         self.assertIn("ARG APP_REVISION=unknown", dockerfile)
         self.assertIn("org.opencontainers.image.revision", dockerfile)
+        self.assertIn("/app/.feeddock-build.json", dockerfile)
+        self.assertNotIn("ENV APP_VERSION=", dockerfile)
+        self.assertIn("load_build_info", (ROOT / "app/config.py").read_text(encoding="utf-8"))
+        self.assertIn('id="currentBuildSource"', (ROOT / "app/static/index.html").read_text(encoding="utf-8"))
+        self.assertIn("镜像构建文件", (ROOT / "app/static/app.js").read_text(encoding="utf-8"))
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        for page in ("index.html", "login.html", "change-password.html"):
+            html = (ROOT / "app/static" / page).read_text(encoding="utf-8")
+            self.assertIn("__FEEDDOCK_ASSET_VERSION__", html)
+        self.assertIn("settings.app_revision[:12]", main)
+        self.assertIn('_render_static_page("index.html")', main)
+        self.assertIn('"Cache-Control": "no-store"', main)
 
     def test_workflow_versions_from_remote_image_without_manual_tag_push(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
@@ -201,30 +213,33 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("formElement.reset();", handler)
         self.assertNotIn("event.currentTarget.reset()", handler)
 
-    def test_static_assets_are_cache_busted_for_current_version(self) -> None:
-        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    def test_static_assets_are_cache_busted_for_running_image_revision(self) -> None:
+        token = "__FEEDDOCK_ASSET_VERSION__"
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         login = (ROOT / "app/static/login.html").read_text(encoding="utf-8")
         change_password = (ROOT / "app/static/change-password.html").read_text(encoding="utf-8")
         change_password_script = (ROOT / "app/static/change-password.js").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
 
-        self.assertIn(f"/static/app.js?v={version}", index)
-        self.assertIn(f"/static/mikan-subscription-state.js?v={version}", index)
-        self.assertIn(f"/static/subscription-sources.js?v={version}", index)
-        self.assertIn(f"/static/navigation.js?v={version}", index)
+        self.assertIn(f"/static/app.js?v={token}", index)
+        self.assertIn(f"/static/mikan-subscription-state.js?v={token}", index)
+        self.assertIn(f"/static/subscription-sources.js?v={token}", index)
+        self.assertIn(f"/static/navigation.js?v={token}", index)
         self.assertLess(
-            index.index(f"/static/subscription-sources.js?v={version}"),
-            index.index(f"/static/app.js?v={version}"),
+            index.index(f"/static/subscription-sources.js?v={token}"),
+            index.index(f"/static/app.js?v={token}"),
         )
         self.assertLess(
-            index.index(f"/static/navigation.js?v={version}"),
-            index.index(f"/static/app.js?v={version}"),
+            index.index(f"/static/navigation.js?v={token}"),
+            index.index(f"/static/app.js?v={token}"),
         )
-        self.assertIn(f"/static/login.js?v={version}", login)
-        self.assertIn(f"/static/change-password.js?v={version}", change_password)
+        self.assertIn(f"/static/login.js?v={token}", login)
+        self.assertIn(f"/static/change-password.js?v={token}", change_password)
         self.assertIn("/#settings-login", change_password_script)
         for page in (index, login, change_password):
-            self.assertIn(f"/static/styles.css?v={version}", page)
+            self.assertIn(f"/static/styles.css?v={token}", page)
+        self.assertIn("settings.app_revision[:12]", main)
+        self.assertIn("__FEEDDOCK_ASSET_VERSION__", main)
 
     def test_update_check_is_manual_only(self) -> None:
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

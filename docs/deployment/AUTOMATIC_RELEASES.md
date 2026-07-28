@@ -80,18 +80,23 @@ python scripts/release_version.py next \
 
 ## 镜像元数据
 
-构建时写入以下 OCI 标准标签和运行时环境变量：
+构建时写入以下 OCI 标准标签：
 
 ```text
 org.opencontainers.image.version
 org.opencontainers.image.revision
 org.opencontainers.image.created
-APP_VERSION
-APP_REVISION
-APP_CREATED_AT
 ```
 
-`APP_REVISION` 是运行中镜像对应的提交 SHA。FeedDock 查询远端镜像时会读取同一标签进行比较，因此不需要挂载 Docker Socket，也不需要读取 GitHub Release。
+同一份版本、revision 和构建时间还会写入镜像内的不可变文件：
+
+```text
+/app/.feeddock-build.json
+```
+
+运行中的 FeedDock 优先读取该文件。这样即使 Watchtower 或旧 Compose 保留了上一个容器的 `APP_VERSION`、`APP_REVISION` 环境变量，新镜像也不会显示旧版本。源码运行和测试环境没有该文件时，才回退读取环境变量。
+
+前端 HTML 中的静态资源版本参数也由当前 revision 动态生成，不再硬编码仓库中的版本号。
 
 ## 手动运行
 
@@ -124,3 +129,37 @@ Release 是附属记录，不参与 FeedDock 的在线更新判断。
 ## 并发与重复运行
 
 同一分支的发布工作流按顺序执行。工作流会先读取远端 `latest` 的 revision；如果它已经等于当前 `GITHUB_SHA`，普通 push 运行会跳过重复发布。
+
+## 当前版本与远端版本不一致
+
+若页面出现以下组合：
+
+```text
+当前版本：1.17.12
+远端镜像版本：1.17.14
+当前构建与远端构建相同
+本地元数据：容器环境变量（兼容）
+```
+
+说明运行中的容器仍在使用旧版镜像的环境变量，而不是镜像内构建文件。先检查：
+
+```bash
+docker inspect feeddock --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep -E '^(APP_VERSION|APP_REVISION|APP_CREATED_AT)='
+```
+
+删除 `.env`、Compose 或管理界面中手工配置的这些变量，然后强制拉取并重新创建：
+
+```bash
+docker compose pull feeddock
+docker compose up -d --force-recreate feeddock
+```
+
+飞牛 Compose：
+
+```bash
+docker compose -f docker-compose.fnos.yml pull feeddock
+docker compose -f docker-compose.fnos.yml up -d --force-recreate feeddock
+```
+
+安装包含 `/app/.feeddock-build.json` 的新镜像后，页面“本地元数据”应显示“镜像构建文件”。

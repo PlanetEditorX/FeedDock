@@ -14,7 +14,7 @@
 ## 自动化测试
 
 ```text
-193 passed, 15 subtests passed
+196 unit tests passed
 ```
 
 新增及重点覆盖：
@@ -24,7 +24,9 @@
 - 多架构镜像选择当前运行平台，并忽略 provenance/attestation descriptor；
 - OCI revision、version、created、root digest 与平台 digest 读取；
 - 当前 revision 与远端 revision 不同时提示更新；
-- revision 相同但远端镜像版本更高时提示重新构建更新；
+- revision 相同且本地元数据来自镜像构建文件时，可识别同代码的新镜像构建；
+- revision 相同但本地版本来自旧容器环境变量时，不误报更新并给出重建提示；
+- 镜像内构建信息文件优先级高于残留的 APP_VERSION/APP_REVISION 环境变量；
 - Registry 查询缓存、过期缓存与错误降级；
 - digest 固定镜像禁止 Watchtower 标签更新；
 - 发布版本由远端镜像版本递增，`VERSION` 只作为 major/minor 人工提升下限；
@@ -38,7 +40,8 @@
 - `docker-compose.yml`、`docker-compose.fnos.yml`：YAML 解析通过；
 - `.github/workflows/docker-publish.yml`：YAML 解析通过；
 - `VERSION` 语义化版本下限：`1.17.13`，校验通过；
-- Dockerfile 同时写入运行时环境变量和 OCI 标准标签；
+- Dockerfile 写入 OCI 标准标签与 `/app/.feeddock-build.json`，不再把版本元数据作为最终镜像 ENV；
+- HTML 静态资源缓存键由运行镜像 revision 动态生成；
 - Compose 已提供 `UPDATE_REGISTRY_USERNAME`、`UPDATE_REGISTRY_TOKEN` 可选配置；
 - Watchtower API 保持 Docker 内部网络访问，不映射宿主机端口。
 
@@ -46,7 +49,7 @@
 
 FeedDock 不挂载 Docker Socket，因此运行中的容器不能直接读取 Docker Engine 保存的本地 RepoDigest。当前方案使用镜像构建时写入的 source revision 与远端 OCI revision 做稳定比较，并展示远端 root digest 和当前平台 digest。实际更新时，Watchtower 会再按镜像 digest 判断是否需要拉取和重建。
 
-此设计避免把 `/var/run/docker.sock` 暴露给主应用。若旧镜像尚未包含 `APP_REVISION`，第一次检查会按 OCI version 回退判断；升级到新镜像后即使用 revision 精确比较。
+此设计避免把 `/var/run/docker.sock` 暴露给主应用。旧镜像没有 `/app/.feeddock-build.json` 时会显示“容器环境变量（兼容）”；安装新镜像后切换为“镜像构建文件”，版本与 revision 均来自当前镜像文件系统。
 
 ## 环境限制
 
