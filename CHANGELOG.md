@@ -1,4 +1,10 @@
 # 变更记录
+## CI configuration module path fix
+
+- Restored application runtime settings to `app/config.py`.
+- Kept notification persistence settings under `app/notification/config.py`.
+- Added a regression test preventing the two modules from being overwritten or exchanged.
+
 
 ## 未发布
 
