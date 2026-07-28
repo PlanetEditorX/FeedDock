@@ -595,11 +595,24 @@ async function loadGlobalRules() {
 
 async function loadUpdateStatus(showResult = false) {
   const data = await api(`/api/update/status${showResult ? '?force=true' : ''}`);
+  const shortHash = (value) => value ? String(value).slice(0, 12) : '—';
+  const shortDigest = (value) => {
+    const digest = String(value || '');
+    if (!digest) return '—';
+    return digest.startsWith('sha256:') ? `sha256:${digest.slice(7, 19)}` : digest.slice(0, 19);
+  };
   document.getElementById('currentVersion').textContent = data.current_version || '—';
   document.getElementById('latestVersion').textContent = data.latest_version || '—';
+  document.getElementById('currentRevision').textContent = shortHash(data.current_revision);
+  document.getElementById('latestRevision').textContent = shortHash(data.latest_revision);
+  document.getElementById('latestDigest').textContent = shortDigest(data.latest_digest);
+  document.getElementById('currentRevision').title = data.current_revision || '';
+  document.getElementById('latestRevision').title = data.latest_revision || '';
+  document.getElementById('latestDigest').title = data.latest_digest || '';
+  document.getElementById('imagePlatform').textContent = data.image_platform || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
   document.getElementById('updaterState').textContent = data.updater_configured ? '在线更新已启用' : '需配置 Watchtower';
-  document.getElementById('versionSummary').textContent = data.message || '未获取到版本信息';
+  document.getElementById('versionSummary').textContent = data.message || '未获取到镜像信息';
 
   const releaseLink = document.getElementById('releaseLink');
   if (data.release_url) {
@@ -608,7 +621,7 @@ async function loadUpdateStatus(showResult = false) {
   } else releaseLink.classList.add('hidden');
 
   const apply = document.getElementById('applyUpdate');
-  if (data.update_available) apply.classList.remove('hidden');
+  if (data.update_available && !String(data.deployed_image || '').includes('@sha256:')) apply.classList.remove('hidden');
   else apply.classList.add('hidden');
   apply.textContent = data.updater_configured ? '在线更新' : '配置在线更新';
 
@@ -1963,7 +1976,7 @@ document.getElementById('checkUpdate').addEventListener('click', async (event) =
   catch (error) { showNotice(error.message, false); }
   finally {
     button.disabled = false;
-    button.textContent = '检查在线更新';
+    button.textContent = '检查镜像更新';
   }
 });
 

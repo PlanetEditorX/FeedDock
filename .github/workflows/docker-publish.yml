@@ -1,10 +1,8 @@
-name: Build, publish and release Docker image
+name: Build and publish Docker image
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
     paths:
       - Dockerfile
       - docker-entrypoint.py
@@ -13,7 +11,6 @@ on:
       - poetry.lock
       - uv.lock
       - VERSION
-      - update.json
       - "app/**"
       - "src/**"
       - "scripts/**"
@@ -33,7 +30,6 @@ on:
       - poetry.lock
       - uv.lock
       - VERSION
-      - update.json
       - "app/**"
       - "src/**"
       - "scripts/**"
@@ -47,14 +43,14 @@ on:
   workflow_dispatch:
     inputs:
       push_image:
-        description: "构建完成后推送镜像并创建 Release"
+        description: "构建完成后推送镜像"
         required: true
         default: true
         type: boolean
-      force_release:
-        description: "即使没有检测到重要文件变化，也自动递增补丁版本"
+      force_build:
+        description: "即使远端 latest 已是当前提交，也重新构建并递增补丁版本"
         required: true
-        default: true
+        default: false
         type: boolean
       image_tag:
         description: "额外镜像标签，例如 dev 或 nightly"
@@ -63,7 +59,7 @@ on:
         type: string
 
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref_name }}
+  group: image-publish-${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -102,7 +98,7 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Validate synchronized version files
+      - name: Validate base version
         run: python scripts/release_version.py check
 
       - name: Validate frontend JavaScript syntax
@@ -157,11 +153,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Resolve application version
-        id: version
-        shell: bash
-        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
-
       - name: Resolve lowercase image name
         id: image
         shell: bash
@@ -181,6 +172,10 @@ jobs:
           tags: |
             type=ref,event=pr
             type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=FeedDock
+            org.opencontainers.image.version=pr-${{ github.event.pull_request.number }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build image without publishing
         uses: docker/build-push-action@v7
@@ -188,7 +183,9 @@ jobs:
           context: .
           file: ./Dockerfile
           build-args: |
-            APP_VERSION=${{ steps.version.outputs.value }}
+            APP_VERSION=pr-${{ github.event.pull_request.number }}
+            APP_REVISION=${{ github.sha }}
+            APP_CREATED_AT=${{ github.event.pull_request.updated_at }}
           platforms: linux/amd64,linux/arm64
           push: false
           tags: ${{ steps.meta.outputs.tags }}
@@ -199,7 +196,7 @@ jobs:
           sbom: true
 
   publish:
-    name: Auto version, publish and release
+    name: Detect image changes and publish
     needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -212,133 +209,132 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: Resolve publish mode
-        id: mode
+      - name: Resolve lowercase image name
+        id: image
         shell: bash
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "push_enabled=${{ inputs.push_image }}" >> "$GITHUB_OUTPUT"
-            echo "force_release=${{ inputs.force_release }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "push_enabled=true" >> "$GITHUB_OUTPUT"
-            echo "force_release=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Detect unreleased important changes
+      - name: Detect image-impacting changes
         id: changes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          git fetch --force --tags origin
-
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            git fetch origin "${GITHUB_REF_NAME}"
-            remote_sha="$(git rev-parse "origin/${GITHUB_REF_NAME}")"
-            if [[ "$remote_sha" != "$GITHUB_SHA" ]]; then
-              echo "当前工作流对应的提交已不是分支最新提交，由后续工作流处理累计变化。"
-              echo "release_needed=false" >> "$GITHUB_OUTPUT"
-              echo "build_needed=false" >> "$GITHUB_OUTPUT"
-              echo "latest_tag=" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
-          latest_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
-          detect_args=(--root "$GITHUB_WORKSPACE" detect --head "$GITHUB_SHA" --paths-file .github/release-paths.txt)
-          if [[ -n "$latest_tag" ]] && git rev-parse --verify "${latest_tag}^{commit}" >/dev/null 2>&1; then
-            detect_args+=(--base "$latest_tag")
-          fi
-
-          release_needed="$(python scripts/release_version.py "${detect_args[@]}" --format boolean)"
-          matched_files="$(python scripts/release_version.py "${detect_args[@]}" --format lines)"
-
-          if [[ "${{ steps.mode.outputs.push_enabled }}" != "true" ]]; then
-            release_needed=false
-          elif [[ "${{ steps.mode.outputs.force_release }}" == "true" ]]; then
-            release_needed=true
-          fi
-
-          build_needed="$release_needed"
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            build_needed=true
+            build_requested=true
+            matched_files="manual workflow dispatch"
+          else
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+            fi
+            build_requested="$(python scripts/release_version.py detect \
+              --base "$base" \
+              --head "$GITHUB_SHA" \
+              --paths-file .github/release-paths.txt \
+              --format boolean)"
+            matched_files="$(python scripts/release_version.py detect \
+              --base "$base" \
+              --head "$GITHUB_SHA" \
+              --paths-file .github/release-paths.txt \
+              --format lines)"
           fi
 
-          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
-          echo "release_needed=$release_needed" >> "$GITHUB_OUTPUT"
-          echo "build_needed=$build_needed" >> "$GITHUB_OUTPUT"
+          echo "build_requested=$build_requested" >> "$GITHUB_OUTPUT"
           {
             echo "matched_files<<EOF"
             printf '%s\n' "$matched_files"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Latest release: ${latest_tag:-none}"
-          echo "Release needed: $release_needed"
-          if [[ -n "$matched_files" ]]; then
-            echo "Release-impacting files:"
-            printf '%s\n' "$matched_files"
-          fi
+      - name: Set up Python for registry inspection
+        if: steps.changes.outputs.build_requested == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
-      - name: Resolve and synchronize release version
-        id: version
-        if: steps.changes.outputs.build_needed == 'true'
+      - name: Install registry inspection dependencies
+        if: steps.changes.outputs.build_requested == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Inspect current remote image metadata
+        id: remote
+        if: steps.changes.outputs.build_requested == 'true'
+        env:
+          UPDATE_REGISTRY_USERNAME: ${{ github.actor }}
+          UPDATE_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          current="$(tr -d '[:space:]' < VERSION)"
-          latest="${{ steps.changes.outputs.latest_tag }}"
-          latest="${latest#v}"
+          mkdir -p "$RUNNER_TEMP/feeddock-registry"
+          set +e
+          metadata="$(DATA_DIR="$RUNNER_TEMP/feeddock-registry" \
+            python scripts/inspect_registry_image.py "${{ steps.image.outputs.name }}:latest" 2>registry-error.log)"
+          inspect_status=$?
+          set -e
 
-          if [[ "${{ steps.changes.outputs.release_needed }}" == "true" ]]; then
-            value="$(python scripts/release_version.py next --current "$current" --latest "$latest")"
-            published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            python scripts/release_version.py sync --version "$value" --published-at "$published_at"
-            python scripts/release_version.py check
+          if [[ "$inspect_status" == "0" ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "version=$(jq -r '.version // empty' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+            echo "revision=$(jq -r '.revision // empty' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+            echo "digest=$(jq -r '.digest // empty' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          elif [[ "$inspect_status" == "3" ]]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "revision=" >> "$GITHUB_OUTPUT"
+            echo "digest=" >> "$GITHUB_OUTPUT"
+            echo "远端 latest 镜像尚不存在，将使用 VERSION 作为首个镜像版本。"
           else
-            value="$current"
+            cat registry-error.log >&2 || true
+            echo "无法安全读取远端镜像版本，停止发布以避免覆盖已有版本标签。" >&2
+            exit "$inspect_status"
+          fi
+
+      - name: Resolve build decision and image version
+        id: version
+        if: steps.changes.outputs.build_requested == 'true'
+        shell: bash
+        run: |
+          push_enabled=true
+          force_build=false
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            push_enabled="${{ inputs.push_image }}"
+            force_build="${{ inputs.force_build }}"
+          fi
+
+          build_needed=true
+          if [[ "$force_build" != "true" && "${{ steps.remote.outputs.revision }}" == "$GITHUB_SHA" ]]; then
+            build_needed=false
+          fi
+
+          base_version="$(tr -d '[:space:]' < VERSION)"
+          latest_version="${{ steps.remote.outputs.version }}"
+          if [[ "$build_needed" == "true" ]]; then
+            value="$(python scripts/release_version.py next \
+              --base "$base_version" \
+              --latest-image "$latest_version")"
+          else
+            value="${latest_version:-$base_version}"
           fi
 
           IFS=. read -r major minor patch <<< "$value"
+          echo "build_needed=$build_needed" >> "$GITHUB_OUTPUT"
+          echo "push_enabled=$push_enabled" >> "$GITHUB_OUTPUT"
           echo "value=$value" >> "$GITHUB_OUTPUT"
           echo "major=$major" >> "$GITHUB_OUTPUT"
           echo "major_minor=$major.$minor" >> "$GITHUB_OUTPUT"
-
-      - name: Commit automatic version update
-        id: release_commit
-        if: steps.changes.outputs.release_needed == 'true'
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add VERSION update.json Dockerfile app/config.py .env.example README.md app/static/*.html
-
-          if git diff --cached --quiet; then
-            echo "版本文件已经是 ${{ steps.version.outputs.value }}，直接使用当前提交。"
-          else
-            git commit -m "chore(release): bump version to ${{ steps.version.outputs.value }} [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve lowercase image name
-        id: image
-        if: steps.changes.outputs.build_needed == 'true'
-        shell: bash
-        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "created_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
-        if: steps.changes.outputs.build_needed == 'true'
+        if: steps.version.outputs.build_needed == 'true'
         uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        if: steps.changes.outputs.build_needed == 'true'
+        if: steps.version.outputs.build_needed == 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        if: steps.changes.outputs.build_needed == 'true' && steps.mode.outputs.push_enabled == 'true'
+        if: steps.version.outputs.build_needed == 'true' && steps.version.outputs.push_enabled == 'true'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -347,7 +343,7 @@ jobs:
 
       - name: Extract Docker metadata
         id: meta
-        if: steps.changes.outputs.build_needed == 'true'
+        if: steps.version.outputs.build_needed == 'true'
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.image.outputs.name }}
@@ -363,19 +359,22 @@ jobs:
             org.opencontainers.image.title=FeedDock
             org.opencontainers.image.description=Self-hosted RSS automation service for qBittorrent
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
-            org.opencontainers.image.revision=${{ steps.release_commit.outputs.sha || github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.version.outputs.created_at }}
 
       - name: Build and optionally publish image
         id: build
-        if: steps.changes.outputs.build_needed == 'true'
+        if: steps.version.outputs.build_needed == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           build-args: |
             APP_VERSION=${{ steps.version.outputs.value }}
+            APP_REVISION=${{ github.sha }}
+            APP_CREATED_AT=${{ steps.version.outputs.created_at }}
           platforms: linux/amd64,linux/arm64
-          push: ${{ steps.mode.outputs.push_enabled == 'true' }}
+          push: ${{ steps.version.outputs.push_enabled == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
@@ -384,23 +383,22 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Create GitHub Release after image publish
-        if: steps.changes.outputs.release_needed == 'true' && steps.mode.outputs.push_enabled == 'true'
+      - name: Create optional GitHub Release record
+        if: steps.version.outputs.build_needed == 'true' && steps.version.outputs.push_enabled == 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: v${{ steps.version.outputs.value }}
-          RELEASE_SHA: ${{ steps.release_commit.outputs.sha || github.sha }}
         shell: bash
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "GitHub Release $RELEASE_TAG 已存在，本次不重复创建。"
+            echo "GitHub Release $RELEASE_TAG 已存在。"
           else
             gh release create "$RELEASE_TAG" \
-              --target "$RELEASE_SHA" \
+              --target "$GITHUB_SHA" \
               --title "FeedDock $RELEASE_TAG" \
               --generate-notes \
               --latest
-            echo "已自动创建 Git 标签和 GitHub Release：$RELEASE_TAG"
           fi
 
       - name: Publish workflow summary
@@ -408,17 +406,17 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### FeedDock 自动发布"
+            echo "### FeedDock 镜像发布"
             echo
-            echo "- 上一个 Release：\`${{ steps.changes.outputs.latest_tag || '无' }}\`"
-            echo "- 检测到重要变化：\`${{ steps.changes.outputs.release_needed || 'false' }}\`"
-            echo "- 构建镜像：\`${{ steps.changes.outputs.build_needed || 'false' }}\`"
-            echo "- 推送镜像：\`${{ steps.mode.outputs.push_enabled || 'false' }}\`"
-            echo "- 目标版本：\`${{ steps.version.outputs.value || '未生成' }}\`"
-            echo "- Digest：\`${{ steps.build.outputs.digest || '未推送或未构建' }}\`"
+            echo "- 重要文件变化：\`${{ steps.changes.outputs.build_requested || 'false' }}\`"
+            echo "- 远端镜像版本：\`${{ steps.remote.outputs.version || '无' }}\`"
+            echo "- 远端镜像 revision：\`${{ steps.remote.outputs.revision || '无' }}\`"
+            echo "- 构建新镜像：\`${{ steps.version.outputs.build_needed || 'false' }}\`"
+            echo "- 新镜像版本：\`${{ steps.version.outputs.value || '未生成' }}\`"
+            echo "- 新镜像 digest：\`${{ steps.build.outputs.digest || '未推送或未构建' }}\`"
             if [[ -n "${{ steps.changes.outputs.matched_files }}" ]]; then
               echo
-              echo "#### 触发发布的文件"
+              echo "#### 触发构建的文件"
               echo '```text'
               printf '%s\n' "${{ steps.changes.outputs.matched_files }}"
               echo '```'

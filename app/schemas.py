@@ -375,6 +375,11 @@ class UpdateStatusOut(BaseModel):
     checked_at: str = ""
     manifest_url: str = ""
     can_apply_update: bool = False
+    current_revision: str = ""
+    latest_revision: str = ""
+    latest_digest: str = ""
+    platform_digest: str = ""
+    image_platform: str = ""
 
 
 class QBittorrentSettingsUpdate(BaseModel):

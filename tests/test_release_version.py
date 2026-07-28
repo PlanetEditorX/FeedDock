@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import shutil
 import sys
 import tempfile
 import unittest
@@ -20,7 +19,7 @@ SPEC.loader.exec_module(release_version)
 
 
 class ReleaseVersionTests(unittest.TestCase):
-    def test_next_patch_uses_latest_release_when_current_is_not_higher(self) -> None:
+    def test_next_patch_uses_latest_remote_image_when_base_is_not_higher(self) -> None:
         self.assertEqual(
             release_version.choose_release_version("1.17.12", "v1.17.12"),
             "1.17.13",
@@ -30,7 +29,7 @@ class ReleaseVersionTests(unittest.TestCase):
             "1.17.13",
         )
 
-    def test_manually_raised_version_is_respected(self) -> None:
+    def test_manually_raised_base_version_is_respected(self) -> None:
         self.assertEqual(
             release_version.choose_release_version("1.18.0", "1.17.12"),
             "1.18.0",
@@ -63,37 +62,17 @@ class ReleaseVersionTests(unittest.TestCase):
             ),
         )
 
-    def test_sync_updates_all_runtime_visible_versions(self) -> None:
+    def test_base_version_validation_only_checks_semver_floor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir)
-            for relative in (
-                "VERSION",
-                "update.json",
-                "Dockerfile",
-                ".env.example",
-                "README.md",
-                "app/config.py",
-            ):
-                source = ROOT / relative
-                destination = target / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, destination)
-            shutil.copytree(ROOT / "app/static", target / "app/static")
+            root = Path(temp_dir)
+            (root / "VERSION").write_text("9.8.7\n", encoding="utf-8")
+            self.assertEqual(release_version.validate_base_version(root), [])
+            (root / "VERSION").write_text("latest\n", encoding="utf-8")
+            self.assertTrue(release_version.validate_base_version(root))
 
-            release_version.sync_version(
-                target,
-                "9.8.7",
-                published_at="2026-07-28T12:34:56Z",
-            )
-
-            self.assertEqual(release_version.validate_version_files(target), [])
-            self.assertEqual((target / "VERSION").read_text(encoding="utf-8"), "9.8.7\n")
-            index = (target / "app/static/index.html").read_text(encoding="utf-8")
-            self.assertIn("/static/app.js?v=9.8.7", index)
-            self.assertNotIn("qbit-cleanup", index)
-
-    def test_current_repository_version_files_are_consistent(self) -> None:
-        self.assertEqual(release_version.validate_version_files(ROOT), [])
+    def test_current_repository_base_version_is_valid(self) -> None:
+        self.assertEqual(release_version.validate_base_version(ROOT), [])
+        self.assertFalse((ROOT / "update.json").exists())
 
 
 if __name__ == "__main__":

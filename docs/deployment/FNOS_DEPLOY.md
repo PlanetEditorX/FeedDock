@@ -86,7 +86,12 @@ openssl rand -hex 32
 FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
 WATCHTOWER_URL=http://watchtower:8080
 WATCHTOWER_TOKEN=替换为生成的Token
+# 公开 GHCR 镜像保持为空；私有包填写 packages:read 凭据
+UPDATE_REGISTRY_USERNAME=
+UPDATE_REGISTRY_TOKEN=
 ```
+
+FeedDock 会直接查询 `FEEDDOCK_IMAGE` 的远端 manifest、revision 和 digest。私有 GHCR 包未配置凭据时只能执行 Watchtower 更新，页面无法读取远端镜像元数据。
 
 启动 FeedDock 与更新服务：
 

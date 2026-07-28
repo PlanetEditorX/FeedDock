@@ -1,8 +1,18 @@
 FROM python:3.13-slim
 
-ARG APP_VERSION=1.17.13
+ARG APP_VERSION=dev
+ARG APP_REVISION=unknown
+ARG APP_CREATED_AT=unknown
+
+LABEL org.opencontainers.image.title="FeedDock" \
+      org.opencontainers.image.description="Self-hosted RSS automation service for qBittorrent" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${APP_REVISION}" \
+      org.opencontainers.image.created="${APP_CREATED_AT}"
 
 ENV APP_VERSION=${APP_VERSION} \
+    APP_REVISION=${APP_REVISION} \
+    APP_CREATED_AT=${APP_CREATED_AT} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1

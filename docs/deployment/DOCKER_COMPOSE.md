@@ -58,7 +58,12 @@ docker compose -f docker-compose.fnos.yml --profile updater up -d
 FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
 WATCHTOWER_URL=http://watchtower:8080
 WATCHTOWER_TOKEN=随机共享Token
+# 公开 GHCR 镜像无需填写；私有包才需要 packages:read 凭据
+UPDATE_REGISTRY_USERNAME=
+UPDATE_REGISTRY_TOKEN=
 ```
+
+FeedDock 的“检查镜像更新”会直接读取 `FEEDDOCK_IMAGE` 标签的 OCI manifest。公开镜像可匿名查询；私有镜像需要填写 Registry 用户名与 Token。
 
 `WATCHTOWER_URL` 是 Docker 内部服务地址。两份 Compose 都没有给 Watchtower 配置 `ports`，外部浏览器无法直接访问该 API。
 

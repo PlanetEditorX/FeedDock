@@ -506,7 +506,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, Any]:
         "poll_interval_minutes": load_rss_poll_config(db).minutes,
         **qbit.public_dict(),
         "timezone": settings.timezone,
-        "update_repository": settings.update_repository,
+        "app_revision": settings.app_revision,
         "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
         "deployed_image": settings.deployed_image,
         "mikan_cache_hours": settings.mikan_cache_hours,

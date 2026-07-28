@@ -1,4 +1,4 @@
-# Changes matching these paths create a new patch release on the default branch.
+# Changes matching these paths build and publish a new container image.
 # Python fnmatch syntax is used. Keep documentation and tests out unless they
 # change the shipped application or deployment contract.
 app/**
@@ -14,7 +14,6 @@ docker-compose.fnos.yml
 .env.example
 .env.fnos.example
 VERSION
-update.json
-scripts/release_version.py
+scripts/**
 .github/release-paths.txt
 .github/workflows/docker-publish.yml

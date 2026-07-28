@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import unittest
 from pathlib import Path
 
@@ -120,33 +118,41 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('QBIT_USERNAME: "${QBIT_USERNAME:-}"', compose)
         self.assertIn('QBIT_PASSWORD: "${QBIT_PASSWORD:-}"', compose)
 
-    def test_runtime_version_is_not_pinned_by_env_file(self) -> None:
+    def test_runtime_version_and_revision_come_from_image_build_metadata(self) -> None:
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
         fnos_env = (ROOT / ".env.fnos.example").read_text(encoding="utf-8")
-        self.assertNotIn("\nAPP_VERSION=", f"\n{env_example}")
-        self.assertNotIn("\nAPP_VERSION=", f"\n{fnos_env}")
-        self.assertIn(f"FEEDDOCK_BUILD_VERSION={(ROOT / 'VERSION').read_text(encoding='utf-8').strip()}", env_example)
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        for env_text in (env_example, fnos_env):
+            self.assertNotIn("\nAPP_VERSION=", f"\n{env_text}")
+            self.assertNotIn("\nAPP_REVISION=", f"\n{env_text}")
+        self.assertNotIn("FEEDDOCK_BUILD_VERSION=", env_example)
+        self.assertIn("ARG APP_VERSION=dev", dockerfile)
+        self.assertIn("ARG APP_REVISION=unknown", dockerfile)
+        self.assertIn("org.opencontainers.image.revision", dockerfile)
 
-    def test_workflow_auto_releases_important_changes_without_manual_tag_push(self) -> None:
+    def test_workflow_versions_from_remote_image_without_manual_tag_push(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
         release_paths = (ROOT / ".github/release-paths.txt").read_text(encoding="utf-8")
 
         self.assertNotIn('tags:\n      - "v*.*.*"', workflow)
-        self.assertIn("Detect unreleased important changes", workflow)
-        self.assertIn("python scripts/release_version.py", workflow)
-        self.assertIn("Commit automatic version update", workflow)
-        self.assertIn("chore(release): bump version to", workflow)
-        self.assertIn('git push origin "HEAD:${GITHUB_REF_NAME}"', workflow)
-        self.assertIn("Create GitHub Release after image publish", workflow)
+        self.assertIn("Detect image-impacting changes", workflow)
+        self.assertIn("Inspect current remote image metadata", workflow)
+        self.assertIn("scripts/inspect_registry_image.py", workflow)
+        self.assertIn("--latest-image", workflow)
+        self.assertNotIn("Commit automatic version update", workflow)
+        self.assertNotIn('git push origin "HEAD:${GITHUB_REF_NAME}"', workflow)
+        self.assertIn("Create optional GitHub Release record", workflow)
+        self.assertIn("continue-on-error: true", workflow)
         self.assertIn("RELEASE_TAG: v${{ steps.version.outputs.value }}", workflow)
         self.assertIn('gh release create "$RELEASE_TAG"', workflow)
-        self.assertIn('--target "$RELEASE_SHA"', workflow)
+        self.assertIn('--target "$GITHUB_SHA"', workflow)
+        self.assertIn("APP_REVISION=${{ github.sha }}", workflow)
         self.assertIn("type=raw,value=${{ steps.version.outputs.value }}", workflow)
-        self.assertIn("--latest", workflow)
         self.assertIn("app/**", release_paths)
         self.assertIn("src/**", release_paths)
         self.assertNotIn("docs/**", release_paths)
         self.assertNotIn("tests/**", release_paths)
+        self.assertNotIn("update.json", release_paths)
         self.assertIn("node --check app/static/modules/notification-settings.js", workflow)
 
 
@@ -226,12 +232,13 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("reloadAll().then(() => loadUpdateStatus", script)
         self.assertTrue(script.rstrip().endswith("reloadAll();"))
 
-    def test_fnos_update_check_uses_static_manifest_and_optional_watchtower(self) -> None:
+    def test_fnos_update_check_uses_registry_image_and_optional_watchtower(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
-        self.assertIn('UPDATE_MANIFEST_URLS:', compose)
+        self.assertNotIn('UPDATE_MANIFEST_URLS:', compose)
+        self.assertNotIn('UPDATE_REPOSITORY:', compose)
+        self.assertNotIn('UPDATE_API_URL:', compose)
         self.assertIn('UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"', compose)
-        self.assertIn('UPDATE_REPOSITORY: "${UPDATE_REPOSITORY:-planeteditorx/feeddock}"', compose)
-        self.assertIn('UPDATE_API_URL: "${UPDATE_API_URL:-https://api.github.com}"', compose)
+        self.assertIn('FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"', compose)
         self.assertIn('WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"', compose)
         self.assertIn('WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"', compose)
         self.assertIn("  watchtower:", compose)
@@ -255,14 +262,16 @@ class DeploymentFileTests(unittest.TestCase):
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
-    def test_static_update_manifest_matches_version_file(self) -> None:
-        payload = json.loads((ROOT / "update.json").read_text(encoding="utf-8"))
-        self.assertEqual(payload["version"], (ROOT / "VERSION").read_text(encoding="utf-8").strip())
-        self.assertIn("release_url", payload)
+    def test_update_check_reads_container_registry_instead_of_release_manifest(self) -> None:
+        self.assertFalse((ROOT / "update.json").exists())
         update_service = (ROOT / "app/update_service.py").read_text(encoding="utf-8")
-        self.assertIn("manifest-cache", update_service)
-        self.assertIn("If-None-Match", update_service)
-        self.assertIn("timedelta(hours=24)", update_service)
+        registry = (ROOT / "app/image_registry.py").read_text(encoding="utf-8")
+        self.assertIn("container-registry", update_service)
+        self.assertIn("RegistryImageClient", update_service)
+        self.assertNotIn("releases/latest", update_service)
+        self.assertNotIn("update.json", update_service)
+        self.assertIn("docker-content-digest", registry)
+        self.assertIn("org.opencontainers.image.revision", registry)
 
 
     def test_dmhy_integration_is_removed(self) -> None:

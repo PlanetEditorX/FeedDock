@@ -308,34 +308,28 @@ FeedDock 在调用 qBittorrent 前，会把任务保存路径从 qBittorrent 路
 
 不会删除视频、字幕或任意其它用户文件。清理范围受媒体根目录限制，并优先依据 FeedDock 刮削清单。即使 RSS 总开关关闭，手动检查订阅也会先执行本地清理，再跳过网络请求。
 
-## 静态版本清单
+## 容器镜像更新检查
 
-版本检查优先读取固定 URL 的 `update.json`：
-
-```json
-{
-  "version": "1.17.9",
-  "release_url": "https://github.com/planeteditorx/feeddock/releases/tag/v1.17.9",
-  "published_at": "2026-07-27T00:00:00Z",
-  "image": "ghcr.io/planeteditorx/feeddock:latest"
-}
-```
-
-发布新版本时只需更新并发布该文件。FeedDock 会：
-
-- 缓存版本清单；
-- 使用 ETag 或 Last-Modified 条件请求；
-- 默认 6 小时内直接使用缓存；
-- 清单不可用时使用旧缓存；
-- 只有没有任何清单缓存时，才调用 GitHub Release API；
-- GitHub API 备用检查每天最多一次。
-
-可配置：
+FeedDock 直接读取 `FEEDDOCK_IMAGE` 指向标签的 OCI manifest 和镜像 config，例如：
 
 ```dotenv
-UPDATE_MANIFEST_URLS=https://cdn.jsdelivr.net/gh/planeteditorx/feeddock@main/update.json,https://raw.githubusercontent.com/planeteditorx/feeddock/main/update.json
+FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
 UPDATE_CHECK_CACHE_HOURS=6
 ```
+
+检查过程会：
+
+- 按 OCI/Docker Registry V2 协议读取远端 manifest；
+- 多架构镜像会选择当前运行平台的 config；
+- 读取 `org.opencontainers.image.version`；
+- 读取 `org.opencontainers.image.revision`；
+- 记录远端 manifest digest 和平台 digest；
+- 使用当前镜像的 `APP_REVISION` 与远端 revision 判断是否存在更新；
+- 非手动检查时使用数据库缓存，默认 6 小时。
+
+该流程不需要 `update.json`，也不调用 GitHub Release API。公开 GHCR 镜像可通过仓库认证挑战获取匿名只读 Token。
+
+首次部署包含该能力的镜像后，后续镜像都会带有完整 revision。旧镜像缺少 `APP_REVISION` 时，会暂时回退到镜像版本比较；完成一次更新后即可使用精确 revision 判断。
 
 ## 在线更新
 
@@ -346,7 +340,7 @@ WATCHTOWER_URL=http://watchtower:8080
 WATCHTOWER_TOKEN=至少32位随机字符串
 ```
 
-未配置 Watchtower 时，FeedDock 仍能检查版本、显示最新版本和打开发布说明，但不会直接修改正在运行的容器。
+未配置 Watchtower 时，FeedDock 仍能检查远端镜像版本、revision 和 digest，但不会直接修改正在运行的容器。
 
 ## 下载路径映射
 

@@ -8,6 +8,9 @@ services:
       - .env
     environment:
       FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"
+      UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"
+      UPDATE_REGISTRY_USERNAME: "${UPDATE_REGISTRY_USERNAME:-}"
+      UPDATE_REGISTRY_TOKEN: "${UPDATE_REGISTRY_TOKEN:-}"
       WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"
       WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"
     ports:

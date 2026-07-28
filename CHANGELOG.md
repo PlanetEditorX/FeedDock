@@ -1,5 +1,22 @@
 # 变更记录
 
+## 未发布
+
+### 容器镜像更新检测
+
+- 在线更新检查改为直接读取 `FEEDDOCK_IMAGE` 对应容器仓库的 OCI manifest 和镜像 config。
+- 使用 `org.opencontainers.image.revision` 比较当前运行镜像与远端标签，不再依赖静态版本清单或 GitHub Release。
+- 页面新增当前构建、远端构建、远端 digest 和镜像平台信息。
+- 删除 `update.json` 及 GitHub Release API 备用检查配置。
+- Docker 构建写入 `APP_VERSION`、`APP_REVISION`、`APP_CREATED_AT` 和对应 OCI 标签。
+
+### 镜像发布流程
+
+- 工作流从远端 `latest` 镜像读取上一版本并自动递增补丁号。
+- 不再自动修改或提交版本文件，避免发布提交循环和分支保护冲突。
+- 远端镜像 revision 已等于当前提交时跳过重复构建。
+- GitHub Release 改为镜像发布后的可选记录，创建失败不影响镜像发布结果。
+
 ## 1.17.13 - 2026-07-28
 
 ### 自动版本发布
