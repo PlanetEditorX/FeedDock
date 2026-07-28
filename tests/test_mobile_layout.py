@@ -59,6 +59,17 @@ class MobileLayoutTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_recent_download_toolbar_preserves_single_line_button_labels(self) -> None:
+        index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn('class="actions recent-items-actions"', index)
+        self.assertIn("#recent-items .panel-head > .recent-items-actions", styles)
+        self.assertIn("#recent-items .recent-items-actions > #openQbit { min-width: 148px; }", styles)
+        self.assertIn("#recent-items .recent-items-actions > #normalizeTorrents { min-width: 132px; }", styles)
+        self.assertIn("#recent-items .recent-items-actions > #clearRecentItems { min-width: 96px; }", styles)
+        self.assertIn("white-space: nowrap;", styles)
+        self.assertIn("flex-wrap: wrap;", styles)
+
     def test_download_table_has_mobile_card_labels(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

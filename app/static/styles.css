@@ -656,3 +656,47 @@ button, .button-link, input, select, textarea, summary { touch-action: manipulat
   .primary-nav { max-height: calc(100dvh - 64px); }
   .modal-card { max-height: 100dvh; }
 }
+
+/* Keep the recent-download controls readable while still allowing the toolbar to wrap. */
+#recent-items .panel-head > .recent-items-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+}
+#recent-items .recent-items-actions > button,
+#recent-items .recent-items-actions > .button-link {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: max-content;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  justify-content: center;
+}
+#recent-items .recent-items-actions > #openQbit { min-width: 148px; }
+#recent-items .recent-items-actions > #normalizeTorrents { min-width: 132px; }
+#recent-items .recent-items-actions > #clearRecentItems { min-width: 96px; }
+#recent-items .recent-items-actions > #statusFilter {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 180px;
+  max-width: 360px;
+}
+
+@media (max-width: 760px) {
+  #recent-items .panel-head > .recent-items-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  #recent-items .recent-items-actions > button,
+  #recent-items .recent-items-actions > .button-link,
+  #recent-items .recent-items-actions > #statusFilter {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+}
+
