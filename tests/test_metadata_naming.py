@@ -49,7 +49,14 @@ class _FakeQbitClient:
     def get(self, path, params=None):
         self.calls.append(("GET", path, params, None))
         if path.endswith("torrents/info"):
-            return _Response(payload=[{"hash": "abc", "added_on": 1, "progress": 1.0, "amount_left": 0, "state": "uploading"}])
+            return _Response(payload=[{
+                "hash": "abc",
+                "added_on": 1,
+                "progress": 1.0,
+                "amount_left": 0,
+                "state": "uploading",
+                "completion_on": 1785198000,
+            }])
         if path.endswith("torrents/files"):
             return _Response(payload=[
                 {"name": "raw/[Group] Show - 01.mkv"},
@@ -217,6 +224,10 @@ class MetadataNamingTests(unittest.TestCase):
             )
         self.assertTrue(normalized.ok)
         self.assertEqual(normalized.state, "completed")
+        self.assertEqual(
+            normalized.completed_at,
+            datetime.fromtimestamp(1785198000, tz=timezone.utc),
+        )
         add_call = next(call for call in calls if call[1].endswith("torrents/add"))
         self.assertEqual(add_call[3]["rename"][1], "Show - S01E01")
         self.assertEqual(add_call[3]["tags"][1], "feeddock-item-1")

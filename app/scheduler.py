@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from .anime_catalog import refresh_due_anime_catalogs
 from .database import SessionLocal
 from .debug_logging import log_exception
+from .download_cleanup import cleanup_completed_torrent_records
 from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import cleanup_internal_qbittorrent_tags, normalize_pending_items
 from .rss_service import dispatch_scheduled_downloads, refresh_all
@@ -54,6 +55,7 @@ class PollScheduler:
             return
         last_rss_refresh: float | None = None
         next_completion_check = 0.0
+        next_completed_record_cleanup = 0.0
         next_tag_cleanup = 0.0
         while not self._stop_event.is_set():
             now = time.monotonic()
@@ -76,6 +78,19 @@ class PollScheduler:
                 except Exception as exc:
                     log_exception("后台下载完成检查异常", exc, stage="scheduler.normalize-pending")
                 next_completion_check = time.monotonic() + 120
+
+            if now >= next_completed_record_cleanup:
+                try:
+                    cleanup_completed_torrent_records()
+                except Exception as exc:
+                    log_exception(
+                        "qBittorrent 完成任务记录清理异常",
+                        exc,
+                        stage="scheduler.cleanup-completed-records",
+                    )
+                # A one-minute user delay remains responsive without adding a
+                # long-running timer per torrent.
+                next_completed_record_cleanup = time.monotonic() + 30
 
             if now >= next_tag_cleanup:
                 try:
@@ -100,7 +115,12 @@ class PollScheduler:
                 log_exception("多站点番剧周历后台刷新异常", exc, stage="scheduler.anime-catalog-refresh")
 
             next_rss_refresh = (last_rss_refresh or time.monotonic()) + poll_interval * 60
-            next_event = min(next_rss_refresh, next_completion_check, next_tag_cleanup)
+            next_event = min(
+                next_rss_refresh,
+                next_completion_check,
+                next_completed_record_cleanup,
+                next_tag_cleanup,
+            )
             wait_seconds = max(1.0, next_event - time.monotonic())
             if self._stop_event.wait(min(60.0, wait_seconds)):
                 return

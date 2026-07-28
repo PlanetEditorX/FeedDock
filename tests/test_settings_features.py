@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
+from app.download_cleanup import cleanup_completed_torrent_records
 from app.downloader import DownloaderResult, InternalTagCleanupResult, QBittorrentClient
 from app.media_sidecar import write_bangumi_ini
 from app.postprocess import cleanup_internal_qbittorrent_tags
@@ -79,6 +80,8 @@ class ApplicationSettingsTests(unittest.TestCase):
             "retry_count": 3,
             "concurrent_limit": 2,
             "seeding_minutes": 90,
+            "cleanup_completed_enabled": False,
+            "cleanup_completed_delay_minutes": 1,
             "rss_enabled": True,
             "rss_timeout_seconds": 20,
             "auto_skip_existing": False,
@@ -164,9 +167,14 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertEqual(saved.media_local_root, "/media")
 
     def test_preferences_persist_and_tracker_cache_is_deduplicated(self):
-        saved = self.save_preferences()
+        saved = self.save_preferences(
+            cleanup_completed_enabled=True,
+            cleanup_completed_delay_minutes=7,
+        )
         self.assertEqual(saved.page.theme_color, "green")
         self.assertEqual(saved.download.retry_count, 3)
+        self.assertTrue(saved.download.cleanup_completed_enabled)
+        self.assertEqual(saved.download.cleanup_completed_delay_minutes, 7)
         trackers = normalize_tracker_text("udp://tracker.test:80/announce\n\ninvalid\nudp://tracker.test:80/announce\nhttps://tracker2.test/announce")
         self.assertEqual(len(trackers), 2)
         save_tracker_cache(self.db, trackers, updated_at=datetime(2026, 7, 27, tzinfo=timezone.utc))
@@ -192,6 +200,100 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertTrue(result.verified)
         self.assertEqual(result.torrent_hash, "demo-hash")
         self.assertEqual(fake.add_files["seedingTimeLimit"][1], "120")
+
+    def test_qbittorrent_record_cleanup_never_deletes_downloaded_files(self):
+        fake = _FakeQbitHttpClient()
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with (
+            patch.object(client, "_client", return_value=fake),
+            patch.object(client, "_login", return_value=DownloaderResult(True, "ok")),
+        ):
+            result = client.delete_torrent_record("demo-hash")
+        self.assertTrue(result.ok, result.message)
+        path, data, _files = fake.posts[-1]
+        self.assertEqual(path, "api/v2/torrents/delete")
+        self.assertEqual(data, {"hashes": "demo-hash", "deleteFiles": "false"})
+
+    def test_completed_qbittorrent_record_is_removed_after_configured_delay(self):
+        now = datetime(2026, 7, 28, 0, 40, tzinfo=timezone.utc)
+        sub = Subscription(name="Demo", rss_url="https://example.test/rss")
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="cleanup-due",
+            title="Demo 01",
+            status="queued",
+            torrent_hash="due-hash",
+            rename_status="completed",
+            scrape_status="completed",
+            completed_at=now - timedelta(minutes=1, seconds=1),
+        )
+        self.db.add(item)
+        self.save_preferences(
+            cleanup_completed_enabled=True,
+            cleanup_completed_delay_minutes=1,
+        )
+        fake = SimpleNamespace(
+            delete_torrent_record=lambda torrent_hash: DownloaderResult(
+                torrent_hash == "due-hash",
+                "qBittorrent 任务记录已删除，下载文件已保留",
+            )
+        )
+
+        result = cleanup_completed_torrent_records(self.db, now=now, client=fake)
+
+        self.assertEqual(result["removed"], 1)
+        self.db.refresh(item)
+        self.assertEqual(
+            item.qbit_record_removed_at.replace(tzinfo=timezone.utc),
+            now,
+        )
+        self.assertEqual(item.torrent_hash, "due-hash")
+        self.assertIn("文件已保留", item.qbit_record_remove_message)
+
+    def test_completed_qbittorrent_record_waits_for_delay_and_postprocessing(self):
+        now = datetime(2026, 7, 28, 0, 40, tzinfo=timezone.utc)
+        sub = Subscription(name="Demo", rss_url="https://example.test/rss")
+        self.db.add(sub)
+        self.db.flush()
+        too_new = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="cleanup-new",
+            title="Demo 01",
+            status="queued",
+            torrent_hash="new-hash",
+            rename_status="completed",
+            scrape_status="completed",
+            completed_at=now - timedelta(seconds=30),
+        )
+        blocked = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="cleanup-blocked",
+            title="Demo 02",
+            status="queued",
+            torrent_hash="blocked-hash",
+            rename_status="completed",
+            scrape_status="error",
+            completed_at=now - timedelta(minutes=5),
+        )
+        self.db.add_all([too_new, blocked])
+        self.save_preferences(
+            cleanup_completed_enabled=True,
+            cleanup_completed_delay_minutes=1,
+        )
+        calls: list[str] = []
+        fake = SimpleNamespace(
+            delete_torrent_record=lambda torrent_hash: calls.append(torrent_hash)
+            or DownloaderResult(True, "ok")
+        )
+
+        result = cleanup_completed_torrent_records(self.db, now=now, client=fake)
+
+        self.assertEqual(result["checked"], 1)
+        self.assertEqual(result["blocked"], 1)
+        self.assertEqual(result["removed"], 0)
+        self.assertEqual(calls, [])
 
     def test_qbittorrent_uploads_raw_torrent_file_and_verifies_it(self):
         fake = _FakeQbitHttpClient([{"hash": "file-hash", "name": "Episode 03", "state": "downloading"}])

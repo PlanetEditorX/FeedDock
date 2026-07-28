@@ -102,10 +102,12 @@
 <label>失败重试次数<input max="10" min="0" name="retry_count" type="number" value="2"/></label>
 <label>同时下载限制<input max="100" min="0" name="concurrent_limit" type="number" value="3"/><small>0 表示不限；达到限制的任务会等待空位。</small></label>
 <label>做种时长（分钟）<input max="525600" min="-1" name="seeding_minutes" type="number" value="-1"/><small>-1 使用 qBittorrent 默认，0 表示完成后停止。</small></label>
+<label class="checkbox-label wide"><input name="cleanup_completed_enabled" type="checkbox"/>下载完成后自动删除 qBittorrent 任务记录<small>只删除 qBittorrent WebUI 中的任务记录，不删除媒体文件；启用后也会处理已超过等待时间的历史完成任务。</small></label>
+<label>完成后等待（分钟）<input max="525600" min="1" name="cleanup_completed_delay_minutes" type="number" value="1"/><small>后台约每 30 秒检查一次；例如填写 1，完成满一分钟后清理。</small></label>
 <label class="checkbox-label"><input name="clear_password" type="checkbox"/>清除已经保存的密码</label>
-<div class="form-actions wide"><button type="submit">保存配置</button><button class="secondary" id="saveAndTestDownloader" type="button">保存并测试连接</button><button class="secondary" id="restoreDownloaderConfig" type="button">恢复 Compose 默认</button></div>
+<div class="form-actions wide"><button type="submit">保存配置</button><button class="secondary" id="saveAndTestDownloader" type="button">保存并测试连接</button><button class="secondary" id="cleanupCompletedTorrents" type="button">检查到期清理</button><button class="secondary" id="restoreDownloaderConfig" type="button">恢复 Compose 默认</button></div>
 </form>
-<p class="hint panel-body">qBittorrent 与 FeedDock 必须访问同一个宿主机媒体目录，但容器内路径可以不同。qBittorrent 保存根目录在这里配置；FeedDock 自己看到的路径在“刮削设置”中配置。</p>
+<p class="hint panel-body" id="qbitCleanupState">自动清理默认关闭。qBittorrent 与 FeedDock 必须访问同一个宿主机媒体目录，但容器内路径可以不同。</p>
 </section>
 <section class="panel hidden" data-app-view="settings-scrape" data-panel-id="metadata-settings">
 <div class="panel-head"><div><h2>刮削设置</h2><p id="metadataConfigState">同步外部元数据，并在下载完成后写入 NFO、海报和背景图。</p></div></div>
@@ -261,6 +263,6 @@
 <div aria-labelledby="mikanDetailTitle" aria-modal="true" class="modal hidden" id="mikanDetailModal" role="dialog"><div class="modal-backdrop" data-close-mikan-modal=""></div><section class="modal-card"><div class="modal-head"><div><span class="provider-badge mikan" id="catalogDetailBadge">Mikan</span><h2 id="mikanDetailTitle">番剧详情</h2></div><button aria-label="关闭" class="icon-button secondary" id="closeMikanModal" type="button">×</button></div><div class="mikan-detail-body" id="mikanDetailBody"></div></section></div>
 <script defer="" src="/static/mikan-subscription-state.js?v=1.17.12"></script>
 <script defer="" src="/static/subscription-sources.js?v=1.17.12"></script>
-<script defer="" src="/static/navigation.js?v=1.17.12"></script><script defer="" src="/static/modules/notification-settings.js?v=1.17.12"></script><script defer="" src="/static/app.js?v=1.17.12"></script>
+<script defer="" src="/static/navigation.js?v=1.17.12"></script><script defer="" src="/static/modules/notification-settings.js?v=1.17.12"></script><script defer="" src="/static/app.js?v=1.17.12-qbit-cleanup"></script>
 </body>
 </html>

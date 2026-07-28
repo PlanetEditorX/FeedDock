@@ -22,6 +22,8 @@ _SETTING_KEYS = {
     "download_retry_count",
     "download_concurrent_limit",
     "download_seeding_minutes",
+    "download_cleanup_completed_enabled",
+    "download_cleanup_completed_delay_minutes",
     "rss_enabled",
     "rss_timeout_seconds",
     "rss_auto_skip_existing",
@@ -50,12 +52,16 @@ class DownloadPolicy:
     retry_count: int = 2
     concurrent_limit: int = 3
     seeding_minutes: int = -1
+    cleanup_completed_enabled: bool = False
+    cleanup_completed_delay_minutes: int = 1
 
-    def public_dict(self) -> dict[str, int]:
+    def public_dict(self) -> dict[str, int | bool]:
         return {
             "retry_count": self.retry_count,
             "concurrent_limit": self.concurrent_limit,
             "seeding_minutes": self.seeding_minutes,
+            "cleanup_completed_enabled": self.cleanup_completed_enabled,
+            "cleanup_completed_delay_minutes": self.cleanup_completed_delay_minutes,
         }
 
 
@@ -195,6 +201,16 @@ def load_application_preferences(db: Session) -> ApplicationPreferences:
         retry_count=_integer(rows.get("download_retry_count"), fallback.download.retry_count, 0, 10),
         concurrent_limit=_integer(rows.get("download_concurrent_limit"), fallback.download.concurrent_limit, 0, 100),
         seeding_minutes=_integer(rows.get("download_seeding_minutes"), fallback.download.seeding_minutes, -1, 525600),
+        cleanup_completed_enabled=_bool(
+            rows.get("download_cleanup_completed_enabled"),
+            fallback.download.cleanup_completed_enabled,
+        ),
+        cleanup_completed_delay_minutes=_integer(
+            rows.get("download_cleanup_completed_delay_minutes"),
+            fallback.download.cleanup_completed_delay_minutes,
+            1,
+            525600,
+        ),
     )
     rss = RssPolicy(
         enabled=_bool(rows.get("rss_enabled"), fallback.rss.enabled),
@@ -232,6 +248,8 @@ def save_application_preferences(
     retry_count: int,
     concurrent_limit: int,
     seeding_minutes: int,
+    cleanup_completed_enabled: bool,
+    cleanup_completed_delay_minutes: int,
     rss_enabled: bool,
     rss_timeout_seconds: int,
     auto_skip_existing: bool,
@@ -251,6 +269,8 @@ def save_application_preferences(
         raise ValueError("同时下载限制必须在 0 到 100 之间，0 表示不限")
     if not -1 <= seeding_minutes <= 525600:
         raise ValueError("做种时长必须是 -1 或 0 到 525600 分钟")
+    if not 1 <= cleanup_completed_delay_minutes <= 525600:
+        raise ValueError("完成任务清理等待时间必须在 1 到 525600 分钟之间")
     if not 5 <= rss_timeout_seconds <= 300:
         raise ValueError("RSS 超时必须在 5 到 300 秒之间")
     tracker_url = _valid_http_url(trackers_update_url, "Trackers 更新地址")
@@ -270,6 +290,8 @@ def save_application_preferences(
         "download_retry_count": str(retry_count),
         "download_concurrent_limit": str(concurrent_limit),
         "download_seeding_minutes": str(seeding_minutes),
+        "download_cleanup_completed_enabled": "1" if cleanup_completed_enabled else "0",
+        "download_cleanup_completed_delay_minutes": str(cleanup_completed_delay_minutes),
         "rss_enabled": "1" if rss_enabled else "0",
         "rss_timeout_seconds": str(rss_timeout_seconds),
         "rss_auto_skip_existing": "1" if auto_skip_existing else "0",

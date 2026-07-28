@@ -316,6 +316,8 @@ class FeedItemOut(BaseModel):
     trackers_status: str
     trackers_message: str
     trackers_applied_at: datetime | None
+    qbit_record_removed_at: datetime | None
+    qbit_record_remove_message: str
     hidden: bool
     created_at: datetime
     updated_at: datetime
@@ -395,6 +397,8 @@ class ApplicationPreferencesUpdate(BaseModel):
     retry_count: int = Field(default=2, ge=0, le=10)
     concurrent_limit: int = Field(default=3, ge=0, le=100)
     seeding_minutes: int = Field(default=-1, ge=-1, le=525600)
+    cleanup_completed_enabled: bool = False
+    cleanup_completed_delay_minutes: int = Field(default=1, ge=1, le=525600)
     rss_enabled: bool = True
     rss_timeout_seconds: int = Field(default=20, ge=5, le=300)
     auto_skip_existing: bool = True

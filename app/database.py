@@ -93,6 +93,8 @@ _FEED_ITEM_COLUMNS: dict[str, str] = {
     "trackers_status": "VARCHAR(32) NOT NULL DEFAULT ''",
     "trackers_message": "TEXT NOT NULL DEFAULT ''",
     "trackers_applied_at": "DATETIME NULL",
+    "qbit_record_removed_at": "DATETIME NULL",
+    "qbit_record_remove_message": "TEXT NOT NULL DEFAULT ''",
     "hidden": "BOOLEAN NOT NULL DEFAULT 0",
 }
 

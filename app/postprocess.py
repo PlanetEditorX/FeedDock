@@ -213,7 +213,14 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             if result.completed:
                 stats["completed"] += 1
                 newly_completed = item.completed_at is None
-                item.completed_at = item.completed_at or datetime.now(timezone.utc)
+                # Prefer qBittorrent's own completion timestamp so a one-minute
+                # cleanup delay is measured from the real finish time rather
+                # than from FeedDock's next polling cycle.
+                item.completed_at = (
+                    item.completed_at
+                    or result.completed_at
+                    or datetime.now(timezone.utc)
+                )
                 if newly_completed:
                     completed_subscription_ids.add(item.subscription_id)
                     subscription = session.get(Subscription, item.subscription_id)

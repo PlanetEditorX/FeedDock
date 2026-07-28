@@ -92,6 +92,18 @@ FeedDock 内部会补全 `/3` 和 `/t/p` 路径，也兼容用户直接填写已
 
 最终行为仍受 qBittorrent 版本、队列和分享率规则影响。
 
+### 完成任务记录自动清理
+
+默认关闭。启用后可设置下载完成后的等待分钟数，最小为 `1` 分钟。FeedDock 优先使用 qBittorrent 返回的实际 `completion_on` 时间计算到期时间，并约每 30 秒检查一次。
+
+清理调用 qBittorrent `torrents/delete` 接口，并固定提交 `deleteFiles=false`：
+
+- 删除 qBittorrent WebUI 中的任务记录；
+- 保留已经下载的媒体文件；
+- 命名、Tracker 或本地刮削仍处于失败/等待状态时暂不清理；
+- 启用后，已经完成且超过等待时间的历史 FeedDock 任务也会进入清理；
+- “检查到期清理”只执行当前已经到期的任务，不会跳过等待时间。
+
 ## RSS 设置
 
 ### RSS 开关

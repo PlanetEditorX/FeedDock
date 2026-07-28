@@ -85,6 +85,12 @@ def effective_setting_values(db: Session) -> dict[str, str]:
         "download_retry_count": str(preferences.download.retry_count),
         "download_concurrent_limit": str(preferences.download.concurrent_limit),
         "download_seeding_minutes": str(preferences.download.seeding_minutes),
+        "download_cleanup_completed_enabled": _bool_text(
+            preferences.download.cleanup_completed_enabled
+        ),
+        "download_cleanup_completed_delay_minutes": str(
+            preferences.download.cleanup_completed_delay_minutes
+        ),
         "rss_enabled": _bool_text(preferences.rss.enabled),
         "rss_timeout_seconds": str(preferences.rss.timeout_seconds),
         "rss_auto_skip_existing": _bool_text(preferences.rss.auto_skip_existing),

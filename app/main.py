@@ -50,6 +50,7 @@ from .metadata_tasks import refresh_all_metadata, scrape_completed_media
 from .models import AdminAccount, AnimePreference, FeedItem, Subscription, SystemLog
 from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
+from .download_cleanup import cleanup_completed_torrent_records
 from .subscription_monitor import reset_monitor_state_for_changes
 from .subscription_sources import (
     classify_subscription_source,
@@ -565,6 +566,8 @@ def update_application_settings(
             retry_count=payload.retry_count,
             concurrent_limit=payload.concurrent_limit,
             seeding_minutes=payload.seeding_minutes,
+            cleanup_completed_enabled=payload.cleanup_completed_enabled,
+            cleanup_completed_delay_minutes=payload.cleanup_completed_delay_minutes,
             rss_enabled=payload.rss_enabled,
             rss_timeout_seconds=payload.rss_timeout_seconds,
             auto_skip_existing=payload.auto_skip_existing,
@@ -1639,6 +1642,16 @@ def scrape_subscription_media(
 @app.post("/api/actions/normalize-torrents", dependencies=[Depends(require_admin)])
 def normalize_torrents_now() -> dict[str, Any]:
     return normalize_pending_items(limit=200)
+
+
+@app.post(
+    "/api/actions/cleanup-completed-torrents",
+    dependencies=[Depends(require_admin)],
+)
+def cleanup_completed_torrents_now() -> dict[str, Any]:
+    """Check and remove qBittorrent records whose configured delay has elapsed."""
+
+    return cleanup_completed_torrent_records(limit=500)
 
 
 @app.post("/api/actions/test-downloader", dependencies=[Depends(require_admin)])

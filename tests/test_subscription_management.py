@@ -122,6 +122,8 @@ class SubscriptionManagementTests(unittest.TestCase):
             retry_count=2,
             concurrent_limit=3,
             seeding_minutes=-1,
+            cleanup_completed_enabled=False,
+            cleanup_completed_delay_minutes=1,
             rss_enabled=True,
             rss_timeout_seconds=20,
             auto_skip_existing=True,

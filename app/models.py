@@ -164,6 +164,10 @@ class FeedItem(Base):
     trackers_status: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     trackers_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     trackers_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    qbit_record_removed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    qbit_record_remove_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

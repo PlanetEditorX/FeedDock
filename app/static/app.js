@@ -434,6 +434,14 @@ async function loadApplicationSettings() {
   downloader.elements.retry_count.value = data.download?.retry_count ?? 2;
   downloader.elements.concurrent_limit.value = data.download?.concurrent_limit ?? 3;
   downloader.elements.seeding_minutes.value = data.download?.seeding_minutes ?? -1;
+  downloader.elements.cleanup_completed_enabled.checked = Boolean(data.download?.cleanup_completed_enabled);
+  downloader.elements.cleanup_completed_delay_minutes.value = data.download?.cleanup_completed_delay_minutes ?? 1;
+  const cleanupState = document.getElementById('qbitCleanupState');
+  if (cleanupState) {
+    cleanupState.textContent = data.download?.cleanup_completed_enabled
+      ? `已启用：下载完成 ${data.download?.cleanup_completed_delay_minutes ?? 1} 分钟后删除 qBittorrent 任务记录，媒体文件保留。`
+      : '自动清理已关闭；不会删除 qBittorrent 任务记录。';
+  }
   const automation = document.getElementById('automationSettingsForm');
   automation.elements.rss_enabled.checked = data.rss?.enabled !== false;
   automation.elements.rss_timeout_seconds.value = data.rss?.timeout_seconds ?? 20;
@@ -457,6 +465,8 @@ function applicationSettingsPayload() {
     retry_count: Number(downloader.elements.retry_count.value),
     concurrent_limit: Number(downloader.elements.concurrent_limit.value),
     seeding_minutes: Number(downloader.elements.seeding_minutes.value),
+    cleanup_completed_enabled: downloader.elements.cleanup_completed_enabled.checked,
+    cleanup_completed_delay_minutes: Number(downloader.elements.cleanup_completed_delay_minutes.value),
     rss_enabled: automation.elements.rss_enabled.checked,
     rss_timeout_seconds: Number(automation.elements.rss_timeout_seconds.value),
     auto_skip_existing: automation.elements.auto_skip_existing.checked,
@@ -1566,6 +1576,23 @@ document.getElementById('saveAndTestDownloader').addEventListener('click', async
     await saveApplicationSettings();
     const result = await api('/api/actions/test-downloader', { method: 'POST' });
     showNotice(result.message, result.ok);
+  } catch (error) { showNotice(error.message, false); }
+});
+
+document.getElementById('cleanupCompletedTorrents').addEventListener('click', async () => {
+  try {
+    await saveDownloaderSettings();
+    await saveApplicationSettings();
+    const result = await api('/api/actions/cleanup-completed-torrents', { method: 'POST' });
+    if (!result.enabled) {
+      showNotice(result.message || '请先启用完成任务自动清理', false);
+      return;
+    }
+    showNotice(
+      `到期检查 ${result.checked || 0}，已删除记录 ${result.removed || 0}，等待后处理 ${result.blocked || 0}，错误 ${result.errors || 0}；媒体文件未删除。`,
+      !(result.errors),
+    );
+    await loadItems();
   } catch (error) { showNotice(error.message, false); }
 });
 

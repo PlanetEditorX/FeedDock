@@ -3,6 +3,7 @@ from __future__ import annotations
 import posixpath
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -39,6 +40,7 @@ class TorrentNormalizeResult:
     torrent_hash: str = ""
     completed: bool = False
     progress: int = 0
+    completed_at: datetime | None = None
 
 
 class QBittorrentClient:
@@ -489,6 +491,38 @@ class QBittorrentClient:
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             return False, 0, f"读取活动下载数失败：{exc}"
 
+    def delete_torrent_record(self, torrent_hash: str) -> DownloaderResult:
+        """Remove a qBittorrent task while explicitly preserving its files.
+
+        qBittorrent's delete endpoint can also remove downloaded data.  FeedDock
+        always sends ``deleteFiles=false`` here so this cleanup only removes the
+        WebUI task/history record from qBittorrent.
+        """
+
+        error = self._configuration_error()
+        if error:
+            return DownloaderResult(False, error)
+        normalized_hash = str(torrent_hash or "").strip()
+        if not normalized_hash:
+            return DownloaderResult(False, "任务哈希为空")
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return login
+                response = client.post(
+                    "api/v2/torrents/delete",
+                    data={"hashes": normalized_hash, "deleteFiles": "false"},
+                )
+                if response.status_code != 200:
+                    return DownloaderResult(
+                        False,
+                        f"删除 qBittorrent 任务记录失败：HTTP {response.status_code}",
+                    )
+                return DownloaderResult(True, "qBittorrent 任务记录已删除，下载文件已保留")
+        except httpx.HTTPError as exc:
+            return DownloaderResult(False, f"删除 qBittorrent 任务记录请求失败：{exc}")
+
     def add_trackers(self, torrent_hash: str, trackers: Iterable[str]) -> DownloaderResult:
         error = self._configuration_error()
         if error:
@@ -566,6 +600,17 @@ class QBittorrentClient:
                     and int(amount_left or 0) == 0
                     and state_name not in {"metaDL", "checkingResumeData", "unknown"}
                 )
+                completed_at: datetime | None = None
+                if completed:
+                    try:
+                        completion_timestamp = int(torrent.get("completion_on") or 0)
+                    except (TypeError, ValueError):
+                        completion_timestamp = 0
+                    if completion_timestamp > 0:
+                        completed_at = datetime.fromtimestamp(
+                            completion_timestamp,
+                            tz=timezone.utc,
+                        )
 
                 files_response = client.get(
                     "api/v2/torrents/files", params={"hash": resolved_hash}
@@ -574,13 +619,25 @@ class QBittorrentClient:
                 files = files_response.json()
                 if not isinstance(files, list) or not files:
                     return TorrentNormalizeResult(
-                        False, "pending", "磁力链接元数据尚未获取", resolved_hash, completed, progress
+                        False,
+                        "pending",
+                        "磁力链接元数据尚未获取",
+                        resolved_hash,
+                        completed,
+                        progress,
+                        completed_at,
                     )
                 videos = [file for file in files if is_video_file(str(file.get("name") or ""))]
                 if not videos:
                     state = "completed_no_video" if completed else "waiting_completion"
                     return TorrentNormalizeResult(
-                        False, state, "暂未发现视频文件", resolved_hash, completed, progress
+                        False,
+                        state,
+                        "暂未发现视频文件",
+                        resolved_hash,
+                        completed,
+                        progress,
+                        completed_at,
                     )
 
                 rename_message = ""
@@ -652,7 +709,13 @@ class QBittorrentClient:
                     if rename_message:
                         message += "；下载已完成"
                     return TorrentNormalizeResult(
-                        True, state, message, resolved_hash, True, 100
+                        True,
+                        state,
+                        message,
+                        resolved_hash,
+                        True,
+                        100,
+                        completed_at,
                     )
 
                 state = "manual_required_waiting" if manual_required else "waiting_completion"
