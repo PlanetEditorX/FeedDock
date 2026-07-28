@@ -189,7 +189,7 @@ Tracker 缓存存入 SQLite。功能不会删除任务已有 Tracker，也不会
 
 ## 1.17.11 RSS 快速更新与免责声明
 
-订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
+订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](../../DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
 
 
 ## 1.17.12 配置备份与恢复

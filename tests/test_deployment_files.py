@@ -13,17 +13,17 @@ class DeploymentFileTests(unittest.TestCase):
     def test_fnos_compose_uses_published_image_and_absolute_data_path(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn("ghcr.io/planeteditorx/feeddock:latest", compose)
-        self.assertIn('"7789:8000"', compose)
+        self.assertIn('"${APP_PORT:-7789}:8000"', compose)
         self.assertIn('"host.docker.internal:host-gateway"', compose)
-        self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', compose)
+        self.assertIn('"${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data"', compose)
         self.assertNotIn("build:", compose)
         self.assertNotIn("./downloads:/downloads", compose)
 
     def test_workflow_validates_both_fnos_volume_mounts(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
-        self.assertIn('"/vol1/1000/应用/feeddock/data:/data"', workflow)
-        self.assertIn('"/vol2/1000/影视:/media"', workflow)
-        self.assertIn("missing_volumes = required_volumes - volumes", workflow)
+        self.assertIn('${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data', workflow)
+        self.assertIn('${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media', workflow)
+        self.assertIn("required_volumes.issubset(volumes)", workflow)
         self.assertNotIn(
             'service["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]',
             workflow,
@@ -53,12 +53,12 @@ class DeploymentFileTests(unittest.TestCase):
 
     def test_fnos_compose_has_source_discovery_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
-        self.assertIn('MIKAN_BASE_URL: "https://mikanime.tv"', compose)
-        self.assertIn('MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"', compose)
-        self.assertIn('MIKAN_CACHE_HOURS: "6"', compose)
-        self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "30"', compose)
-        self.assertIn('MIKAN_THUMBNAIL_WIDTH: "240"', compose)
-        self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "320"', compose)
+        self.assertIn('MIKAN_BASE_URL: "${MIKAN_BASE_URL:-https://mikanime.tv}"', compose)
+        self.assertIn('MIKAN_FALLBACK_URLS: "${MIKAN_FALLBACK_URLS:-https://mikanani.me,https://mikanani.kas.pub}"', compose)
+        self.assertIn('MIKAN_CACHE_HOURS: "${MIKAN_CACHE_HOURS:-6}"', compose)
+        self.assertIn('MIKAN_IMAGE_CACHE_DAYS: "${MIKAN_IMAGE_CACHE_DAYS:-30}"', compose)
+        self.assertIn('MIKAN_THUMBNAIL_WIDTH: "${MIKAN_THUMBNAIL_WIDTH:-240}"', compose)
+        self.assertIn('MIKAN_THUMBNAIL_HEIGHT: "${MIKAN_THUMBNAIL_HEIGHT:-320}"', compose)
         self.assertNotIn('ANIME_CATALOG_BASE_URLS:', compose)
         self.assertNotIn('DMHY_BASE_URL', compose)
 
@@ -114,11 +114,11 @@ class DeploymentFileTests(unittest.TestCase):
 
     def test_fnos_compose_has_first_login_defaults(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
-        self.assertIn('ADMIN_USER: "admin"', compose)
-        self.assertIn('ADMIN_PASSWORD: "password"', compose)
-        self.assertIn('QBIT_URL: ""', compose)
-        self.assertIn('QBIT_USERNAME: ""', compose)
-        self.assertIn('QBIT_PASSWORD: ""', compose)
+        self.assertIn('ADMIN_USER: "${ADMIN_USER:-admin}"', compose)
+        self.assertIn('ADMIN_PASSWORD: "${ADMIN_PASSWORD:-password}"', compose)
+        self.assertIn('QBIT_URL: "${QBIT_URL:-}"', compose)
+        self.assertIn('QBIT_USERNAME: "${QBIT_USERNAME:-}"', compose)
+        self.assertIn('QBIT_PASSWORD: "${QBIT_PASSWORD:-}"', compose)
 
     def test_runtime_version_is_not_pinned_by_env_file(self) -> None:
         env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -220,12 +220,30 @@ class DeploymentFileTests(unittest.TestCase):
     def test_fnos_update_check_uses_static_manifest_and_optional_watchtower(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertIn('UPDATE_MANIFEST_URLS:', compose)
-        self.assertIn('UPDATE_CHECK_CACHE_HOURS: "6"', compose)
-        self.assertIn('UPDATE_REPOSITORY: "planeteditorx/feeddock"', compose)
-        self.assertIn('UPDATE_API_URL: "https://api.github.com"', compose)
-        self.assertIn('WATCHTOWER_URL: ""', compose)
-        self.assertIn('WATCHTOWER_TOKEN: ""', compose)
-        self.assertNotIn("watchtower:", compose)
+        self.assertIn('UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"', compose)
+        self.assertIn('UPDATE_REPOSITORY: "${UPDATE_REPOSITORY:-planeteditorx/feeddock}"', compose)
+        self.assertIn('UPDATE_API_URL: "${UPDATE_API_URL:-https://api.github.com}"', compose)
+        self.assertIn('WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"', compose)
+        self.assertIn('WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"', compose)
+        self.assertIn("  watchtower:", compose)
+        self.assertIn('profiles: ["updater"]', compose)
+        self.assertIn('WATCHTOWER_HTTP_API_UPDATE: "true"', compose)
+        self.assertIn('/var/run/docker.sock:/var/run/docker.sock', compose)
+        self.assertIn('com.centurylinklabs.watchtower.enable: "true"', compose)
+
+    def test_documentation_is_grouped_by_purpose(self) -> None:
+        root_markdown = {path.name for path in ROOT.glob("*.md")}
+        self.assertEqual(root_markdown, {"README.md", "CHANGELOG.md", "DISCLAIMER.md"})
+        for relative in (
+            "docs/README.md",
+            "docs/deployment/FNOS_DEPLOY.md",
+            "docs/deployment/NETWORK_TROUBLESHOOTING.md",
+            "docs/guides/QBITTORRENT.md",
+            "docs/guides/METADATA_AND_MEDIA.md",
+            "docs/reference/DEBUG_LOGGING.md",
+            "docs/archive/README.md",
+        ):
+            self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_static_update_manifest_matches_version_file(self) -> None:
         payload = json.loads((ROOT / "update.json").read_text(encoding="utf-8"))
@@ -329,11 +347,11 @@ class DeploymentFileTests(unittest.TestCase):
 
     def test_fnos_compose_has_optional_metadata_and_media_mount(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
-        self.assertIn('TMDB_READ_ACCESS_TOKEN: ""', compose)
-        self.assertIn('BANGUMI_ACCESS_TOKEN: ""', compose)
-        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
-        self.assertIn('EMBY_URL: ""', compose)
-        self.assertIn('- "/vol2/1000/影视:/media"', compose)
+        self.assertIn('TMDB_READ_ACCESS_TOKEN: "${TMDB_READ_ACCESS_TOKEN:-}"', compose)
+        self.assertIn('BANGUMI_ACCESS_TOKEN: "${BANGUMI_ACCESS_TOKEN:-}"', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: "${MEDIA_LOCAL_ROOT:-/media}"', compose)
+        self.assertIn('EMBY_URL: "${EMBY_URL:-}"', compose)
+        self.assertIn('- "${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media"', compose)
 
     def test_container_defaults_media_local_root_to_media_mount(self) -> None:
         config = (ROOT / "app/config.py").read_text(encoding="utf-8")
@@ -347,10 +365,10 @@ class DeploymentFileTests(unittest.TestCase):
         entrypoint = (ROOT / "docker-entrypoint.py").read_text(encoding="utf-8")
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
-        self.assertIn('PUID: "0"', compose)
-        self.assertIn('PGID: "0"', compose)
-        self.assertIn('DOWNLOAD_PATH: "/media"', compose)
-        self.assertIn('MEDIA_LOCAL_ROOT: "/media"', compose)
+        self.assertIn('PUID: "${PUID:-0}"', compose)
+        self.assertIn('PGID: "${PGID:-0}"', compose)
+        self.assertIn('DOWNLOAD_PATH: "${DOWNLOAD_PATH:-/media}"', compose)
+        self.assertIn('MEDIA_LOCAL_ROOT: "${MEDIA_LOCAL_ROOT:-/media}"', compose)
         self.assertIn('chown -R 0:0 /app /data /media', dockerfile)
         self.assertIn('_number("PUID", 0)', entrypoint)
         self.assertIn('name="media_local_root" placeholder="/media" required', index)

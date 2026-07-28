@@ -1,4 +1,15 @@
-# 通知与订阅交互改动
+# 变更记录
+
+## 未发布
+
+### Docker 在线更新与文档结构
+
+- `docker-compose.yml` 与 `docker-compose.fnos.yml` 统一使用远程镜像并提供可选 `updater` profile。
+- 两个 Compose 均包含 Watchtower HTTP API、共享 Token、容器标签、独立网络和 DNS 配置。
+- 根目录文档按部署、使用指南、参考资料和历史分析重新归档。
+- 合并重复的 qBittorrent、元数据、命名和媒体目录说明。
+
+### 通知与订阅交互
 
 ## Bark 修复
 
@@ -38,3 +49,10 @@ PYTHONPATH=. pytest -q
 ```
 
 结果：`178 passed, 15 subtests passed`。
+
+### qBittorrent 下载完成记录延迟清理
+
+- 支持开关和可配置等待分钟数。
+- 优先依据 qBittorrent `completion_on` 计算到期时间。
+- 删除任务记录时固定 `deleteFiles=false`，保留媒体文件。
+- 后处理等待或失败时暂缓清理。

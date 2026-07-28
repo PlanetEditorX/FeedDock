@@ -1,17 +1,17 @@
 services:
   feeddock:
-    image: ghcr.io/planeteditorx/feeddock:latest
+    image: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"
     container_name: feeddock
     restart: unless-stopped
     pull_policy: always
     ports:
-      - "7789:8000"
+      - "${APP_PORT:-7789}:8000"
     # 飞牛 Docker 的继承 DNS 在部分环境会指向不可达地址。
-    # 这些解析器仅用于容器外部域名；局域网服务仍可通过 IP 或 host.docker.internal 访问。
+    # 修改后必须重新创建容器，普通重启不会更新 /etc/resolv.conf。
     dns:
-      - "223.5.5.5"
-      - "119.29.29.29"
-      - "1.1.1.1"
+      - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
+      - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
+      - "${FEEDDOCK_DNS_TERTIARY:-1.1.1.1}"
     dns_opt:
       - "timeout:2"
       - "attempts:2"
@@ -19,69 +19,94 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      TZ: "Asia/Shanghai"
-      PUID: "0"
-      PGID: "0"
-      UMASK: "002"
-      TAKE_OWNERSHIP: "false"
-      ADMIN_USER: "admin"
-      ADMIN_PASSWORD: "password"
-      SESSION_DAYS: "7"
-      COOKIE_SECURE: "false"
-      FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "false"
-      POLL_INTERVAL_MINUTES: "30"
-      REQUEST_TIMEOUT_SECONDS: "20"
-      # INFO 或 DEBUG；也可以在网页“系统日志”板块切换
-      LOG_LEVEL: "INFO"
+      TZ: "${TZ:-Asia/Shanghai}"
+      PUID: "${PUID:-0}"
+      PGID: "${PGID:-0}"
+      UMASK: "${UMASK:-002}"
+      TAKE_OWNERSHIP: "${TAKE_OWNERSHIP:-false}"
+      ADMIN_USER: "${ADMIN_USER:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-password}"
+      SESSION_DAYS: "${SESSION_DAYS:-7}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      FEEDDOCK_ALLOW_SYSTEM_ACTIONS: "${FEEDDOCK_ALLOW_SYSTEM_ACTIONS:-false}"
+      POLL_INTERVAL_MINUTES: "${POLL_INTERVAL_MINUTES:-30}"
+      REQUEST_TIMEOUT_SECONDS: "${REQUEST_TIMEOUT_SECONDS:-20}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
 
-      # Mikan 番剧目录；若主域名不可用，会依次尝试备用地址
-      MIKAN_BASE_URL: "https://mikanime.tv"
-      MIKAN_FALLBACK_URLS: "https://mikanani.me,https://mikanani.kas.pub"
-      MIKAN_CACHE_HOURS: "6"
-      MIKAN_IMAGE_CACHE_DAYS: "30"
-      MIKAN_THUMBNAIL_WIDTH: "240"
-      MIKAN_THUMBNAIL_HEIGHT: "320"
-      # 非 Mikan 周历优先尝试多个镜像，全部失败时自动复用 Mikan 季度目录
+      MIKAN_BASE_URL: "${MIKAN_BASE_URL:-https://mikanime.tv}"
+      MIKAN_FALLBACK_URLS: "${MIKAN_FALLBACK_URLS:-https://mikanani.me,https://mikanani.kas.pub}"
+      MIKAN_CACHE_HOURS: "${MIKAN_CACHE_HOURS:-6}"
+      MIKAN_IMAGE_CACHE_DAYS: "${MIKAN_IMAGE_CACHE_DAYS:-30}"
+      MIKAN_THUMBNAIL_WIDTH: "${MIKAN_THUMBNAIL_WIDTH:-240}"
+      MIKAN_THUMBNAIL_HEIGHT: "${MIKAN_THUMBNAIL_HEIGHT:-320}"
 
-      # 先不配置 qBittorrent
-      QBIT_URL: ""
-      QBIT_USERNAME: ""
-      QBIT_PASSWORD: ""
-      QBIT_CATEGORY: "rss"
-      DOWNLOAD_PATH: "/media"
+      QBIT_URL: "${QBIT_URL:-}"
+      QBIT_USERNAME: "${QBIT_USERNAME:-}"
+      QBIT_PASSWORD: "${QBIT_PASSWORD:-}"
+      QBIT_CATEGORY: "${QBIT_CATEGORY:-rss}"
+      DOWNLOAD_PATH: "${DOWNLOAD_PATH:-/media}"
 
-      # 元数据与 Emby 规范命名
-      METADATA_LANGUAGE: "zh-CN"
-      METADATA_AUTO_SYNC_HOURS: "24"
-      TMDB_API_BASE: "https://api.themoviedb.org"
-      TMDB_IMAGE_BASE: "https://image.tmdb.org"
-      # 支持 32 位 v3 API Key 或 v4 Read Access Token
-      TMDB_READ_ACCESS_TOKEN: ""
-      BANGUMI_ACCESS_TOKEN: ""
-      ANILIST_API_URL: "https://graphql.anilist.co"
-      MEDIA_LOCAL_ROOT: "/media"
-      EMBY_URL: ""
-      EMBY_API_KEY: ""
-      TMM_URL: ""
-      TMM_API_KEY: ""
+      METADATA_LANGUAGE: "${METADATA_LANGUAGE:-zh-CN}"
+      METADATA_AUTO_SYNC_HOURS: "${METADATA_AUTO_SYNC_HOURS:-24}"
+      TMDB_API_BASE: "${TMDB_API_BASE:-https://api.themoviedb.org}"
+      TMDB_IMAGE_BASE: "${TMDB_IMAGE_BASE:-https://image.tmdb.org}"
+      TMDB_READ_ACCESS_TOKEN: "${TMDB_READ_ACCESS_TOKEN:-}"
+      BANGUMI_ACCESS_TOKEN: "${BANGUMI_ACCESS_TOKEN:-}"
+      ANILIST_API_URL: "${ANILIST_API_URL:-https://graphql.anilist.co}"
+      MEDIA_LOCAL_ROOT: "${MEDIA_LOCAL_ROOT:-/media}"
+      EMBY_URL: "${EMBY_URL:-}"
+      EMBY_API_KEY: "${EMBY_API_KEY:-}"
+      TMM_URL: "${TMM_URL:-}"
+      TMM_API_KEY: "${TMM_API_KEY:-}"
 
-      # 可选统一执行时间和外部请求代理
-      AUTOMATION_TIME: "02:00"
-      AUTOMATION_TIMEZONE: "Asia/Shanghai"
-      OUTBOUND_PROXY_URL: ""
-      OUTBOUND_NO_PROXY: "localhost,127.0.0.1,host.docker.internal"
+      AUTOMATION_TIME: "${AUTOMATION_TIME:-02:00}"
+      AUTOMATION_TIMEZONE: "${AUTOMATION_TIMEZONE:-Asia/Shanghai}"
+      OUTBOUND_PROXY_URL: "${OUTBOUND_PROXY_URL:-}"
+      OUTBOUND_NO_PROXY: "${OUTBOUND_NO_PROXY:-localhost,127.0.0.1,host.docker.internal}"
 
-      # 优先读取静态 update.json；GitHub API 仅在清单不可用且没有缓存时备用。
-      UPDATE_MANIFEST_URLS: "https://cdn.jsdelivr.net/gh/planeteditorx/feeddock@main/update.json,https://raw.githubusercontent.com/planeteditorx/feeddock/main/update.json"
-      UPDATE_CHECK_CACHE_HOURS: "6"
-      UPDATE_REPOSITORY: "planeteditorx/feeddock"
-      UPDATE_API_URL: "https://api.github.com"
-      UPDATE_GITHUB_TOKEN: ""
-
-      # 在线更新需要独立 Watchtower HTTP API；未配置时页面仍可检查版本和查看发布说明。
-      WATCHTOWER_URL: ""
-      WATCHTOWER_TOKEN: ""
+      UPDATE_MANIFEST_URLS: "${UPDATE_MANIFEST_URLS:-https://cdn.jsdelivr.net/gh/planeteditorx/feeddock@main/update.json,https://raw.githubusercontent.com/planeteditorx/feeddock/main/update.json}"
+      UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"
+      UPDATE_REPOSITORY: "${UPDATE_REPOSITORY:-planeteditorx/feeddock}"
+      UPDATE_API_URL: "${UPDATE_API_URL:-https://api.github.com}"
+      UPDATE_GITHUB_TOKEN: "${UPDATE_GITHUB_TOKEN:-}"
+      FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"
+      WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"
+      WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"
 
     volumes:
-      - "/vol1/1000/应用/feeddock/data:/data"
-      - "/vol2/1000/影视:/media"
+      - "${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data"
+      - "${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    networks:
+      - feeddock-net
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: feeddock-updater
+    profiles: ["updater"]
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:-}"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+    dns:
+      - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
+      - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
+      - "${FEEDDOCK_DNS_TERTIARY:-1.1.1.1}"
+    dns_opt:
+      - "timeout:2"
+      - "attempts:2"
+      - "rotate"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    networks:
+      - feeddock-net
+
+networks:
+  feeddock-net:
+    driver: bridge

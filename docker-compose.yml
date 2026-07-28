@@ -1,20 +1,18 @@
 services:
   feeddock:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${FEEDDOCK_BUILD_VERSION:-1.17.12}
-    image: ${FEEDDOCK_IMAGE:-feeddock:local}
+    image: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"
+    pull_policy: always
     container_name: feeddock
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-feeddock:local}"
+      FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"
+      WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"
+      WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"
     ports:
       - "${APP_PORT:-7789}:8000"
-    # Override Docker's inherited resolver. This avoids NAS/container runtimes
-    # that expose an unreachable embedded DNS server to the container.
+    # Override Docker's inherited resolver. Recreate the container after changing DNS.
     dns:
       - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
       - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
@@ -61,10 +59,18 @@ services:
     restart: unless-stopped
     environment:
       WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN}"
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:-}"
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+    dns:
+      - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
+      - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
+      - "${FEEDDOCK_DNS_TERTIARY:-1.1.1.1}"
+    dns_opt:
+      - "timeout:2"
+      - "attempts:2"
+      - "rotate"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     labels:

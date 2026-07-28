@@ -75,7 +75,7 @@ FeedDock 1.13.0 起将首页从“所有配置面板纵向堆叠”改为“订�
 5. **Trackers**：Tracker 更新地址、缓存状态和手动刷新；
 6. **代理设置**：外部请求代理及不使用代理列表；
 7. **登录设置**：查看当前账号、修改密码和退出登录；
-8. **通知**：Telegram、Bark、Webhook 和事件开关；
+8. **通知设置**：Telegram、Bark、Webhook、模板、预览和事件开关；
 9. **系统管理**：退出登录、重启、关闭、检查更新和执行更新。
 
 页面、刮削、下载、RSS 和 Tracker 的详细依赖关系见 [`SETTINGS_REFERENCE.md`](SETTINGS_REFERENCE.md)。
@@ -180,7 +180,7 @@ FEEDDOCK_ALLOW_SYSTEM_ACTIONS=true
 
 ## 1.17.11 RSS 快速更新与免责声明
 
-订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
+订阅卡片提供“更新 RSS”，编辑页面可仅保存 RSS 或保存后立即检查当前订阅。系统设置中展示免责声明，完整文本见 [`DISCLAIMER.md`](../../DISCLAIMER.md)，操作说明见 [`RSS_QUICK_UPDATE.md`](RSS_QUICK_UPDATE.md)。
 
 
 ## 1.17.12 配置备份与 RSS 候选窗口

@@ -18,7 +18,7 @@ on:
       - docker-compose.yml
       - docker-compose.fnos.yml
       - .env.fnos.example
-      - FNOS_DEPLOY.md
+      - docs/deployment/FNOS_DEPLOY.md
       - ".github/workflows/docker-publish.yml"
   pull_request:
     paths:
@@ -32,7 +32,7 @@ on:
       - docker-compose.yml
       - docker-compose.fnos.yml
       - .env.fnos.example
-      - FNOS_DEPLOY.md
+      - docs/deployment/FNOS_DEPLOY.md
       - ".github/workflows/docker-publish.yml"
   workflow_dispatch:
     inputs:
@@ -117,7 +117,7 @@ jobs:
           service = payload["services"]["feeddock"]
 
           image = str(service.get("image", ""))
-          assert image.startswith("ghcr.io/planeteditorx/feeddock:"), f"Unexpected image: {image!r}"
+          assert "ghcr.io/planeteditorx/feeddock:latest" in image, f"Unexpected image: {image!r}"
 
           extra_hosts = set(service.get("extra_hosts") or [])
           required_host = "host.docker.internal:host-gateway"
@@ -125,15 +125,21 @@ jobs:
 
           volumes = set(service.get("volumes") or [])
           required_volumes = {
-              "/vol1/1000/应用/feeddock/data:/data",
-              "/vol2/1000/影视:/media",
+              "${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data",
+              "${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media",
           }
-          missing_volumes = required_volumes - volumes
-          assert not missing_volumes, f"Missing fnOS volume mounts: {sorted(missing_volumes)}"
+          assert required_volumes.issubset(volumes), f"Unexpected fnOS volume mounts: {sorted(volumes)}"
 
           environment = service.get("environment") or {}
-          assert environment.get("DOWNLOAD_PATH") == "/media", "DOWNLOAD_PATH must be /media"
-          assert environment.get("MEDIA_LOCAL_ROOT") == "/media", "MEDIA_LOCAL_ROOT must be /media"
+          assert environment.get("DOWNLOAD_PATH") == "${DOWNLOAD_PATH:-/media}"
+          assert environment.get("MEDIA_LOCAL_ROOT") == "${MEDIA_LOCAL_ROOT:-/media}"
+          assert environment.get("WATCHTOWER_URL") == "${WATCHTOWER_URL:-http://watchtower:8080}"
+
+          watchtower = payload["services"]["watchtower"]
+          assert "updater" in (watchtower.get("profiles") or [])
+          assert "/var/run/docker.sock:/var/run/docker.sock" in (watchtower.get("volumes") or [])
+          assert watchtower["environment"]["WATCHTOWER_HTTP_API_UPDATE"] == "true"
+          assert watchtower["environment"]["WATCHTOWER_HTTP_API_TOKEN"] == "${WATCHTOWER_TOKEN:-}"
           PY
 
   build-and-push:

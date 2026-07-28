@@ -2,6 +2,9 @@
 
 ## 功能范围
 
+- 两份 Compose 的 Watchtower HTTP API、共享 Token、内部网络、容器标签和 Docker Socket 挂载；
+- 根目录文档精简及 `docs/` 分类、重复 qBittorrent 与媒体文档合并；
+
 - 全系统 JSON 备份与恢复：网页有效配置、全部订阅和番剧隐藏偏好；
 - 敏感值默认省略，可选择包含；
 - 合并恢复与替换恢复；
@@ -14,7 +17,7 @@
 ## 自动化测试
 
 ```text
-174 passed, 15 subtests passed
+182 passed, 15 subtests passed
 ```
 
 新增覆盖：
@@ -31,7 +34,7 @@
 
 - Python `compileall`：通过；
 - 6 个 JavaScript 文件 `node --check`：通过；
-- `docker-compose.yml`、`docker-compose.fnos.yml`、GitHub Actions YAML：通过；
+- `docker-compose.yml`、`docker-compose.fnos.yml`、Watchtower 配置和 GitHub Actions YAML：通过；
 - `index.html`：152 个 ID，无重复；
 - `login.html`：3 个 ID，无重复；
 - `change-password.html`：7 个 ID，无重复；
