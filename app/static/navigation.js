@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const DEFAULT_VIEW = 'subscriptions';
   const VIEW_META = Object.freeze({
-    subscriptions: ['订阅', '查看当前订阅、运行状态与最近检查结果。'],
+    subscriptions: ['订阅列表', '查看当前订阅、运行状态与最近检查结果。'],
     'add-catalog': ['番剧周历', '按星期浏览稳定订阅站点，并生成站点专用 RSS。'],
     'add-subscription': ['添加订阅', '添加或编辑站点生成的订阅，以及任意其它 RSS。'],
     downloads: ['下载', '查看最近发现、推送和完成处理的条目。'],
@@ -26,8 +26,21 @@
     return Object.prototype.hasOwnProperty.call(VIEW_META, view) ? view : DEFAULT_VIEW;
   }
 
-  function closeMenus(doc = document) {
-    doc.querySelectorAll('.nav-menu[open]').forEach((menu) => menu.removeAttribute('open'));
+  function setMenuExpanded(menu, expanded) {
+    const summary = menu?.querySelector(':scope > summary');
+    if (summary) summary.setAttribute('aria-expanded', String(Boolean(expanded)));
+  }
+
+  function closeMenus(doc = document, except = null) {
+    doc.querySelectorAll('.nav-menu').forEach((menu) => {
+      if (menu !== except && menu.hasAttribute('open')) menu.removeAttribute('open');
+      setMenuExpanded(menu, menu === except ? menu.open : menu.hasAttribute('open'));
+    });
+  }
+
+  function handleMenuToggle(menu, doc = document) {
+    if (menu.open) closeMenus(doc, menu);
+    setMenuExpanded(menu, menu.open);
   }
 
   function showView(value, options = {}) {
@@ -60,6 +73,10 @@
   }
 
   function initialize(doc = document) {
+    doc.querySelectorAll('.nav-menu').forEach((menu) => {
+      setMenuExpanded(menu, menu.open);
+      menu.addEventListener('toggle', () => handleMenuToggle(menu, doc));
+    });
     doc.querySelectorAll('[data-view-target]').forEach((element) => {
       element.addEventListener('click', (event) => {
         event.preventDefault();
@@ -72,6 +89,9 @@
     doc.addEventListener('click', (event) => {
       if (!event.target.closest('.nav-menu')) closeMenus(doc);
     });
+    doc.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeMenus(doc);
+    });
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', () => showView(window.location.hash, { document: doc, updateHash: false }));
       showView(window.location.hash, { document: doc, updateHash: false, scroll: false });
@@ -80,5 +100,5 @@
     }
   }
 
-  return { DEFAULT_VIEW, VIEW_META, normalizeView, closeMenus, showView, initialize };
+  return { DEFAULT_VIEW, VIEW_META, normalizeView, setMenuExpanded, closeMenus, handleMenuToggle, showView, initialize };
 });

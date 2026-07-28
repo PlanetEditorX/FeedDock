@@ -169,6 +169,16 @@ class SubscriptionManagementTests(unittest.TestCase):
             assert.deepEqual(sorting.sortSubscriptions(rows, 'rating').map((row) => row.id), [3, 2, 1]);
             assert.equal(sorting.normalizeMode('pinyin'), 'name');
             assert.equal(sorting.weekdayIndex('2026-07-26'), 7);
+            assert.equal(sorting.weekdayLabel(1), '星期一');
+            assert.equal(sorting.weekdayLabel(99), '未设置星期');
+            const groups = sorting.groupSubscriptionsByWeekday([
+              ...rows,
+              {{ id: 4, name: '另一个周一', air_date: '2026-08-03' }},
+              {{ id: 5, name: '日期未知', air_date: null }},
+            ]);
+            assert.deepEqual(groups.map((group) => [group.label, group.subscriptions.length]), [
+              ['星期一', 2], ['星期三', 1], ['星期日', 1], ['未设置星期', 1],
+            ]);
             """
         )
         result = subprocess.run(
@@ -185,6 +195,24 @@ class SubscriptionManagementTests(unittest.TestCase):
             assert.equal(navigation.normalizeView('#downloads'), 'downloads');
             assert.equal(navigation.normalizeView('not-a-view'), 'subscriptions');
             assert.equal(navigation.VIEW_META['settings-system'][0], '系统管理');
+            assert.equal(navigation.VIEW_META.subscriptions[0], '订阅列表');
+            const summaries = [{{ attrs: {{}} }}, {{ attrs: {{}} }}];
+            const menus = summaries.map((summary) => ({{
+              open: false,
+              attrs: new Set(),
+              querySelector: () => ({{ setAttribute: (key, value) => {{ summary.attrs[key] = value; }} }}),
+              hasAttribute(key) {{ return key === 'open' && this.attrs.has('open'); }},
+              removeAttribute(key) {{ this.attrs.delete(key); if (key === 'open') this.open = false; }},
+            }}));
+            const doc = {{ querySelectorAll: () => menus }};
+            menus[0].open = true; menus[0].attrs.add('open');
+            navigation.handleMenuToggle(menus[0], doc);
+            menus[1].open = true; menus[1].attrs.add('open');
+            navigation.handleMenuToggle(menus[1], doc);
+            assert.equal(menus[0].open, false);
+            assert.equal(menus[1].open, true);
+            assert.equal(summaries[0].attrs['aria-expanded'], 'false');
+            assert.equal(summaries[1].attrs['aria-expanded'], 'true');
             """
         )
         result = subprocess.run(
@@ -195,7 +223,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         document = _IndexStructureParser()
         document.feed(index)
-        for label in ("添加", "下载", "刷新", "管理", "设置", "日志"):
+        for label in ("添加", "下载", "刷新", "管理", "设置", "日志", "订阅列表"):
             self.assertIn(label, index)
         for element_id in (
             "subscriptionBatchToolbar",
@@ -209,7 +237,14 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertLess(index.index('data-panel-id="subscriptions"'), index.index('data-panel-id="recent-items"'))
         self.assertEqual(len(document.ids), len(set(document.ids)))
         self.assertEqual(document.visible_views, {"subscriptions", "all"})
-        self.assertIn("请先选择需要导出的订阅", (ROOT / "app/static/app.js").read_text(encoding="utf-8"))
+        app_js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("请先选择需要导出的订阅", app_js)
+        self.assertIn("groupSubscriptionsByWeekday", app_js)
+        self.assertIn("subscription-weekday-section", app_js)
+        self.assertIn('name="primary-navigation"', index)
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn(".nav-menu[open] > summary::after", styles)
+        self.assertIn("writing-mode: horizontal-tb", styles)
 
 
 if __name__ == "__main__":

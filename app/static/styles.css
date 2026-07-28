@@ -278,7 +278,8 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .primary-nav { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-left: auto; }
 .nav-direct, .nav-menu > summary { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-weight: 700; cursor: pointer; list-style: none; }
 .nav-menu > summary::-webkit-details-marker { display: none; }
-.nav-menu > summary::after { content: "⌄"; margin-left: 6px; color: var(--muted); font-size: 11px; }
+.nav-menu > summary::after { content: ""; width: 7px; height: 7px; flex: 0 0 7px; margin: -4px 1px 0 3px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transform-origin: center; transition: transform .16s ease, margin .16s ease, border-color .16s ease; }
+.nav-menu[open] > summary::after { margin-top: 4px; transform: rotate(225deg); border-color: var(--text); }
 .nav-direct:hover, .nav-menu > summary:hover, .nav-direct.is-active, .nav-menu:has([data-view-target].is-active) > summary { background: var(--panel-2); filter: none; }
 .nav-refresh { color: var(--accent); }
 .nav-menu { position: relative; }
@@ -297,6 +298,7 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .subscription-list-filters { align-items: center; }
 .subscription-list-filters input { min-width: 190px; }
 .subscription-list-filters select { min-width: 120px; }
+.subscription-list-filters #toggleManagementMode { flex: 0 0 auto; min-width: max-content; white-space: nowrap; writing-mode: horizontal-tb; }
 .batch-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -4px 0 16px; padding: 11px 13px; border: 1px solid var(--accent); border-radius: 9px; background: rgba(88, 166, 255, .08); }
 .batch-toolbar.hidden { display: none; }
 .subscription-card { position: relative; }
@@ -305,6 +307,13 @@ body.subscription-management-mode .subscription-select { display: block; }
 body.subscription-management-mode .subscription-card { padding-left: 46px; }
 .subscription-card.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .subscription-source-label { display: inline-flex; margin-bottom: 10px; color: var(--accent); font-size: 12px; font-weight: 750; }
+#subscriptions.is-weekday-grouped { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.subscription-weekday-section { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.subscription-weekday-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.subscription-weekday-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; min-width: 0; }
+.subscription-weekday-title h3 { margin: 0; font-size: 16px; }
+.subscription-weekday-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; padding: 12px; }
+
 .system-action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .system-action-grid article { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .system-action-grid h3 { margin-bottom: 6px; }

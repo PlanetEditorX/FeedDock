@@ -5,6 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function subscriptionSortingFactory() {
   const MODES = Object.freeze(['weekday', 'updated', 'created', 'name', 'rating']);
   const MODE_ALIASES = Object.freeze({ pinyin: 'name' });
+  const WEEKDAY_LABELS = Object.freeze(['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']);
 
   function normalizeMode(value) {
     const mode = String(value || '').trim().toLowerCase();
@@ -33,6 +34,22 @@
     return day === 0 ? 7 : day;
   }
 
+  function weekdayLabel(index) {
+    return WEEKDAY_LABELS[index - 1] || '未设置星期';
+  }
+
+  function groupSubscriptionsByWeekday(subscriptions) {
+    const groups = new Map();
+    for (const subscription of sortSubscriptions(subscriptions, 'weekday')) {
+      const index = weekdayIndex(subscription?.air_date);
+      if (!groups.has(index)) groups.set(index, []);
+      groups.get(index).push(subscription);
+    }
+    return [...groups.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([index, items]) => ({ index, label: weekdayLabel(index), subscriptions: items }));
+  }
+
   function sortSubscriptions(subscriptions, mode) {
     const normalized = normalizeMode(mode);
     return [...(Array.isArray(subscriptions) ? subscriptions : [])].sort((left, right) => {
@@ -52,5 +69,5 @@
     });
   }
 
-  return { MODES, normalizeMode, weekdayIndex, sortSubscriptions };
+  return { MODES, WEEKDAY_LABELS, normalizeMode, weekdayIndex, weekdayLabel, groupSubscriptionsByWeekday, sortSubscriptions };
 });

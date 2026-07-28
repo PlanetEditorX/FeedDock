@@ -15,7 +15,7 @@
 <img alt="" src="/static/feeddock-icon.png"/><div><h1>FeedDock</h1><p>RSS 自动订阅与下载管理</p></div>
 </div>
 <nav aria-label="主要功能" class="primary-nav">
-<details class="nav-menu"><summary>添加</summary><div class="nav-popover">
+<details class="nav-menu" name="primary-navigation"><summary>添加</summary><div class="nav-popover">
 <span class="nav-group-label">添加订阅</span>
 <button data-subscription-source="mikan" data-view-target="add-catalog" type="button">Mikan</button>
 <button data-subscription-source="anibt" data-view-target="add-catalog" type="button">ANI.BT</button>
@@ -24,14 +24,14 @@
 <hr/><button id="openCollectionImport" type="button">添加合集</button>
 </div></details>
 <button class="nav-direct" data-view-target="downloads" type="button">下载</button>
-<details class="nav-menu"><summary>刷新</summary><div class="nav-popover nav-popover-refresh"><button id="refreshNow" type="button">刷新全部订阅</button><button id="refreshMetadata" type="button">同步订阅元数据</button><button id="scrapeCompletedMedia" type="button">刮削已完成媒体</button></div></details>
-<details class="nav-menu"><summary>管理</summary><div class="nav-popover">
-<button data-view-target="subscriptions" type="button">查看订阅状态</button>
+<details class="nav-menu" name="primary-navigation"><summary>刷新</summary><div class="nav-popover nav-popover-refresh"><button id="refreshNow" type="button">刷新全部订阅</button><button id="refreshMetadata" type="button">同步订阅元数据</button><button id="scrapeCompletedMedia" type="button">刮削已完成媒体</button></div></details>
+<details class="nav-menu" name="primary-navigation"><summary>管理</summary><div class="nav-popover">
+<button data-view-target="subscriptions" type="button">订阅列表</button>
 <button data-management-mode="true" data-view-target="subscriptions" type="button">批量管理</button>
 <hr/><button id="openImportSubscriptions" type="button">导入订阅</button>
 <button id="exportSubscriptions" type="button">导出订阅</button>
 </div></details>
-<details class="nav-menu"><summary>设置</summary><div class="nav-popover nav-popover-wide">
+<details class="nav-menu" name="primary-navigation"><summary>设置</summary><div class="nav-popover nav-popover-wide">
 <button data-view-target="settings-page" type="button">页面设置</button>
 <button data-view-target="settings-scrape" type="button">刮削设置</button>
 <button data-view-target="settings-download" type="button">下载设置</button>

@@ -1247,22 +1247,129 @@ function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   }
 }
 
+function createSubscriptionCard(sub) {
+  const card = document.createElement('article');
+  card.className = `subscription-card metadata-subscription-card${selectedSubscriptionIds.has(sub.id) ? ' is-selected' : ''}`;
+  const selector = document.createElement('input');
+  selector.type = 'checkbox';
+  selector.className = 'subscription-select';
+  selector.checked = selectedSubscriptionIds.has(sub.id);
+  selector.setAttribute('aria-label', `选择 ${sub.name}`);
+  selector.addEventListener('change', () => {
+    if (selector.checked) selectedSubscriptionIds.add(sub.id); else selectedSubscriptionIds.delete(sub.id);
+    card.classList.toggle('is-selected', selector.checked);
+    updateSubscriptionSelectionSummary();
+  });
+  card.append(selector);
+  if (sub.poster_url) {
+    const img = document.createElement('img');
+    img.className = 'subscription-poster';
+    img.src = sub.poster_url;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = `${sub.canonical_title || sub.name} 海报`;
+    card.append(img);
+  }
+  const content = document.createElement('div');
+  content.className = 'subscription-card-content';
+  content.append(text('span', subscriptionSourceLabel(sub), 'subscription-source-label'));
+  const titleRow = document.createElement('div');
+  titleRow.className = 'subscription-title';
+  titleRow.append(text('h3', sub.canonical_title || sub.name));
+  if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
+  titleRow.append(text('span', sub.last_error ? '异常' : sub.enabled ? '启用' : '停用', `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`));
+  content.append(titleRow);
+  if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
+  const details = document.createElement('details');
+  details.className = 'subscription-details';
+  details.append(text('summary', '订阅详情'));
+  const meta = document.createElement('div');
+  meta.className = 'subscription-meta';
+  meta.append(text('span', `原订阅名：${sub.name}`));
+  meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
+  meta.append(text('span', `评分：${Number(sub.metadata_rating || 0) > 0 ? Number(sub.metadata_rating).toFixed(1) : '—'}`));
+  const weekday = subscriptionSorting.weekdayIndex(sub.air_date);
+  meta.append(text('span', `首播：${sub.air_date || '—'}${weekday <= 7 ? ` · ${subscriptionSorting.weekdayLabel(weekday)}` : ''}`));
+  meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
+  meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
+  meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
+  meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 完结自动停用：${sub.auto_disable_when_complete ? '开启' : '关闭'} · 未更新告警：${sub.stale_days ? `${sub.stale_days} 天` : '关闭'}`));
+  meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
+  details.append(meta);
+  details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
+  content.append(details);
+  const controls = document.createElement('div');
+  controls.className = 'card-actions';
+  const edit = text('button', '编辑', 'secondary');
+  edit.addEventListener('click', () => populateSubscriptionForm(sub));
+  const updateRss = text('button', '更新 RSS', 'secondary');
+  updateRss.addEventListener('click', () => {
+    populateSubscriptionForm(sub, { focusRss: true });
+    openRssCandidateSearch(sub).catch((error) => showNotice(error.message, false));
+  });
+  const sync = text('button', '同步元数据', 'secondary');
+  sync.addEventListener('click', async () => {
+    try {
+      await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) });
+      showNotice('元数据和总集数已同步');
+      await reloadAll();
+    } catch (error) { showNotice(error.message, false); }
+  });
+  const scrape = text('button', '刮削', 'secondary');
+  scrape.addEventListener('click', async () => {
+    try {
+      const result = await api(`/api/subscriptions/${sub.id}/scrape`, { method: 'POST' });
+      showNotice(`${result.message}，共 ${result.items} 个已完成条目`);
+      window.setTimeout(reloadAll, 2500);
+    } catch (error) { showNotice(error.message, false); }
+  });
+  const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary');
+  toggle.addEventListener('click', async () => {
+    await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) });
+    showNotice('订阅状态已更新');
+    await reloadAll();
+  });
+  const remove = text('button', '删除', 'danger');
+  remove.addEventListener('click', async () => {
+    if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
+    await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
+    selectedSubscriptionIds.delete(sub.id);
+    if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm();
+    showNotice('订阅已删除');
+    await reloadAll();
+  });
+  controls.append(edit, updateRss, sync, scrape, toggle, remove);
+  content.append(controls);
+  card.append(content);
+  return card;
+}
+
 function renderSubscriptions(data) {
   const container = document.getElementById('subscriptions');
   const visibleSubscriptions = filteredSubscriptions(data);
+  const groupedByWeekday = subscriptionSortMode === 'weekday';
+  container.classList.toggle('is-weekday-grouped', groupedByWeekday);
   container.replaceChildren();
   if (!data.length) {
-    const empty = document.createElement('div'); empty.className = 'empty-state';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
     empty.append(text('h3', '还没有订阅'));
     empty.append(text('p', '从 Mikan、ANI.BT 或 Anime Garden 原站番剧目录选择作品，也可以手动添加其它 RSS。', 'muted'));
-    const actions = document.createElement('div'); actions.className = 'form-actions';
+    const actions = document.createElement('div');
+    actions.className = 'form-actions';
     ['mikan', 'anibt', 'ag'].forEach((sourceId, index) => {
       const source = subscriptionSourceState.getSource(subscriptionSources, sourceId);
       const button = text('button', source.short_label || source.label, index ? 'secondary' : '');
-      button.type = 'button'; button.addEventListener('click', () => openCatalogSource(sourceId, { autoLoad: true }).catch((error) => showNotice(error.message, false))); actions.append(button);
+      button.type = 'button';
+      button.addEventListener('click', () => openCatalogSource(sourceId, { autoLoad: true }).catch((error) => showNotice(error.message, false)));
+      actions.append(button);
     });
-    const other = text('button', '其它 RSS', 'secondary'); other.type = 'button'; other.addEventListener('click', () => openSubscriptionEditor('other').catch((error) => showNotice(error.message, false)));
-    actions.append(other); empty.append(actions); container.append(empty);
+    const other = text('button', '其它 RSS', 'secondary');
+    other.type = 'button';
+    other.addEventListener('click', () => openSubscriptionEditor('other').catch((error) => showNotice(error.message, false)));
+    actions.append(other);
+    empty.append(actions);
+    container.append(empty);
     updateSubscriptionSelectionSummary();
     return;
   }
@@ -1271,52 +1378,25 @@ function renderSubscriptions(data) {
     updateSubscriptionSelectionSummary();
     return;
   }
-  for (const sub of visibleSubscriptions) {
-    const card = document.createElement('article');
-    card.className = `subscription-card metadata-subscription-card${selectedSubscriptionIds.has(sub.id) ? ' is-selected' : ''}`;
-    const selector = document.createElement('input'); selector.type = 'checkbox'; selector.className = 'subscription-select';
-    selector.checked = selectedSubscriptionIds.has(sub.id); selector.setAttribute('aria-label', `选择 ${sub.name}`);
-    selector.addEventListener('change', () => {
-      if (selector.checked) selectedSubscriptionIds.add(sub.id); else selectedSubscriptionIds.delete(sub.id);
-      card.classList.toggle('is-selected', selector.checked); updateSubscriptionSelectionSummary();
-    });
-    card.append(selector);
-    if (sub.poster_url) {
-      const img = document.createElement('img');
-      img.className = 'subscription-poster'; img.src = sub.poster_url; img.loading = 'lazy'; img.decoding = 'async';
-      img.alt = `${sub.canonical_title || sub.name} 海报`; card.append(img);
+  if (groupedByWeekday) {
+    for (const group of subscriptionSorting.groupSubscriptionsByWeekday(visibleSubscriptions)) {
+      const section = document.createElement('section');
+      section.className = 'subscription-weekday-section';
+      const heading = document.createElement('div');
+      heading.className = 'subscription-weekday-head';
+      const title = document.createElement('div');
+      title.className = 'subscription-weekday-title';
+      title.append(text('h3', group.label));
+      title.append(text('span', `${group.subscriptions.length} 个订阅`, 'muted'));
+      heading.append(title);
+      const grid = document.createElement('div');
+      grid.className = 'subscription-weekday-grid';
+      group.subscriptions.forEach((sub) => grid.append(createSubscriptionCard(sub)));
+      section.append(heading, grid);
+      container.append(section);
     }
-    const content = document.createElement('div'); content.className = 'subscription-card-content';
-    content.append(text('span', subscriptionSourceLabel(sub), 'subscription-source-label'));
-    const titleRow = document.createElement('div'); titleRow.className = 'subscription-title';
-    titleRow.append(text('h3', sub.canonical_title || sub.name));
-    if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
-    titleRow.append(text('span', sub.last_error ? '异常' : sub.enabled ? '启用' : '停用', `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`)); content.append(titleRow);
-    if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
-    const details = document.createElement('details'); details.className = 'subscription-details';
-    details.append(text('summary', '订阅详情'));
-    const meta = document.createElement('div'); meta.className = 'subscription-meta';
-    meta.append(text('span', `原订阅名：${sub.name}`));
-    meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
-    meta.append(text('span', `评分：${Number(sub.metadata_rating || 0) > 0 ? Number(sub.metadata_rating).toFixed(1) : '—'}`));
-    const weekday = subscriptionSorting.weekdayIndex(sub.air_date);
-    meta.append(text('span', `首播：${sub.air_date || '—'}${weekday <= 7 ? ` · 星期${'一二三四五六日'[weekday - 1]}` : ''}`));
-    meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
-    meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
-    meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
-    meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 完结自动停用：${sub.auto_disable_when_complete ? '开启' : '关闭'} · 未更新告警：${sub.stale_days ? `${sub.stale_days} 天` : '关闭'}`));
-    meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
-    details.append(meta);
-    details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
-    content.append(details);
-    const controls = document.createElement('div'); controls.className = 'card-actions';
-    const edit = text('button', '编辑', 'secondary'); edit.addEventListener('click', () => populateSubscriptionForm(sub));
-    const updateRss = text('button', '更新 RSS', 'secondary'); updateRss.addEventListener('click', () => { populateSubscriptionForm(sub, { focusRss: true }); openRssCandidateSearch(sub).catch((error) => showNotice(error.message, false)); });
-    const sync = text('button', '同步元数据', 'secondary'); sync.addEventListener('click', async () => { try { await api(`/api/subscriptions/${sub.id}/metadata/sync`, { method: 'POST', body: JSON.stringify({ provider: 'auto' }) }); showNotice('元数据和总集数已同步'); await reloadAll(); } catch (error) { showNotice(error.message, false); } });
-    const scrape = text('button', '刮削', 'secondary'); scrape.addEventListener('click', async () => { try { const result = await api(`/api/subscriptions/${sub.id}/scrape`, { method: 'POST' }); showNotice(`${result.message}，共 ${result.items} 个已完成条目`); window.setTimeout(reloadAll, 2500); } catch (error) { showNotice(error.message, false); } });
-    const toggle = text('button', sub.enabled ? '停用' : '启用', 'secondary'); toggle.addEventListener('click', async () => { await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !sub.enabled }) }); showNotice('订阅状态已更新'); await reloadAll(); });
-    const remove = text('button', '删除', 'danger'); remove.addEventListener('click', async () => { if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return; await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' }); selectedSubscriptionIds.delete(sub.id); if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm(); showNotice('订阅已删除'); await reloadAll(); });
-    controls.append(edit, updateRss, sync, scrape, toggle, remove); content.append(controls); card.append(content); container.append(card);
+  } else {
+    visibleSubscriptions.forEach((sub) => container.append(createSubscriptionCard(sub)));
   }
   updateSubscriptionSelectionSummary();
 }
