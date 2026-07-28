@@ -117,3 +117,9 @@ PYTHONPATH=. pytest -q
 - 优先依据 qBittorrent `completion_on` 计算到期时间。
 - 删除任务记录时固定 `deleteFiles=false`，保留媒体文件。
 - 后处理等待或失败时暂缓清理。
+## Unreleased
+
+- 修复 `app/__init__.py` 与 `app/config.py` 被通知子包同名文件覆盖的问题。
+- 新增模块目录预检，在单元测试导入前直接报告错误路径。
+- 扩展回归测试，同时保护应用包入口和通知包入口。
+
