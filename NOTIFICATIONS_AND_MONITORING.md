@@ -27,13 +27,14 @@ POST https://api.telegram.org/bot{TOKEN}/sendMessage
 
 ### Bark
 
-请求：
+请求地址支持两种配置方式：
 
 ```text
-POST {BARK_SERVER}/push
+http://主机:端口
+http://主机:端口/push
 ```
 
-JSON 字段：`title`、`body`、`device_key` 和固定分组 `FeedDock`。
+发送前会统一归一化为一个 `/push` 端点，不会再出现 `/push/push`。JSON 字段为 `title`、`body`、`device_key` 和固定分组 `FeedDock`。Device Key 放在 JSON 请求体中，不拼接到 URL，避免反向代理访问日志泄露密钥。
 
 ### Webhook
 
@@ -41,7 +42,22 @@ Webhook 接收完整结构化事件，适合接入 Home Assistant、n8n、Node-R
 
 自定义请求头会与 `Content-Type: application/json` 合并。请求头输入必须是 JSON 对象，所有值会转为字符串。
 
-## 3. 密钥行为
+
+## 3. 通知模板与预览
+
+标题和正文可分别配置模板。页面中的“预览模板”调用服务端渲染逻辑，因此预览结果与 Telegram、Bark 和 Webhook 实际收到的内容一致。
+
+可用变量：
+
+- `{event}`、`{event_label}`；
+- `{title}`、`{message}`；
+- `{subscription_name}`、`{subscription_id}`；
+- `{item_title}`、`{item_episode}`、`{item_status}`；
+- `{timestamp}`。
+
+模板只允许上述平面变量，不支持属性访问、数组索引、格式说明或类型转换。默认标题模板为 `{title}`，默认正文模板为 `{message}`，升级后保持原有通知内容不变。
+
+## 4. 密钥行为
 
 - 设置读取接口只返回 `*_configured`；
 - 密钥输入留空表示保留；
@@ -50,7 +66,7 @@ Webhook 接收完整结构化事件，适合接入 Home Assistant、n8n、Node-R
 - Webhook 地址可能包含签名参数，因此也按密钥处理；
 - 设置、测试响应、WARNING/DEBUG 日志都会隐藏 Token、Device Key、Webhook 地址和请求头值。
 
-## 4. 完成状态
+## 5. 完成状态
 
 每个 FeedItem 在推送前写入唯一 qBittorrent Tag：
 
@@ -68,7 +84,7 @@ feeddock-item-{item_id}
 
 未开启规范命名时不会调用重命名 API。
 
-## 5. 完结自动停用
+## 6. 完结自动停用
 
 条件全部满足才执行：
 
@@ -86,7 +102,7 @@ feeddock-item-{item_id}
 
 限制：只统计 FeedDock 数据库中、由 qBittorrent 确认完成的任务。已有但未被 FeedDock 管理的本地文件不会自动计入。修改总集数或重新开启完结自动停用时，会清空旧完结去重状态并按新条件重新判断。
 
-## 6. 长期未更新
+## 7. 长期未更新
 
 `stale_days=0` 时关闭。
 
@@ -100,7 +116,7 @@ feeddock-item-{item_id}
 
 达到阈值后只通知一次。下一次发现新匹配条目会清空 `last_stale_notified_at`。旧数据库没有历史活跃时间时，会先使用最近检查时间作为兼容基准，避免升级后立即产生大批停更告警。
 
-## 7. 遗漏检测
+## 8. 遗漏检测
 
 遗漏集合按预计总集数 `1..total_episodes` 计算。以下状态视为已跟踪：
 
@@ -115,7 +131,7 @@ feeddock-item-{item_id}
 
 签名没有变化时不重复通知。缺失超过 10 集通常意味着番剧仍在播出、总集数刚同步或规则配置不完整，因此只在订阅页面显示，不主动发送。
 
-## 8. 失败处理
+## 9. 失败处理
 
 - 启用通知中心时必须至少选择一个事件并启用一个渠道；
 - 每个渠道独立尝试；
@@ -126,7 +142,7 @@ feeddock-item-{item_id}
 
 后续若增加重试，建议使用独立 `notification_deliveries` 表和后台任务，而不是在 RSS 事务中循环重试。
 
-## 9. Webhook 示例
+## 10. Webhook 示例
 
 ```bash
 curl -X POST https://example.test/hooks/feeddock \
@@ -143,10 +159,10 @@ curl -X POST https://example.test/hooks/feeddock \
   }'
 ```
 
-## 10. 排障
+## 11. 排障
 
 1. 先点击“保存并测试”；
-2. 检查通知中心顶部是否显示可用渠道；
+2. 检查“通知设置”顶部是否显示可用渠道；
 3. 查看系统日志中的 `通知发送部分失败`；
 4. 使用 DEBUG 日志查看异常类型，密钥仍会被隐藏；
 5. 代理环境中确认 Telegram/Bark/Webhook 域名未被错误加入 `NO_PROXY`；

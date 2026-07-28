@@ -455,6 +455,13 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('def evaluate_missing_episodes', monitor)
         self.assertIn('def evaluate_stale_subscription', monitor)
         self.assertIn('def evaluate_subscription_completion', monitor)
+        notification_module = (ROOT / "app/static/modules/notification-settings.js").read_text(encoding="utf-8")
+        self.assertIn('/static/modules/notification-settings.js', index)
+        self.assertIn('/api/notifications/preview', notification_module)
+        self.assertIn('name="title_template"', index)
+        self.assertIn('id="notificationTemplatePreview"', index)
+        self.assertIn('type="button">取消添加</button>', index)
+        self.assertIn("'settings-notification': ['通知设置'", (ROOT / "app/static/navigation.js").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

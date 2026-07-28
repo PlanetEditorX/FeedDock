@@ -440,6 +440,8 @@ class RssPollSettingsUpdate(BaseModel):
 class NotificationSettingsUpdate(BaseModel):
     enabled: bool = False
     events: list[str] = Field(default_factory=list, max_length=20)
+    title_template: str = Field(default="{title}", min_length=1, max_length=1000)
+    body_template: str = Field(default="{message}", min_length=1, max_length=10000)
     telegram_enabled: bool = False
     telegram_bot_token: str | None = Field(default=None, max_length=1000)
     clear_telegram_bot_token: bool = False
@@ -453,6 +455,12 @@ class NotificationSettingsUpdate(BaseModel):
     clear_webhook_url: bool = False
     webhook_headers_json: str | None = Field(default=None, max_length=20000)
     clear_webhook_headers: bool = False
+
+
+class NotificationPreviewRequest(BaseModel):
+    event: str = Field(default="download_started", max_length=100)
+    title_template: str = Field(default="{title}", min_length=1, max_length=1000)
+    body_template: str = Field(default="{message}", min_length=1, max_length=10000)
 
 
 class ProxySettingsUpdate(BaseModel):

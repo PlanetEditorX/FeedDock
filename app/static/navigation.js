@@ -16,7 +16,7 @@
     'settings-trackers': ['Trackers', '配置并更新追加到下载任务的 Tracker 列表。'],
     'settings-proxy': ['代理设置', '配置外部 RSS、元数据与更新请求使用的代理。'],
     'settings-login': ['登录设置', '查看当前账号并修改登录密码。'],
-    'settings-notification': ['通知', '配置通知事件与消息渠道。'],
+    'settings-notification': ['通知设置', '配置通知事件、消息模板与发送渠道。'],
     'settings-system': ['系统管理', '检查更新、退出、重启或关闭 FeedDock。'],
     logs: ['日志', '查看运行日志并调整日志级别。'],
   });

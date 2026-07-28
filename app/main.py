@@ -44,6 +44,7 @@ from .notification_config import (
     save_notification_config,
 )
 from .notifications import send_notification
+from .notification.service import preview_notification
 from .metadata_service import MetadataService
 from .metadata_tasks import refresh_all_metadata, scrape_completed_media
 from .models import AdminAccount, AnimePreference, FeedItem, Subscription, SystemLog
@@ -112,6 +113,7 @@ from .schemas import (
     MetadataSettingsUpdate,
     MetadataSyncRequest,
     MetadataReviewSkipRequest,
+    NotificationPreviewRequest,
     NotificationSettingsUpdate,
     MikanBangumiDetailOut,
     MikanCatalogOut,
@@ -721,6 +723,8 @@ def update_notification_settings(
             db,
             enabled=payload.enabled,
             events=payload.events,
+            title_template=payload.title_template,
+            body_template=payload.body_template,
             telegram_enabled=payload.telegram_enabled,
             telegram_bot_token=payload.telegram_bot_token,
             clear_telegram_bot_token=payload.clear_telegram_bot_token,
@@ -743,6 +747,23 @@ def update_notification_settings(
 @app.delete("/api/notifications/settings", dependencies=[Depends(require_admin)])
 def restore_notification_settings(db: Session = Depends(get_db)) -> dict[str, object]:
     return reset_notification_config(db).public_dict()
+
+
+@app.post("/api/notifications/preview", dependencies=[Depends(require_admin)])
+def preview_notifications(payload: NotificationPreviewRequest) -> dict[str, Any]:
+    try:
+        # Validate through the same template rules used when settings are saved.
+        from .notification.templates import validate_template
+
+        title_template = validate_template(payload.title_template, "通知标题模板", max_length=1000)
+        body_template = validate_template(payload.body_template, "通知正文模板", max_length=10000)
+        return preview_notification(
+            event=payload.event,
+            title_template=title_template,
+            body_template=body_template,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/notifications/test", dependencies=[Depends(require_admin)])

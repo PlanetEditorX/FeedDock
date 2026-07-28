@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from app.database import Base
 from app.notification_config import load_notification_config, save_notification_config
 from app.notifications import send_notification
+from app.notification.channels import normalize_bark_push_url
+from app.notification.service import preview_notification
+from app.notification.templates import validate_template
 
 
 class _Response:
@@ -104,6 +107,71 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn("https://hooks.example.test/notify", combined)
         self.assertNotIn("Bearer secret", combined)
         self.assertIn("***", combined)
+
+
+    def test_bark_accepts_complete_push_endpoint_and_sends_device_key_in_json(self):
+        self.save_config(
+            telegram_enabled=False,
+            bark_server_url="http://192.168.1.10:28080/push",
+            webhook_enabled=False,
+        )
+        calls = []
+
+        def fake_post(url, **kwargs):
+            calls.append((url, kwargs))
+            return _Response()
+
+        with patch("app.notifications.external_post", side_effect=fake_post):
+            result = send_notification(self.db, "download_started", "开始下载", "第 1 集")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(calls[0][0], "http://192.168.1.10:28080/push")
+        self.assertEqual(calls[0][1]["json"]["device_key"], "device-secret")
+        self.assertNotIn("device-secret", calls[0][0])
+
+    def test_bark_endpoint_normalization_supports_root_and_push_url(self):
+        self.assertEqual(normalize_bark_push_url("https://api.day.app"), "https://api.day.app/push")
+        self.assertEqual(normalize_bark_push_url("https://api.day.app/push/"), "https://api.day.app/push")
+        self.assertEqual(
+            normalize_bark_push_url("http://host:8080/base"),
+            "http://host:8080/base/push",
+        )
+
+    def test_notification_templates_are_persisted_rendered_and_previewed(self):
+        config = self.save_config(
+            title_template="[{event_label}] {title}",
+            body_template="{message}\n订阅：{subscription_name}",
+            telegram_enabled=False,
+            bark_enabled=True,
+            webhook_enabled=False,
+        )
+        self.assertEqual(config.public_dict()["title_template"], "[{event_label}] {title}")
+
+        calls = []
+
+        def fake_post(url, **kwargs):
+            calls.append((url, kwargs))
+            return _Response()
+
+        with patch("app.notifications.external_post", side_effect=fake_post):
+            result = send_notification(self.db, "download_started", "开始下载", "第 1 集")
+        self.assertTrue(result.ok)
+        self.assertEqual(calls[0][1]["json"]["title"], "[开始下载] 开始下载")
+        self.assertEqual(calls[0][1]["json"]["body"], "第 1 集\n订阅：")
+
+        preview = preview_notification(
+            event="download_completed",
+            title_template="[{event_label}] {subscription_name}",
+            body_template="{message} / E{item_episode}",
+        )
+        self.assertEqual(preview["title"], "[下载完成] 示例番剧")
+        self.assertIn("E1", preview["body"])
+
+    def test_template_validation_rejects_unknown_or_advanced_fields(self):
+        with self.assertRaisesRegex(ValueError, "未知变量"):
+            validate_template("{unknown}", "通知标题模板", max_length=1000)
+        with self.assertRaisesRegex(ValueError, "不支持格式说明"):
+            validate_template("{item_episode:02}", "通知标题模板", max_length=1000)
 
     def test_enabled_center_requires_at_least_one_event(self):
         with self.assertRaisesRegex(ValueError, "至少需要选择一个通知事件"):

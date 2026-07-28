@@ -115,6 +115,8 @@ def effective_setting_values(db: Session) -> dict[str, str]:
         "proxy_no_proxy": proxy.no_proxy,
         "notification_enabled": _bool_text(notifications.enabled),
         "notification_events": ",".join(sorted(notifications.events)),
+        "notification_title_template": notifications.title_template,
+        "notification_body_template": notifications.body_template,
         "notification_telegram_enabled": _bool_text(notifications.telegram_enabled),
         "notification_telegram_bot_token": notifications.telegram_bot_token,
         "notification_telegram_chat_id": notifications.telegram_chat_id,

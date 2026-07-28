@@ -4,9 +4,13 @@ const subscriptionPreviewBox = document.getElementById('subscriptionPreview');
 const mikanSubscriptionState = window.FeedDockMikanSubscriptionState;
 const navigation = window.FeedDockNavigation;
 const subscriptionSourceState = window.FeedDockSubscriptionSources;
+const notificationSettingsModule = window.FeedDockNotificationSettings;
 if (!mikanSubscriptionState) throw new Error('Mikan subscription state module is unavailable');
 if (!navigation) throw new Error('Navigation module is unavailable');
 if (!subscriptionSourceState) throw new Error('Subscription source module is unavailable');
+if (!notificationSettingsModule) throw new Error('Notification settings module is unavailable');
+const notificationSettings = notificationSettingsModule.create({ api, showNotice });
+// The notification module owns /api/notifications/settings, /api/notifications/preview and /api/notifications/test.
 let subscriptionsById = new Map();
 let currentSubscriptions = [];
 const selectedSubscriptionIds = new Set();
@@ -249,7 +253,8 @@ function resetSubscriptionForm() {
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
   renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, 'other'));
   document.getElementById('saveSubscription').textContent = '保存订阅';
-  document.getElementById('cancelSubscriptionEdit').classList.add('hidden');
+  document.getElementById('cancelSubscriptionEdit').textContent = '取消添加';
+  document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   document.getElementById('searchRssCandidates').classList.add('hidden');
   document.getElementById('saveRssOnly').classList.add('hidden');
   document.getElementById('saveRssAndRefresh').classList.add('hidden');
@@ -1177,6 +1182,7 @@ function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, sub.source_type || 'other'));
   document.getElementById('subscriptionFormTitle').textContent = `编辑订阅：${sub.name}`;
   document.getElementById('saveSubscription').textContent = '保存修改';
+  document.getElementById('cancelSubscriptionEdit').textContent = '取消编辑';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   document.getElementById('searchRssCandidates').classList.remove('hidden');
   document.getElementById('saveRssOnly').classList.remove('hidden');
@@ -1349,7 +1355,7 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadApplicationSettings(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(), loadSubscriptionSources(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), loadNotificationSettings(), loadSystemStatus(),
+      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), notificationSettings.load(), loadSystemStatus(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
@@ -1498,61 +1504,6 @@ async function loadAutomationSettings() {
   form.elements.download_enabled.checked = Boolean(data.download_enabled);
   form.elements.daily_time.value = data.daily_time || '02:00';
   form.elements.timezone.value = data.timezone || 'Asia/Shanghai';
-}
-
-async function loadNotificationSettings() {
-  const data = await api('/api/notifications/settings');
-  const form = document.getElementById('notificationSettingsForm');
-  form.elements.enabled.checked = Boolean(data.enabled);
-  form.elements.telegram_enabled.checked = Boolean(data.telegram_enabled);
-  form.elements.telegram_chat_id.value = data.telegram_chat_id || '';
-  form.elements.bark_enabled.checked = Boolean(data.bark_enabled);
-  form.elements.bark_server_url.value = data.bark_server_url || 'https://api.day.app';
-  form.elements.webhook_enabled.checked = Boolean(data.webhook_enabled);
-  const events = new Set(data.events || []);
-  form.querySelectorAll('input[name="events"]').forEach((input) => { input.checked = events.has(input.value); });
-  const secrets = [
-    ['notification_telegram_bot_token', data.telegram_bot_token_configured, '已保存 Token；留空保留'],
-    ['notification_bark_device_key', data.bark_device_key_configured, '已保存 Key；留空保留'],
-    ['notification_webhook_url', data.webhook_url_configured, '已保存地址；留空保留'],
-    ['notification_webhook_headers_json', data.webhook_headers_configured, '已保存请求头；留空保留'],
-  ];
-  secrets.forEach(([name, configured, placeholder]) => {
-    form.elements[name].value = '';
-    form.elements[name].type = 'password';
-    form.elements[name].placeholder = configured ? placeholder : form.elements[name].placeholder;
-  });
-  ['clear_telegram_bot_token','clear_bark_device_key','clear_webhook_url','clear_webhook_headers'].forEach((name) => { form.elements[name].checked = false; });
-  const channels = (data.configured_channels || []).join('、') || '无';
-  document.getElementById('notificationConfigState').textContent = `${data.enabled ? '已启用' : '未启用'} · 可用渠道：${channels}`;
-}
-
-function notificationPayload() {
-  const form = document.getElementById('notificationSettingsForm');
-  const valueOrNull = (name) => form.elements[name].value.trim() || null;
-  return {
-    enabled: form.elements.enabled.checked,
-    events: [...form.querySelectorAll('input[name="events"]:checked')].map((input) => input.value),
-    telegram_enabled: form.elements.telegram_enabled.checked,
-    telegram_bot_token: valueOrNull('notification_telegram_bot_token'),
-    clear_telegram_bot_token: form.elements.clear_telegram_bot_token.checked,
-    telegram_chat_id: form.elements.telegram_chat_id.value.trim(),
-    bark_enabled: form.elements.bark_enabled.checked,
-    bark_server_url: form.elements.bark_server_url.value.trim() || 'https://api.day.app',
-    bark_device_key: valueOrNull('notification_bark_device_key'),
-    clear_bark_device_key: form.elements.clear_bark_device_key.checked,
-    webhook_enabled: form.elements.webhook_enabled.checked,
-    webhook_url: valueOrNull('notification_webhook_url'),
-    clear_webhook_url: form.elements.clear_webhook_url.checked,
-    webhook_headers_json: valueOrNull('notification_webhook_headers_json'),
-    clear_webhook_headers: form.elements.clear_webhook_headers.checked,
-  };
-}
-
-async function saveNotificationSettings() {
-  const data = await api('/api/notifications/settings', { method: 'PUT', body: JSON.stringify(notificationPayload()) });
-  await loadNotificationSettings();
-  return data;
 }
 
 async function loadProxySettings() {
@@ -2066,9 +2017,6 @@ document.getElementById('automationSettingsForm').addEventListener('submit', asy
 });
 document.getElementById('runAutomationNow').addEventListener('click', async()=>{try{const r=await api('/api/automation/run',{method:'POST'});showNotice(r.message||'统一任务已执行');await reloadAll();}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreAutomation').addEventListener('click', async()=>{const f=document.getElementById('automationSettingsForm');f.elements.rss_enabled.checked=true;f.elements.rss_timeout_seconds.value=20;f.elements.auto_skip_existing.checked=true;f.elements.auto_disable_complete.checked=false;await Promise.all([api('/api/automation/settings',{method:'DELETE'}),api('/api/rss-poll/settings',{method:'DELETE'}),saveApplicationSettings()]);await Promise.all([loadAutomationSettings(),loadApplicationSettings(),loadConfig()]);showNotice('已恢复默认 RSS 设置');});
-document.getElementById('notificationSettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();try{await saveNotificationSettings();showNotice('通知设置已保存');}catch(e){showNotice(e.message,false);}});
-document.getElementById('testNotifications').addEventListener('click',async()=>{try{await saveNotificationSettings();const r=await api('/api/notifications/test',{method:'POST'});showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
-document.getElementById('restoreNotifications').addEventListener('click',async()=>{if(!window.confirm('确认清空网页保存的全部通知渠道和密钥？'))return;await api('/api/notifications/settings',{method:'DELETE'});await loadNotificationSettings();showNotice('通知设置已清空');});
 document.getElementById('proxySettingsForm').addEventListener('submit', async(event)=>{event.preventDefault();const f=event.currentTarget;try{await api('/api/proxy/settings',{method:'PUT',body:JSON.stringify({enabled:f.elements.enabled.checked,proxy_url:f.elements.proxy_url.value.trim()||null,clear_proxy_url:f.elements.clear_proxy_url.checked,no_proxy:f.elements.no_proxy.value.trim()})});await loadProxySettings();showNotice('代理设置已保存');}catch(e){showNotice(e.message,false);}});
 function renderNetworkDiagnostics(data) {
   const container = document.getElementById('networkDiagnostics');
@@ -2210,5 +2158,6 @@ navigation.initialize();
 initializeCollapsiblePanels();
 initializePasswordToggles();
 initializeCatalogSelectors();
+notificationSettings.bind();
 resetSubscriptionForm();
 reloadAll();
