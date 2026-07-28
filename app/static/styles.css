@@ -657,46 +657,80 @@ button, .button-link, input, select, textarea, summary { touch-action: manipulat
   .modal-card { max-height: 100dvh; }
 }
 
-/* Keep the recent-download controls readable while still allowing the toolbar to wrap. */
+/* Keep recent-download controls in dedicated columns so the status filter cannot squeeze buttons. */
 #recent-items .panel-head > .recent-items-actions {
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-wrap: wrap;
+  display: grid;
+  flex: 1 1 700px;
+  grid-template-columns:
+    minmax(160px, max-content)
+    minmax(180px, 360px)
+    minmax(150px, max-content)
+    minmax(110px, max-content);
+  gap: 10px;
+  min-width: 630px;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: start;
 }
 #recent-items .recent-items-actions > button,
 #recent-items .recent-items-actions > .button-link {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: max-content;
+  width: 100%;
+  flex: none;
   white-space: nowrap;
   writing-mode: horizontal-tb;
   justify-content: center;
 }
-#recent-items .recent-items-actions > #openQbit { min-width: 148px; }
-#recent-items .recent-items-actions > #normalizeTorrents { min-width: 132px; }
-#recent-items .recent-items-actions > #clearRecentItems { min-width: 96px; }
+#recent-items .recent-items-actions > #openQbit { min-width: 160px; }
+#recent-items .recent-items-actions > #normalizeTorrents { min-width: 150px; }
+#recent-items .recent-items-actions > #clearRecentItems { min-width: 110px; }
 #recent-items .recent-items-actions > #statusFilter {
-  flex: 1 1 220px;
-  width: auto;
+  width: 100%;
   min-width: 180px;
   max-width: 360px;
 }
 
-@media (max-width: 760px) {
-  #recent-items .panel-head > .recent-items-actions {
-    width: 100%;
+/* Move the whole control group below the heading before its columns become cramped. */
+@media (max-width: 1100px) {
+  #recent-items .panel-head {
+    flex-wrap: wrap;
   }
-}
-
-@media (max-width: 520px) {
-  #recent-items .recent-items-actions > button,
-  #recent-items .recent-items-actions > .button-link,
-  #recent-items .recent-items-actions > #statusFilter {
-    flex: 1 1 100%;
+  #recent-items .panel-head > div:first-child {
+    flex: 1 1 0;
+  }
+  #recent-items .panel-head > .panel-toggle {
+    order: 2;
+  }
+  #recent-items .panel-head > .recent-items-actions {
+    order: 3;
+    flex: 1 0 100%;
     width: 100%;
+    min-width: 0;
+    grid-template-columns:
+      minmax(160px, max-content)
+      minmax(180px, 1fr)
+      minmax(150px, max-content)
+      minmax(110px, max-content);
+  }
+  #recent-items .recent-items-actions > #statusFilter {
     max-width: none;
   }
 }
 
+/* Tablet layouts use two control columns; labels remain on one line inside each button. */
+@media (max-width: 760px) {
+  #recent-items .panel-head > .recent-items-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #recent-items .recent-items-actions > button,
+  #recent-items .recent-items-actions > .button-link,
+  #recent-items .recent-items-actions > #statusFilter {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+@media (max-width: 520px) {
+  #recent-items .panel-head > .recent-items-actions {
+    grid-template-columns: 1fr;
+  }
+}
