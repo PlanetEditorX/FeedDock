@@ -152,7 +152,25 @@ function filteredSubscriptions(subscriptions) {
     if (subscriptionSortMode === 'rating') {
       return (Number(right.metadata_rating || 0) - Number(left.metadata_rating || 0)) || pinyin(left, right);
     }
-    if (subscriptionSortMode === 'pinyin') return pinyin(left, right);
+    if (subscriptionSortMode === 'pinyin') {
+      return pinyin(left, right);
+    }
+    if (subscriptionSortMode === 'weekday') {
+      const getWeekday = (sub) => {
+        if (!sub.air_date) return 8;
+        const d = new Date(sub.air_date);
+        if (isNaN(d.getTime())) return 8;
+        const day = d.getDay();
+        return day === 0 ? 7 : day;
+      };
+      const wl = getWeekday(left);
+      const wr = getWeekday(right);
+      if (wl !== wr) return wl - wr;
+      return pinyin(left, right);
+    }
+    if (subscriptionSortMode === 'created') {
+      return String(right.created_at || '').localeCompare(String(left.created_at || '')) || pinyin(left, right);
+    }
     return String(right.updated_at || '').localeCompare(String(left.updated_at || '')) || pinyin(left, right);
   });
   return filtered;

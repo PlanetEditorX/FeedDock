@@ -14,7 +14,7 @@ from .models import AppSetting, Subscription
 
 
 PAGE_THEME_COLORS = {"blue", "indigo", "green", "orange", "rose"}
-SUBSCRIPTION_SORT_MODES = {"rating", "pinyin", "updated"}
+SUBSCRIPTION_SORT_MODES = {"rating", "pinyin", "updated", "created", "weekday"}
 
 _SETTING_KEYS = {
     "page_theme_color",
