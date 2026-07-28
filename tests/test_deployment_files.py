@@ -503,6 +503,9 @@ class DeploymentFileTests(unittest.TestCase):
         monitor = (ROOT / "app/subscription_monitor.py").read_text(encoding="utf-8")
 
         self.assertIn('id="notificationSettingsForm"', index)
+        self.assertIn('id="openQbit"', index)
+        self.assertIn('target="_blank"', index)
+        self.assertIn("openQbit.href = data.qbit_url", script)
         self.assertIn('name="auto_disable_when_complete"', index)
         self.assertIn('name="stale_days"', index)
         self.assertIn('/api/notifications/settings', script)

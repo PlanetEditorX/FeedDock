@@ -225,14 +225,23 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                     completed_subscription_ids.add(item.subscription_id)
                     subscription = session.get(Subscription, item.subscription_id)
                     if subscription is not None:
+                        completed_filename = (
+                            result.media_filename
+                            or item.desired_name
+                            or item.title
+                        )
                         send_notification(
                             session,
                             "download_completed",
                             f"下载完成：{subscription.name}",
-                            f"第 {item.episode or '?'} 集下载完成。\n{item.title}",
+                            f"第 {item.episode or '?'} 集下载完成。\n{completed_filename}",
                             subscription=subscription,
                             item=item,
-                            details={"progress": 100},
+                            details={
+                                "progress": 100,
+                                "filename": completed_filename,
+                                "cover_url": subscription.poster_url,
+                            },
                         )
                 subscription = session.get(Subscription, item.subscription_id)
                 metadata_config = load_metadata_config(session)

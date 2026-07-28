@@ -41,6 +41,7 @@ class TorrentNormalizeResult:
     completed: bool = False
     progress: int = 0
     completed_at: datetime | None = None
+    media_filename: str = ""
 
 
 class QBittorrentClient:
@@ -642,6 +643,7 @@ class QBittorrentClient:
 
                 rename_message = ""
                 manual_required = False
+                media_filename = posixpath.basename(str(videos[0].get("name") or ""))
                 if desired_name:
                     if len(videos) > 1:
                         manual_required = True
@@ -699,7 +701,8 @@ class QBittorrentClient:
                             if response.status_code == 200:
                                 subtitle_count += 1
 
-                        rename_message = f"已规范化为 {target_stem + extension}"
+                        media_filename = target_stem + extension
+                        rename_message = f"已规范化为 {media_filename}"
                         if subtitle_count:
                             rename_message += f"，并同步重命名 {subtitle_count} 个字幕"
 
@@ -716,13 +719,14 @@ class QBittorrentClient:
                         True,
                         100,
                         completed_at,
+                        media_filename,
                     )
 
                 state = "manual_required_waiting" if manual_required else "waiting_completion"
                 message = rename_message or "任务已建立"
                 message += f"；等待下载完成（{progress}%）"
                 return TorrentNormalizeResult(
-                    True, state, message, resolved_hash, False, progress
+                    True, state, message, resolved_hash, False, progress, None, media_filename
                 )
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             return TorrentNormalizeResult(False, "error", f"重命名或完成状态检查失败：{exc}")

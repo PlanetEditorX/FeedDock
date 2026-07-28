@@ -364,6 +364,18 @@ async function loadDownloaderSettings() {
   const source = data.source === 'web' ? '网页保存' : 'Compose 环境变量';
   const status = data.configured ? '配置完整' : '尚未配置完整';
   document.getElementById('qbitConfigState').textContent = `${status} · 当前来源：${source}`;
+  const openQbit = document.getElementById('openQbit');
+  if (openQbit) {
+    if (data.qbit_url) {
+      openQbit.href = data.qbit_url;
+      openQbit.setAttribute('aria-disabled', 'false');
+      openQbit.title = `在新页面打开 ${data.qbit_url}`;
+    } else {
+      openQbit.removeAttribute('href');
+      openQbit.setAttribute('aria-disabled', 'true');
+      openQbit.title = '请先在下载设置中配置 qBittorrent WebUI 地址';
+    }
+  }
 }
 
 function downloaderPayload() {

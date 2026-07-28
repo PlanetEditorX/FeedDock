@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
+from app.models import FeedItem, Subscription
 from app.notification_config import load_notification_config, save_notification_config
 from app.notifications import send_notification
 from app.notification.channels import normalize_bark_push_url
@@ -128,6 +129,53 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "http://192.168.1.10:28080/push")
         self.assertEqual(calls[0][1]["json"]["device_key"], "device-secret")
         self.assertNotIn("device-secret", calls[0][0])
+
+    def test_bark_download_completion_uses_normalized_filename_and_cover(self):
+        self.save_config(
+            telegram_enabled=False,
+            webhook_enabled=False,
+            title_template="{title}",
+            body_template="{message}",
+        )
+        subscription = Subscription(
+            name="示例番剧",
+            rss_url="https://example.test/rss",
+            poster_url="https://images.example.test/poster.jpg",
+        )
+        item = FeedItem(
+            subscription_id=1,
+            fingerprint="normalized-bark",
+            title="[Group] Example - 01 [1080p].mkv",
+            episode="1",
+            desired_name="示例番剧 - S01E01",
+            status="queued",
+        )
+        calls = []
+
+        def fake_post(url, **kwargs):
+            calls.append((url, kwargs))
+            return _Response()
+
+        with patch("app.notifications.external_post", side_effect=fake_post):
+            result = send_notification(
+                self.db,
+                "download_completed",
+                "下载完成：示例番剧",
+                "第 1 集下载完成。\n示例番剧 - S01E01.mkv",
+                subscription=subscription,
+                item=item,
+                details={
+                    "filename": "示例番剧 - S01E01.mkv",
+                    "cover_url": subscription.poster_url,
+                },
+            )
+
+        self.assertTrue(result.ok)
+        payload = calls[0][1]["json"]
+        self.assertIn("示例番剧 - S01E01.mkv", payload["body"])
+        self.assertNotIn("[Group] Example", payload["body"])
+        self.assertEqual(payload["icon"], subscription.poster_url)
+        self.assertEqual(payload["image"], subscription.poster_url)
 
     def test_bark_endpoint_normalization_supports_root_and_push_url(self):
         self.assertEqual(normalize_bark_push_url("https://api.day.app"), "https://api.day.app/push")

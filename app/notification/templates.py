@@ -34,6 +34,7 @@ TEMPLATE_FIELDS = frozenset({
     "item_title",
     "item_episode",
     "item_status",
+    "item_filename",
     "timestamp",
 })
 
@@ -90,6 +91,7 @@ def template_context(payload: Mapping[str, Any]) -> dict[str, Any]:
         "item_title": str(item.get("title") or ""),
         "item_episode": item.get("episode") or "",
         "item_status": str(item.get("status") or ""),
+        "item_filename": str(item.get("filename") or ""),
         "timestamp": str(payload.get("timestamp") or ""),
     }
 
@@ -142,6 +144,7 @@ def sample_payload(event: str) -> dict[str, Any]:
             "episode": 1,
             "status": "queued",
             "save_path": "/media/示例番剧/Season 01",
+            "filename": "示例番剧 - S01E01.mkv",
         },
         "details": {"preview": True},
         "timestamp": datetime.now(timezone.utc).isoformat(),

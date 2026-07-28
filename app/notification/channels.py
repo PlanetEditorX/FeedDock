@@ -57,18 +57,25 @@ def send_bark(
     device_key: str,
     title: str,
     body: str,
+    icon: str = "",
+    image: str = "",
 ) -> None:
     # Device Key is intentionally sent in the JSON body instead of the URL so
     # reverse-proxy access logs and browser history do not expose the secret.
+    payload = {
+        "title": title,
+        "body": body,
+        "device_key": device_key,
+        "group": "FeedDock",
+    }
+    if icon:
+        payload["icon"] = icon
+    if image:
+        payload["image"] = image
     response = post(
         normalize_bark_push_url(server_url),
         db=db,
-        json={
-            "title": title,
-            "body": body,
-            "device_key": device_key,
-            "group": "FeedDock",
-        },
+        json=payload,
     )
     response.raise_for_status()
 

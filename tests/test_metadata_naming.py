@@ -224,6 +224,7 @@ class MetadataNamingTests(unittest.TestCase):
             )
         self.assertTrue(normalized.ok)
         self.assertEqual(normalized.state, "completed")
+        self.assertEqual(normalized.media_filename, "Show - S01E01.mkv")
         self.assertEqual(
             normalized.completed_at,
             datetime.fromtimestamp(1785198000, tz=timezone.utc),
@@ -338,6 +339,7 @@ class MetadataNamingTests(unittest.TestCase):
                 patch("app.postprocess.QBittorrentClient", return_value=fake_qbit),
                 patch("app.postprocess.MetadataService", return_value=fake_metadata),
                 patch("app.postprocess.load_metadata_config", return_value=metadata_config),
+                patch("app.postprocess.send_notification") as notify,
                 patch(
                     "app.postprocess.scrape_completed_item",
                     return_value=ScrapeResult(True, "已写入媒体库元数据：4 个文件", "/media/show", ["tvshow.nfo"]),
@@ -353,6 +355,12 @@ class MetadataNamingTests(unittest.TestCase):
             self.assertIn("元数据已同步", item.scrape_message)
             self.assertIsNotNone(item.completed_at)
             self.assertIsNotNone(item.scraped_at)
+            notify.assert_called_once()
+            self.assertIn("自动刮削番剧 - S01E01", notify.call_args.args[3])
+            self.assertEqual(
+                notify.call_args.kwargs["details"]["filename"],
+                "自动刮削番剧 - S01E01",
+            )
 
     def test_missing_legacy_qbittorrent_task_becomes_retryable_error(self):
         engine = create_engine("sqlite:///:memory:", future=True)

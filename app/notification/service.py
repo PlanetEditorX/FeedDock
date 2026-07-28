@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -42,10 +43,21 @@ def context_payload(
             "episode": item.episode,
             "status": item.status,
             "save_path": item.save_path,
+            "filename": str((details or {}).get("filename") or item.desired_name or item.title),
         },
         "details": details or {},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _public_image_url(value: object) -> str:
+    """Return a Bark-compatible HTTP(S) artwork URL or an empty string."""
+
+    cleaned = str(value or "").strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return cleaned
 
 
 def safe_channel_error(exc: Exception, *, secrets: list[str]) -> str:
@@ -143,6 +155,10 @@ def send_notification(
             errors.append("Bark 配置不完整")
         else:
             try:
+                cover_url = _public_image_url(
+                    (details or {}).get("cover_url")
+                    or (subscription.poster_url if subscription is not None else "")
+                )
                 send_bark(
                     post=post,
                     db=db,
@@ -150,6 +166,8 @@ def send_notification(
                     device_key=config.bark_device_key,
                     title=rendered_title,
                     body=rendered_body,
+                    icon=cover_url,
+                    image=cover_url,
                 )
                 sent += 1
             except Exception as exc:
