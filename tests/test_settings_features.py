@@ -182,6 +182,16 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertEqual(loaded.trackers.trackers, trackers)
         self.assertEqual(loaded.trackers.updated_at, "2026-07-27T00:00:00+00:00")
 
+    def test_new_sort_options_validation_and_persistence(self):
+        saved = self.save_preferences(subscription_sort="weekday")
+        self.assertEqual(saved.page.subscription_sort, "weekday")
+
+        saved = self.save_preferences(subscription_sort="created")
+        self.assertEqual(saved.page.subscription_sort, "created")
+
+        with self.assertRaises(ValueError):
+            self.save_preferences(subscription_sort="invalid_sort_mode")
+
     def test_auto_skip_requires_rename_for_enabled_subscriptions(self):
         self.db.add(Subscription(name="Demo", rss_url="https://example.test/rss", enabled=True, rename_enabled=False))
         self.db.commit()

@@ -398,7 +398,7 @@ class QBittorrentSettingsUpdate(BaseModel):
 
 class ApplicationPreferencesUpdate(BaseModel):
     theme_color: Literal["blue", "indigo", "green", "orange", "rose"] = "blue"
-    subscription_sort: Literal["rating", "pinyin", "updated"] = "updated"
+    subscription_sort: Literal["rating", "pinyin", "updated", "created", "weekday"] = "updated"
     retry_count: int = Field(default=2, ge=0, le=10)
     concurrent_limit: int = Field(default=3, ge=0, le=100)
     seeding_minutes: int = Field(default=-1, ge=-1, le=525600)
