@@ -1,6 +1,6 @@
 # FeedDock
 
-FeedDock 是面向自托管环境的 RSS 订阅、qBittorrent 下载编排、规范命名、元数据旁车文件和通知管理工具。当前版本：`1.17.12`。
+FeedDock 是面向自托管环境的 RSS 订阅、qBittorrent 下载编排、规范命名、元数据旁车文件和通知管理工具。当前版本：`1.17.13`。
 
 使用前请阅读 [免责声明](DISCLAIMER.md)。完整文档见 [docs/README.md](docs/README.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -69,6 +69,12 @@ docker compose -f docker-compose.fnos.yml --profile updater up -d
 ```
 
 Watchtower 只在 Docker 内部网络监听，Compose 没有把 8080 端口映射到宿主机。FeedDock 容器标签允许更新，qBittorrent 和 Watchtower 自身默认不由该实例更新。
+
+## 自动版本发布
+
+向 `main` 或 `master` 推送后，GitHub Actions 会比较最新 Release 与当前提交。`app/**`、未来的 `src/**`、依赖、Docker/Compose 和发布工作流等重要文件发生累计变化时，自动递增补丁版本、同步版本文件、推送镜像并创建 Release；不需要手动执行 `git tag`。
+
+仅修改 `docs/**` 或 `tests/**` 时不会发布版本。发布路径可在 [`.github/release-paths.txt`](.github/release-paths.txt) 中调整，完整机制见 [自动版本发布说明](docs/deployment/AUTOMATIC_RELEASES.md)。
 
 ## 常用文档
 

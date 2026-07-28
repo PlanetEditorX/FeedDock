@@ -1,66 +1,81 @@
-name: Build and publish Docker image
+name: Build, publish and release Docker image
 
 on:
   push:
     branches:
       - main
       - master
-    tags:
-      - "v*.*.*"
     paths:
       - Dockerfile
       - docker-entrypoint.py
       - requirements.txt
+      - pyproject.toml
+      - poetry.lock
+      - uv.lock
       - VERSION
       - update.json
       - "app/**"
+      - "src/**"
+      - "scripts/**"
       - "tests/**"
       - docker-compose.yml
       - docker-compose.fnos.yml
+      - .env.example
       - .env.fnos.example
-      - docs/deployment/FNOS_DEPLOY.md
+      - ".github/release-paths.txt"
       - ".github/workflows/docker-publish.yml"
   pull_request:
     paths:
       - Dockerfile
       - docker-entrypoint.py
       - requirements.txt
+      - pyproject.toml
+      - poetry.lock
+      - uv.lock
       - VERSION
       - update.json
       - "app/**"
+      - "src/**"
+      - "scripts/**"
       - "tests/**"
       - docker-compose.yml
       - docker-compose.fnos.yml
+      - .env.example
       - .env.fnos.example
-      - docs/deployment/FNOS_DEPLOY.md
+      - ".github/release-paths.txt"
       - ".github/workflows/docker-publish.yml"
   workflow_dispatch:
     inputs:
       push_image:
-        description: "构建完成后推送镜像到 GHCR"
+        description: "构建完成后推送镜像并创建 Release"
+        required: true
+        default: true
+        type: boolean
+      force_release:
+        description: "即使没有检测到重要文件变化，也自动递增补丁版本"
         required: true
         default: true
         type: boolean
       image_tag:
-        description: "额外镜像标签，例如 dev、nightly 或 1.0.0"
+        description: "额外镜像标签，例如 dev 或 nightly"
         required: true
         default: "manual"
         type: string
 
 concurrency:
-  group: docker-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
+  packages: read
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
   test:
-    name: Run unit tests
+    name: Run validation and unit tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -68,6 +83,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -85,97 +102,65 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Validate static update manifest
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          version = Path("VERSION").read_text(encoding="utf-8").strip()
-          manifest = json.loads(Path("update.json").read_text(encoding="utf-8"))
-          assert manifest["version"] == version
-          assert f"/v{version}" in manifest["release_url"]
-          PY
+      - name: Validate synchronized version files
+        run: python scripts/release_version.py check
 
       - name: Validate frontend JavaScript syntax
         run: |
           node --check app/static/mikan-subscription-state.js
           node --check app/static/subscription-sources.js
           node --check app/static/navigation.js
+          node --check app/static/modules/notification-settings.js
           node --check app/static/app.js
           node --check app/static/login.js
           node --check app/static/change-password.js
 
-      - name: Validate fnOS Compose YAML
+      - name: Validate Compose YAML
         run: |
           python -m pip install PyYAML==6.0.3
           python - <<'PY'
           from pathlib import Path
           import yaml
 
-          payload = yaml.safe_load(Path("docker-compose.fnos.yml").read_text(encoding="utf-8"))
-          service = payload["services"]["feeddock"]
+          for compose_path in (Path("docker-compose.yml"), Path("docker-compose.fnos.yml")):
+              payload = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+              feeddock = payload["services"]["feeddock"]
+              watchtower = payload["services"]["watchtower"]
 
-          image = str(service.get("image", ""))
-          assert "ghcr.io/planeteditorx/feeddock:latest" in image, f"Unexpected image: {image!r}"
+              assert "ghcr.io/planeteditorx/feeddock:latest" in str(feeddock.get("image", ""))
+              assert feeddock["environment"]["WATCHTOWER_URL"] == "${WATCHTOWER_URL:-http://watchtower:8080}"
+              assert "updater" in (watchtower.get("profiles") or [])
+              assert "/var/run/docker.sock:/var/run/docker.sock" in (watchtower.get("volumes") or [])
+              assert watchtower["environment"]["WATCHTOWER_HTTP_API_UPDATE"] == "true"
+              assert watchtower["environment"]["WATCHTOWER_HTTP_API_TOKEN"] == "${WATCHTOWER_TOKEN:-}"
 
-          extra_hosts = set(service.get("extra_hosts") or [])
-          required_host = "host.docker.internal:host-gateway"
-          assert required_host in extra_hosts, f"Missing extra_hosts entry: {required_host}"
-
-          volumes = set(service.get("volumes") or [])
+          fnos = yaml.safe_load(Path("docker-compose.fnos.yml").read_text(encoding="utf-8"))
+          service = fnos["services"]["feeddock"]
+          assert "host.docker.internal:host-gateway" in set(service.get("extra_hosts") or [])
           required_volumes = {
               "${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data",
               "${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media",
           }
-          assert required_volumes.issubset(volumes), f"Unexpected fnOS volume mounts: {sorted(volumes)}"
-
-          environment = service.get("environment") or {}
-          assert environment.get("DOWNLOAD_PATH") == "${DOWNLOAD_PATH:-/media}"
-          assert environment.get("MEDIA_LOCAL_ROOT") == "${MEDIA_LOCAL_ROOT:-/media}"
-          assert environment.get("WATCHTOWER_URL") == "${WATCHTOWER_URL:-http://watchtower:8080}"
-
-          watchtower = payload["services"]["watchtower"]
-          assert "updater" in (watchtower.get("profiles") or [])
-          assert "/var/run/docker.sock:/var/run/docker.sock" in (watchtower.get("volumes") or [])
-          assert watchtower["environment"]["WATCHTOWER_HTTP_API_UPDATE"] == "true"
-          assert watchtower["environment"]["WATCHTOWER_HTTP_API_TOKEN"] == "${WATCHTOWER_TOKEN:-}"
+          assert required_volumes.issubset(set(service.get("volumes") or []))
           PY
 
-  build-and-push:
-    name: Build and publish
+  pull-request-build:
+    name: Build pull request image
     needs: test
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: write
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Resolve application version
-        id: app_version
+        id: version
         shell: bash
-        run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          if [[ -z "$version" ]]; then
-            echo "VERSION 文件不能为空" >&2
-            exit 1
-          fi
-          if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)([-+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "VERSION 必须是语义化版本，例如 1.3.2" >&2
-            exit 1
-          fi
-          major="${BASH_REMATCH[1]}"
-          major_minor="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
-            echo "Git 标签 ${GITHUB_REF_NAME} 与 VERSION=${version} 不一致" >&2
-            exit 1
-          fi
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-          echo "major=$major" >> "$GITHUB_OUTPUT"
-          echo "major_minor=$major_minor" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
 
       - name: Resolve lowercase image name
         id: image
@@ -188,8 +173,172 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=pr
+            type=sha,prefix=sha-
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  publish:
+    name: Auto version, publish and release
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository with history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve publish mode
+        id: mode
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "push_enabled=${{ inputs.push_image }}" >> "$GITHUB_OUTPUT"
+            echo "force_release=${{ inputs.force_release }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "push_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "force_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect unreleased important changes
+        id: changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          git fetch --force --tags origin
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            git fetch origin "${GITHUB_REF_NAME}"
+            remote_sha="$(git rev-parse "origin/${GITHUB_REF_NAME}")"
+            if [[ "$remote_sha" != "$GITHUB_SHA" ]]; then
+              echo "当前工作流对应的提交已不是分支最新提交，由后续工作流处理累计变化。"
+              echo "release_needed=false" >> "$GITHUB_OUTPUT"
+              echo "build_needed=false" >> "$GITHUB_OUTPUT"
+              echo "latest_tag=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          latest_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+          detect_args=(--root "$GITHUB_WORKSPACE" detect --head "$GITHUB_SHA" --paths-file .github/release-paths.txt)
+          if [[ -n "$latest_tag" ]] && git rev-parse --verify "${latest_tag}^{commit}" >/dev/null 2>&1; then
+            detect_args+=(--base "$latest_tag")
+          fi
+
+          release_needed="$(python scripts/release_version.py "${detect_args[@]}" --format boolean)"
+          matched_files="$(python scripts/release_version.py "${detect_args[@]}" --format lines)"
+
+          if [[ "${{ steps.mode.outputs.push_enabled }}" != "true" ]]; then
+            release_needed=false
+          elif [[ "${{ steps.mode.outputs.force_release }}" == "true" ]]; then
+            release_needed=true
+          fi
+
+          build_needed="$release_needed"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            build_needed=true
+          fi
+
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "release_needed=$release_needed" >> "$GITHUB_OUTPUT"
+          echo "build_needed=$build_needed" >> "$GITHUB_OUTPUT"
+          {
+            echo "matched_files<<EOF"
+            printf '%s\n' "$matched_files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Latest release: ${latest_tag:-none}"
+          echo "Release needed: $release_needed"
+          if [[ -n "$matched_files" ]]; then
+            echo "Release-impacting files:"
+            printf '%s\n' "$matched_files"
+          fi
+
+      - name: Resolve and synchronize release version
+        id: version
+        if: steps.changes.outputs.build_needed == 'true'
+        shell: bash
+        run: |
+          current="$(tr -d '[:space:]' < VERSION)"
+          latest="${{ steps.changes.outputs.latest_tag }}"
+          latest="${latest#v}"
+
+          if [[ "${{ steps.changes.outputs.release_needed }}" == "true" ]]; then
+            value="$(python scripts/release_version.py next --current "$current" --latest "$latest")"
+            published_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            python scripts/release_version.py sync --version "$value" --published-at "$published_at"
+            python scripts/release_version.py check
+          else
+            value="$current"
+          fi
+
+          IFS=. read -r major minor patch <<< "$value"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$major.$minor" >> "$GITHUB_OUTPUT"
+
+      - name: Commit automatic version update
+        id: release_commit
+        if: steps.changes.outputs.release_needed == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION update.json Dockerfile app/config.py .env.example README.md app/static/*.html
+
+          if git diff --cached --quiet; then
+            echo "版本文件已经是 ${{ steps.version.outputs.value }}，直接使用当前提交。"
+          else
+            git commit -m "chore(release): bump version to ${{ steps.version.outputs.value }} [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve lowercase image name
+        id: image
+        if: steps.changes.outputs.build_needed == 'true'
+        shell: bash
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        if: steps.changes.outputs.build_needed == 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.build_needed == 'true'
+        uses: docker/setup-buildx-action@v4
+
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_image)
+        if: steps.changes.outputs.build_needed == 'true' && steps.mode.outputs.push_enabled == 'true'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -198,37 +347,35 @@ jobs:
 
       - name: Extract Docker metadata
         id: meta
+        if: steps.changes.outputs.build_needed == 'true'
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.image.outputs.name }}
-          flavor: |
-            latest=auto
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=${{ steps.app_version.outputs.value }}
-            type=raw,value=${{ steps.app_version.outputs.major_minor }}
-            type=raw,value=${{ steps.app_version.outputs.major }}
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=${{ steps.version.outputs.major_minor }}
+            type=raw,value=${{ steps.version.outputs.major }}
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=FeedDock
             org.opencontainers.image.description=Self-hosted RSS automation service for qBittorrent
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ steps.release_commit.outputs.sha || github.sha }}
 
-      - name: Build and optionally push image
+      - name: Build and optionally publish image
         id: build
+        if: steps.changes.outputs.build_needed == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           build-args: |
-            APP_VERSION=${{ steps.app_version.outputs.value }}
+            APP_VERSION=${{ steps.version.outputs.value }}
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_image) }}
+          push: ${{ steps.mode.outputs.push_enabled == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
@@ -238,33 +385,42 @@ jobs:
           sbom: true
 
       - name: Create GitHub Release after image publish
-        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_image)
+        if: steps.changes.outputs.release_needed == 'true' && steps.mode.outputs.push_enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: v${{ steps.app_version.outputs.value }}
+          RELEASE_TAG: v${{ steps.version.outputs.value }}
+          RELEASE_SHA: ${{ steps.release_commit.outputs.sha || github.sha }}
         shell: bash
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "GitHub Release $RELEASE_TAG 已存在，本次不重复创建"
+            echo "GitHub Release $RELEASE_TAG 已存在，本次不重复创建。"
           else
             gh release create "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_SHA" \
               --title "FeedDock $RELEASE_TAG" \
               --generate-notes \
               --latest
-            echo "已创建 Git 标签和 GitHub Release：$RELEASE_TAG"
+            echo "已自动创建 Git 标签和 GitHub Release：$RELEASE_TAG"
           fi
 
-      - name: Publish build summary
+      - name: Publish workflow summary
         if: always()
         shell: bash
         run: |
           {
-            echo "### Docker 镜像构建"
+            echo "### FeedDock 自动发布"
             echo
-            echo "- 镜像：\`${{ steps.image.outputs.name }}\`"
-            echo "- 平台：\`linux/amd64, linux/arm64\`"
-            echo "- 推送：\`${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_image) }}\`"
-            echo "- Digest：\`${{ steps.build.outputs.digest || '仅构建，未生成远程 digest' }}\`"
-            echo "- Release：\`v${{ steps.app_version.outputs.value }}\`"
+            echo "- 上一个 Release：\`${{ steps.changes.outputs.latest_tag || '无' }}\`"
+            echo "- 检测到重要变化：\`${{ steps.changes.outputs.release_needed || 'false' }}\`"
+            echo "- 构建镜像：\`${{ steps.changes.outputs.build_needed || 'false' }}\`"
+            echo "- 推送镜像：\`${{ steps.mode.outputs.push_enabled || 'false' }}\`"
+            echo "- 目标版本：\`${{ steps.version.outputs.value || '未生成' }}\`"
+            echo "- Digest：\`${{ steps.build.outputs.digest || '未推送或未构建' }}\`"
+            if [[ -n "${{ steps.changes.outputs.matched_files }}" ]]; then
+              echo
+              echo "#### 触发发布的文件"
+              echo '```text'
+              printf '%s\n' "${{ steps.changes.outputs.matched_files }}"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

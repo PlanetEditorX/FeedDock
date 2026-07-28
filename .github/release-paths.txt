@@ -1,0 +1,20 @@
+# Changes matching these paths create a new patch release on the default branch.
+# Python fnmatch syntax is used. Keep documentation and tests out unless they
+# change the shipped application or deployment contract.
+app/**
+src/**
+Dockerfile
+docker-entrypoint.py
+requirements.txt
+pyproject.toml
+poetry.lock
+uv.lock
+docker-compose.yml
+docker-compose.fnos.yml
+.env.example
+.env.fnos.example
+VERSION
+update.json
+scripts/release_version.py
+.github/release-paths.txt
+.github/workflows/docker-publish.yml

@@ -3,6 +3,7 @@
 ## 部署与排障
 
 - [Docker Compose 部署](deployment/DOCKER_COMPOSE.md)
+- [自动版本发布](deployment/AUTOMATIC_RELEASES.md)
 - [飞牛 OS 部署](deployment/FNOS_DEPLOY.md)
 - [网络与 DNS 排障](deployment/NETWORK_TROUBLESHOOTING.md)
 

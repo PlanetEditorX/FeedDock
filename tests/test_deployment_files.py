@@ -23,7 +23,7 @@ class DeploymentFileTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
         self.assertIn('${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data', workflow)
         self.assertIn('${FEEDDOCK_MEDIA_PATH:-/vol2/1000/影视}:/media', workflow)
-        self.assertIn("required_volumes.issubset(volumes)", workflow)
+        self.assertIn("required_volumes.issubset(set(service.get(\"volumes\") or []))", workflow)
         self.assertNotIn(
             'service["volumes"] == ["/vol1/1000/应用/feeddock/data:/data"]',
             workflow,
@@ -127,18 +127,27 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("\nAPP_VERSION=", f"\n{fnos_env}")
         self.assertIn(f"FEEDDOCK_BUILD_VERSION={(ROOT / 'VERSION').read_text(encoding='utf-8').strip()}", env_example)
 
-    def test_workflow_creates_release_after_image_publish(self) -> None:
+    def test_workflow_auto_releases_important_changes_without_manual_tag_push(self) -> None:
         workflow = (ROOT / ".github/workflows/docker-publish.yml").read_text(encoding="utf-8")
+        release_paths = (ROOT / ".github/release-paths.txt").read_text(encoding="utf-8")
+
+        self.assertNotIn('tags:\n      - "v*.*.*"', workflow)
+        self.assertIn("Detect unreleased important changes", workflow)
+        self.assertIn("python scripts/release_version.py", workflow)
+        self.assertIn("Commit automatic version update", workflow)
+        self.assertIn("chore(release): bump version to", workflow)
+        self.assertIn('git push origin "HEAD:${GITHUB_REF_NAME}"', workflow)
         self.assertIn("Create GitHub Release after image publish", workflow)
-        self.assertIn("RELEASE_TAG: v${{ steps.app_version.outputs.value }}", workflow)
+        self.assertIn("RELEASE_TAG: v${{ steps.version.outputs.value }}", workflow)
         self.assertIn('gh release create "$RELEASE_TAG"', workflow)
-        self.assertIn('--target "$GITHUB_SHA"', workflow)
-        self.assertIn("github.event_name != 'pull_request'", workflow)
-        self.assertIn("type=raw,value=${{ steps.app_version.outputs.value }}", workflow)
+        self.assertIn('--target "$RELEASE_SHA"', workflow)
+        self.assertIn("type=raw,value=${{ steps.version.outputs.value }}", workflow)
         self.assertIn("--latest", workflow)
-        self.assertIn("node --check app/static/mikan-subscription-state.js", workflow)
-        self.assertIn("node --check app/static/subscription-sources.js", workflow)
-        self.assertIn("node --check app/static/navigation.js", workflow)
+        self.assertIn("app/**", release_paths)
+        self.assertIn("src/**", release_paths)
+        self.assertNotIn("docs/**", release_paths)
+        self.assertNotIn("tests/**", release_paths)
+        self.assertIn("node --check app/static/modules/notification-settings.js", workflow)
 
 
     def test_refresh_actions_initial_refresh_and_log_copy(self) -> None:
@@ -237,6 +246,7 @@ class DeploymentFileTests(unittest.TestCase):
         for relative in (
             "docs/README.md",
             "docs/deployment/FNOS_DEPLOY.md",
+            "docs/deployment/AUTOMATIC_RELEASES.md",
             "docs/deployment/NETWORK_TROUBLESHOOTING.md",
             "docs/guides/QBITTORRENT.md",
             "docs/guides/METADATA_AND_MEDIA.md",
