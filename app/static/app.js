@@ -1332,10 +1332,10 @@ function createSubscriptionCard(sub) {
   const remove = text('button', '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
-    await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
+    const result = await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
     selectedSubscriptionIds.delete(sub.id);
     if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm();
-    showNotice('订阅已删除');
+    showNotice(result.hidden ? '订阅已删除，并已从添加番剧中隐藏' : '订阅已删除');
     await reloadAll();
   });
   controls.append(edit, updateRss, sync, scrape, toggle, remove);
@@ -1408,6 +1408,61 @@ async function loadSubscriptions() {
   for (const id of [...selectedSubscriptionIds]) if (!data.some((sub) => sub.id === id)) selectedSubscriptionIds.delete(id);
   syncMikanCatalogSubscriptionState(data);
   renderSubscriptions(data);
+}
+
+function renderHiddenAnimePreferences(data) {
+  const state = document.getElementById('hiddenAnimeState');
+  const container = document.getElementById('hiddenAnimeList');
+  if (!state || !container) return;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  container.replaceChildren();
+  state.textContent = items.length
+    ? `当前有 ${items.length} 部番剧不会出现在添加番剧周历中。`
+    : '当前没有隐藏番剧。';
+  if (!items.length) {
+    container.append(text('p', '删除订阅后，对应番剧会自动出现在这里。', 'empty'));
+    return;
+  }
+  items.forEach((item) => {
+    const row = document.createElement('article');
+    row.className = 'hidden-anime-entry';
+    const details = document.createElement('div');
+    details.append(text('strong', item.title || item.canonical_key || '未命名番剧'));
+    const source = item.reason === 'subscription_deleted' ? '删除订阅后自动隐藏' : '手动隐藏';
+    const identity = item.bangumi_id > 0 ? `Bangumi ${item.bangumi_id}` : item.canonical_key;
+    details.append(text('span', `${source} · ${identity}${item.updated_at ? ` · ${fmtDate(item.updated_at)}` : ''}`));
+    const restore = text('button', '取消隐藏', 'small secondary');
+    restore.type = 'button';
+    restore.addEventListener('click', async () => {
+      restore.disabled = true;
+      try {
+        await api('/api/discovery/preferences/hidden', {
+          method: 'PUT',
+          body: JSON.stringify({
+            items: [{
+              canonical_key: item.canonical_key,
+              title: item.title || '',
+              bangumi_id: Number(item.bangumi_id || 0),
+              hidden: false,
+              reason: '',
+            }],
+          }),
+        });
+        await loadHiddenAnimePreferences();
+        showNotice(`“${item.title || '该番剧'}”已取消隐藏`);
+      } catch (error) {
+        restore.disabled = false;
+        showNotice(error.message, false);
+      }
+    });
+    row.append(details, restore);
+    container.append(row);
+  });
+}
+
+async function loadHiddenAnimePreferences() {
+  const data = await api('/api/discovery/preferences/hidden');
+  renderHiddenAnimePreferences(data);
 }
 
 async function loadItems() {
@@ -1483,7 +1538,7 @@ async function reloadAll() {
     await loadAuth();
     await Promise.all([
       loadDashboard(), loadConfig(), loadApplicationSettings(), loadDownloaderSettings(), loadMetadataSettings(), loadGlobalRules(), loadSubscriptionSources(),
-      loadSubscriptions(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), notificationSettings.load(), loadSystemStatus(),
+      loadSubscriptions(), loadHiddenAnimePreferences(), loadItems(), loadLogs(), loadLogSettings(), loadAutomationSettings(), loadProxySettings(), notificationSettings.load(), loadSystemStatus(),
     ]);
   } catch (error) {
     showNotice(error.message, false);
@@ -1592,7 +1647,8 @@ async function runSubscriptionBatch(action) {
   const result = await api('/api/subscriptions/batch', { method: 'POST', body: JSON.stringify({ ids, action }) });
   selectedSubscriptionIds.clear();
   await reloadAll();
-  showNotice(`批量操作完成：处理 ${result.affected} 条订阅`);
+  const hidden = action === 'delete' && result.hidden ? `，隐藏 ${result.hidden} 部番剧` : '';
+  showNotice(`批量操作完成：处理 ${result.affected} 条订阅${hidden}`);
 }
 
 
@@ -2235,6 +2291,7 @@ document.querySelector('.app-brand').addEventListener('keydown', (event) => {
 document.getElementById('subscriptionSearch').addEventListener('input', () => renderSubscriptions(currentSubscriptions));
 document.getElementById('subscriptionStateFilter').addEventListener('change', () => renderSubscriptions(currentSubscriptions));
 document.getElementById('subscriptionSortMode').addEventListener('change', (event) => saveSubscriptionSort(event.currentTarget.value));
+document.getElementById('refreshHiddenAnime').addEventListener('click', () => loadHiddenAnimePreferences().catch((error) => showNotice(error.message, false)));
 document.getElementById('toggleManagementMode').addEventListener('click', () => setManagementMode(!subscriptionManagementMode));
 document.getElementById('selectAllSubscriptions').addEventListener('change', (event) => {
   filteredSubscriptions(currentSubscriptions).forEach((sub) => {

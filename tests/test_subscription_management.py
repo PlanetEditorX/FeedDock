@@ -10,11 +10,26 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.main import batch_subscriptions, export_subscriptions, import_subscriptions, system_status
+from app.anime_identity import hidden_for_item, title_key
+from app.main import (
+    batch_subscriptions,
+    delete_subscription,
+    export_subscriptions,
+    import_subscriptions,
+    list_hidden_anime_preferences,
+    system_status,
+    update_hidden_anime_preferences,
+)
 from app.settings_config import load_application_preferences, save_application_preferences, save_subscription_sort_preference
 from fastapi import HTTPException
-from app.models import Subscription
-from app.schemas import SubscriptionBatchRequest, SubscriptionCreate, SubscriptionImportRequest
+from app.models import AnimePreference, Subscription
+from app.schemas import (
+    AnimePreferenceBatchUpdate,
+    AnimePreferenceItem,
+    SubscriptionBatchRequest,
+    SubscriptionCreate,
+    SubscriptionImportRequest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,7 +118,41 @@ class SubscriptionManagementTests(unittest.TestCase):
             SubscriptionBatchRequest(ids=[rows[1].id], action="delete"), self.db
         )
         self.assertEqual(deleted["affected"], 1)
+        self.assertEqual(deleted["hidden"], 1)
         self.assertIsNone(self.db.get(Subscription, rows[1].id))
+        self.assertEqual(len(list(self.db.scalars(select(AnimePreference)))), 1)
+
+    def test_deleted_subscription_stays_hidden_until_manually_restored(self) -> None:
+        subscription = Subscription(
+            name="示例动画",
+            reference_title="示例动画",
+            canonical_key=title_key("示例动画"),
+            rss_url="https://example.test/example.xml",
+        )
+        self.db.add(subscription)
+        self.db.commit()
+
+        result = delete_subscription(subscription.id, self.db)
+        self.assertEqual(result, {"ok": True, "hidden": True})
+        preferences = list(self.db.scalars(select(AnimePreference)))
+        self.assertEqual(len(preferences), 1)
+        self.assertTrue(hidden_for_item({"title": "示例动画"}, preferences))
+
+        listed = list_hidden_anime_preferences(self.db)
+        self.assertEqual(listed["count"], 1)
+        self.assertEqual(listed["items"][0]["title"], "示例动画")
+        self.assertEqual(listed["items"][0]["reason"], "subscription_deleted")
+
+        restored = update_hidden_anime_preferences(
+            AnimePreferenceBatchUpdate(items=[AnimePreferenceItem(
+                canonical_key=title_key("示例动画"),
+                title="示例动画",
+                hidden=False,
+            )]),
+            self.db,
+        )
+        self.assertEqual(restored, {"updated": 1, "hidden": 0})
+        self.assertEqual(list(self.db.scalars(select(AnimePreference))), [])
 
 
     def test_auto_skip_blocks_enabling_subscription_without_rename(self) -> None:
@@ -195,6 +244,7 @@ class SubscriptionManagementTests(unittest.TestCase):
             assert.equal(navigation.normalizeView('#downloads'), 'downloads');
             assert.equal(navigation.normalizeView('not-a-view'), 'subscriptions');
             assert.equal(navigation.VIEW_META['settings-system'][0], '系统管理');
+            assert.equal(navigation.VIEW_META['settings-hidden'][0], '隐藏番剧');
             assert.equal(navigation.VIEW_META.subscriptions[0], '订阅列表');
             const summaries = [{{ attrs: {{}} }}, {{ attrs: {{}} }}];
             const menus = summaries.map((summary) => ({{
@@ -232,6 +282,9 @@ class SubscriptionManagementTests(unittest.TestCase):
             "exportSubscriptions",
             "restartSystem",
             "shutdownSystem",
+            "hiddenAnimeState",
+            "hiddenAnimeList",
+            "refreshHiddenAnime",
         ):
             self.assertIn(f'id="{element_id}"', index)
         self.assertLess(index.index('data-panel-id="subscriptions"'), index.index('data-panel-id="recent-items"'))
@@ -241,6 +294,9 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("请先选择需要导出的订阅", app_js)
         self.assertIn("groupSubscriptionsByWeekday", app_js)
         self.assertIn("subscription-weekday-section", app_js)
+        self.assertIn("loadHiddenAnimePreferences", app_js)
+        self.assertIn("取消隐藏", app_js)
+        self.assertIn('data-view-target="settings-hidden"', index)
         self.assertIn('name="primary-navigation"', index)
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertEqual(index.count('class="nav-chevron"'), 4)

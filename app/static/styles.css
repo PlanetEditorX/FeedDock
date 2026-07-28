@@ -436,3 +436,15 @@ label small { color: var(--muted); font-size: 12px; font-weight: 400; }
 @media (max-width: 760px) {
   .subscription-list-filters > button { width: auto; }
 }
+
+/* Deleted subscriptions are retained as catalog hide preferences until restored manually. */
+.hidden-anime-list { display: grid; gap: 10px; }
+.hidden-anime-entry { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.hidden-anime-entry > div { min-width: 0; }
+.hidden-anime-entry strong { display: block; overflow-wrap: anywhere; }
+.hidden-anime-entry span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.hidden-anime-entry button { flex: 0 0 auto; }
+@media (max-width: 600px) {
+  .hidden-anime-entry { align-items: stretch; flex-direction: column; }
+  .hidden-anime-entry button { align-self: flex-start; }
+}

@@ -33,6 +33,7 @@
 </div></details>
 <details class="nav-menu" name="primary-navigation"><summary><span class="nav-label">设置</span><svg aria-hidden="true" class="nav-chevron" viewBox="0 0 12 12"><path d="M2.25 4.25 6 8 9.75 4.25"></path></svg></summary><div class="nav-popover nav-popover-wide">
 <button data-view-target="settings-page" type="button">页面设置</button>
+<button data-view-target="settings-hidden" type="button">隐藏番剧</button>
 <button data-view-target="settings-scrape" type="button">刮削设置</button>
 <button data-view-target="settings-download" type="button">下载设置</button>
 <button data-view-target="settings-rss" type="button">RSS 设置</button>
@@ -92,6 +93,12 @@
 <label>订阅排序<select name="subscription_sort"><option value="weekday">按星期</option><option value="updated">按更新时间</option><option value="created">按添加时间</option><option value="name">按名字</option><option value="rating">按评分</option></select></label>
 <div class="form-actions wide"><button type="submit">保存页面设置</button><button class="secondary" id="restoreApplicationSettings" type="button">恢复全部新增设置</button></div>
 </form></section>
+<section class="panel hidden" data-app-view="settings-hidden" data-panel-id="hidden-anime-settings">
+<div class="panel-head"><div><h2>隐藏番剧</h2><p>从订阅列表删除番剧后会自动加入这里，并从后续番剧周历中隐藏。</p></div><div class="actions"><button class="secondary" id="refreshHiddenAnime" type="button">刷新列表</button></div></div>
+<p class="hint panel-body" id="hiddenAnimeState">正在读取隐藏番剧…</p>
+<div class="hidden-anime-list panel-body" id="hiddenAnimeList"></div>
+<p class="hint panel-body">点击“取消隐藏”后，该番剧会重新出现在 Mikan、ANI.BT 与 Anime Garden 的添加番剧周历中。</p>
+</section>
 <section class="panel hidden" data-app-view="settings-download" data-panel-id="downloader-settings">
 <div class="panel-head"><div><h2>qBittorrent 下载器</h2><p id="qbitConfigState">正在读取下载器配置…</p></div><div class="actions"><button class="secondary" id="testDownloader" type="button">测试连接</button></div></div>
 <form class="form-grid panel-body" id="downloaderForm">

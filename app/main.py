@@ -23,7 +23,14 @@ from .backup_service import (
     import_app_settings,
     validate_system_backup,
 )
-from .anime_identity import backfill_subscription_identities, build_subscription_index, decorate_item, normalize_title, prepare_subscription_identity
+from .anime_identity import (
+    backfill_subscription_identities,
+    build_subscription_index,
+    decorate_item,
+    normalize_title,
+    prepare_subscription_identity,
+    subscription_identity,
+)
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .debug_logging import (
     debug_enabled,
@@ -1015,6 +1022,88 @@ def update_hidden_anime_preferences(
     return {"updated": len(payload.items), "hidden": hidden_count}
 
 
+_DELETED_SUBSCRIPTION_REASON_PREFIX = "subscription_deleted:"
+
+
+def _subscription_preference_title(subscription: Subscription) -> str:
+    return next(
+        (
+            str(value).strip()
+            for value in (
+                subscription.reference_title,
+                subscription.manual_title,
+                subscription.tmdb_title,
+                subscription.name,
+            )
+            if str(value or "").strip()
+        ),
+        "",
+    )
+
+
+def _hide_deleted_subscription(db: Session, subscription: Subscription) -> bool:
+    """Persist a catalog hide preference before deleting a subscription."""
+
+    key = subscription_identity(subscription)
+    if not key:
+        return False
+    title = _subscription_preference_title(subscription)
+    bangumi_id = 0
+    if key.startswith("bgm:"):
+        try:
+            bangumi_id = int(key.split(":", 1)[1])
+        except ValueError:
+            bangumi_id = 0
+    row = db.get(AnimePreference, key)
+    if row is None:
+        row = AnimePreference(canonical_key=key)
+        db.add(row)
+    row.hidden = True
+    row.bangumi_id = bangumi_id
+    row.title_normalized = normalize_title(title)
+    current_reason = str(row.reason or "").strip()
+    if not current_reason or current_reason.startswith(_DELETED_SUBSCRIPTION_REASON_PREFIX):
+        row.reason = f"{_DELETED_SUBSCRIPTION_REASON_PREFIX}{title}"
+    return True
+
+
+def _hidden_preference_title(preference: AnimePreference) -> str:
+    reason = str(preference.reason or "").strip()
+    if reason.startswith(_DELETED_SUBSCRIPTION_REASON_PREFIX):
+        title = reason.removeprefix(_DELETED_SUBSCRIPTION_REASON_PREFIX).strip()
+        if title:
+            return title
+    return preference.title_normalized or preference.canonical_key
+
+
+@app.get("/api/discovery/preferences/hidden", dependencies=[Depends(require_admin)])
+def list_hidden_anime_preferences(db: Session = Depends(get_db)) -> dict[str, Any]:
+    preferences = list(
+        db.scalars(
+            select(AnimePreference)
+            .where(AnimePreference.hidden.is_(True))
+            .order_by(desc(AnimePreference.updated_at), AnimePreference.canonical_key)
+        )
+    )
+    return {
+        "count": len(preferences),
+        "items": [
+            {
+                "canonical_key": preference.canonical_key,
+                "title": _hidden_preference_title(preference),
+                "bangumi_id": preference.bangumi_id,
+                "reason": (
+                    "subscription_deleted"
+                    if str(preference.reason or "").startswith(_DELETED_SUBSCRIPTION_REASON_PREFIX)
+                    else "manual"
+                ),
+                "updated_at": preference.updated_at,
+            }
+            for preference in preferences
+        ],
+    }
+
+
 @app.get(
     "/api/discovery/mikan/catalog",
     response_model=MikanCatalogOut,
@@ -1368,8 +1457,10 @@ def batch_subscriptions(
     subscriptions = list(db.scalars(select(Subscription).where(Subscription.id.in_(payload.ids))))
     if not subscriptions:
         raise HTTPException(status_code=404, detail="未找到所选订阅")
+    hidden = 0
     if payload.action == "delete":
         for subscription in subscriptions:
+            hidden += int(_hide_deleted_subscription(db, subscription))
             db.delete(subscription)
     else:
         enabled = payload.action == "enable"
@@ -1381,7 +1472,7 @@ def batch_subscriptions(
         for subscription in subscriptions:
             subscription.enabled = enabled
     db.commit()
-    return {"action": payload.action, "affected": len(subscriptions)}
+    return {"action": payload.action, "affected": len(subscriptions), "hidden": hidden}
 
 
 @app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
@@ -1538,9 +1629,10 @@ def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> 
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    hidden = _hide_deleted_subscription(db, subscription)
     db.delete(subscription)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "hidden": hidden}
 
 
 @app.get("/api/items", response_model=list[FeedItemOut], dependencies=[Depends(require_admin)])

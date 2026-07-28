@@ -10,6 +10,7 @@
     'add-subscription': ['添加订阅', '添加或编辑站点生成的订阅，以及任意其它 RSS。'],
     downloads: ['下载', '查看最近发现、推送和完成处理的条目。'],
     'settings-page': ['页面设置', '配置主题色与订阅列表排序。'],
+    'settings-hidden': ['隐藏番剧', '管理删除订阅后自动隐藏的番剧，并按需恢复显示。'],
     'settings-scrape': ['刮削设置', '配置自动元数据同步、TMDB 与 bangumi.ini。'],
     'settings-download': ['下载设置', '配置 qBittorrent、重试、并发和做种时长。'],
     'settings-rss': ['RSS 设置', '配置轮询、超时、自动跳过和订阅自动化。'],
