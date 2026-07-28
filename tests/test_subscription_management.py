@@ -243,7 +243,9 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("subscription-weekday-section", app_js)
         self.assertIn('name="primary-navigation"', index)
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
-        self.assertIn(".nav-menu[open] > summary::after", styles)
+        self.assertEqual(index.count('class="nav-chevron"'), 4)
+        self.assertIn('.nav-menu[open] > summary .nav-chevron', styles)
+        self.assertNotIn('.nav-menu > summary::after', styles)
         self.assertIn("writing-mode: horizontal-tb", styles)
 
 

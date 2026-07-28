@@ -276,10 +276,13 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .app-brand h1 { font-size: 20px; }
 .app-brand p { font-size: 12px; }
 .primary-nav { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-left: auto; }
-.nav-direct, .nav-menu > summary { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-weight: 700; cursor: pointer; list-style: none; }
+.nav-direct, .nav-menu > summary { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-weight: 700; line-height: 1.2; cursor: pointer; list-style: none; }
+.nav-menu > summary { gap: 7px; }
 .nav-menu > summary::-webkit-details-marker { display: none; }
-.nav-menu > summary::after { content: ""; width: 7px; height: 7px; flex: 0 0 7px; margin: -4px 1px 0 3px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transform-origin: center; transition: transform .16s ease, margin .16s ease, border-color .16s ease; }
-.nav-menu[open] > summary::after { margin-top: 4px; transform: rotate(225deg); border-color: var(--text); }
+.nav-menu > summary::marker { content: ""; }
+.nav-label { display: inline-block; white-space: nowrap; }
+.nav-chevron { display: block; width: 12px; height: 12px; flex: 0 0 12px; overflow: visible; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); transform-origin: 50% 50%; transition: transform .16s ease, stroke .16s ease; }
+.nav-menu[open] > summary .nav-chevron { stroke: var(--text); transform: rotate(180deg); }
 .nav-direct:hover, .nav-menu > summary:hover, .nav-direct.is-active, .nav-menu:has([data-view-target].is-active) > summary { background: var(--panel-2); filter: none; }
 .nav-refresh { color: var(--accent); }
 .nav-menu { position: relative; }
