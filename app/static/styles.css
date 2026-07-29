@@ -153,7 +153,13 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 
 
 /* Mikan season catalog */
-.catalog-controls { display: grid; grid-template-columns: 140px 140px minmax(240px, 1fr) auto; gap: 14px; align-items: end; }
+.catalog-preorder { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
+.catalog-preorder > div { min-width: 0; }
+.catalog-preorder h3, .catalog-preorder p { margin: 0; }
+.catalog-preorder h3 { font-size: 15px; }
+.catalog-preorder p { margin-top: 4px; color: var(--muted); }
+.catalog-preorder button[aria-pressed="true"] { border-color: var(--good); background: rgba(46, 160, 67, .16); color: #83d49a; }
+.catalog-controls { display: grid; grid-template-columns: 140px 140px minmax(240px, 1fr); gap: 14px; align-items: end; }
 .catalog-controls label { display: grid; gap: 6px; color: var(--muted); }
 /* The preorder toggle adds a fifth catalog-control cell. Keep commands on a
    dedicated full-width row so they never collapse into a narrow single cell. */
@@ -213,6 +219,8 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
   .catalog-search, .catalog-controls .form-actions { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
+  .catalog-preorder { align-items: flex-start; flex-direction: column; }
+  .catalog-preorder button { width: 100%; }
   .modal { padding: 0; align-items: end; }
   .modal-card { width: 100%; max-height: 92vh; border-radius: 15px 15px 0 0; }
   .modal-head > div { align-items: flex-start; flex-direction: column; gap: 6px; }

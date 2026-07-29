@@ -101,6 +101,10 @@ async function openCatalogSource(sourceId, { autoLoad = false } = {}) {
   document.getElementById('mikanCatalog').replaceChildren();
   renderCatalogSourceContext();
   showAppView('add-catalog');
+  const preorderControl = document.getElementById('mikanPreorderControl');
+  preorderControl.classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  document.getElementById('createMikanTrials').classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  if (activeCatalogSource === 'mikan') await loadMikanPreorderState();
   const state = document.getElementById('mikanCatalogState');
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
   state.textContent = `点击“读取缓存”加载 ${source.label} 独立缓存；“强制更新”只请求 ${source.label} 原站。`;
@@ -1196,14 +1200,10 @@ async function loadMikanCatalog(form, forceRefresh = false) {
   refreshButton.disabled = true;
   activeButton.textContent = forceRefresh ? '正在强制更新…' : '正在读取缓存…';
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
-  const preorder = document.getElementById('mikanPreorderEnabled');
   const preorderControl = document.getElementById('mikanPreorderControl');
   preorderControl.classList.toggle('hidden', activeCatalogSource !== 'mikan');
   document.getElementById('createMikanTrials').classList.toggle('hidden', activeCatalogSource !== 'mikan');
-  if (activeCatalogSource === 'mikan') {
-    const preorderState = await api('/api/discovery/mikan/preorder');
-    preorder.checked = Boolean(preorderState.enabled);
-  }
+  if (activeCatalogSource === 'mikan') await loadMikanPreorderState();
   state.textContent = forceRefresh
     ? `正在更新 ${source.label} 的 ${year} ${season}番剧周历…`
     : `正在读取 ${source.label} 的 ${year} ${season}缓存…`;
@@ -2341,20 +2341,29 @@ document.getElementById('batchExportSubscriptions').addEventListener('click', ()
   exportSubscriptionData(ids).catch((error) => showNotice(error.message, false));
 });
 document.getElementById('batchImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
-document.getElementById('mikanPreorderEnabled').addEventListener('change', async (event) => {
-  if (activeCatalogSource !== 'mikan') {
-    event.currentTarget.checked = false;
-    showNotice('预定新番仅适用于 Mikan 目录', false);
-    return;
-  }
+function renderMikanPreorderState(enabled) {
+  const button = document.getElementById('mikanPreorderToggle');
+  button.setAttribute('aria-pressed', String(enabled));
+  button.textContent = `预定新番：${enabled ? '已开启' : '已关闭'}`;
+}
+
+async function loadMikanPreorderState() {
+  const preorderState = await api('/api/discovery/mikan/preorder');
+  renderMikanPreorderState(Boolean(preorderState.enabled));
+}
+
+document.getElementById('mikanPreorderToggle').addEventListener('click', async (event) => {
+  if (activeCatalogSource !== 'mikan') { showNotice('预定新番仅适用于 Mikan 目录', false); return; }
+  const button = event.currentTarget;
+  const nextEnabled = button.getAttribute('aria-pressed') !== 'true';
+  button.disabled = true;
   try {
-    const data = await api(`/api/discovery/mikan/preorder?enabled=${event.currentTarget.checked ? 'true' : 'false'}`, { method: 'PUT' });
-    event.currentTarget.checked = data.enabled;
+    const data = await api(`/api/discovery/mikan/preorder?enabled=${nextEnabled ? 'true' : 'false'}`, { method: 'PUT' });
+    renderMikanPreorderState(Boolean(data.enabled));
     showNotice(data.enabled ? '已开启预定新番；强制更新目录时会自动加入试看' : '已关闭预定新番');
   } catch (error) {
-    event.currentTarget.checked = !event.currentTarget.checked;
     showNotice(error.message, false);
-  }
+  } finally { button.disabled = false; }
 });
 document.getElementById('createMikanTrials').addEventListener('click', async () => {
   if (activeCatalogSource !== 'mikan') { showNotice('全部试看仅适用于 Mikan 目录', false); return; }
