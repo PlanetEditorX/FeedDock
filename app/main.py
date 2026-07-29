@@ -1216,6 +1216,11 @@ def create_mikan_trials(
     created = _create_mikan_trials(db, year=payload.year, season=payload.season)
     for subscription in created:
         background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-trial-batch")
+    if not created:
+        return {
+            "created": 0,
+            "message": "没有创建试看：当前目录可能已全部订阅或隐藏，或未能从 Mikan 读取可用 RSS；请查看系统日志。",
+        }
     return {"created": len(created), "message": f"已加入 {len(created)} 部 Mikan 试看，首个可用剧集将自动下载"}
 
 

@@ -2375,7 +2375,7 @@ document.getElementById('createMikanTrials').addEventListener('click', async () 
   button.disabled = true;
   try {
     const result = await api('/api/discovery/mikan/trials', { method: 'POST', body: JSON.stringify({ year: Number(year), season }) });
-    showNotice(result.message);
+    showNotice(result.message, Number(result.created || 0) > 0);
     await reloadAll();
   } catch (error) { showNotice(error.message, false); }
   finally { button.disabled = false; }

@@ -5,6 +5,7 @@ import textwrap
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import Base
 from app.anime_identity import hidden_for_item, title_key
 from app.main import (
+    _create_mikan_trials,
     batch_subscriptions,
     delete_subscription,
     export_subscriptions,
@@ -308,13 +310,43 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("取消隐藏", app_js)
         self.assertIn('data-view-target="settings-hidden"', index)
         self.assertIn('id="createMikanTrials"', index)
-        self.assertIn('id="mikanPreorderEnabled"', index)
+        self.assertIn('id="mikanPreorderToggle"', index)
         self.assertIn('name="primary-navigation"', index)
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertEqual(index.count('class="nav-chevron"'), 4)
         self.assertIn('.nav-menu[open] > summary .nav-chevron', styles)
         self.assertNotIn('.nav-menu > summary::after', styles)
         self.assertIn("writing-mode: horizontal-tb", styles)
+
+    def test_mikan_trials_create_a_trial_subscription(self) -> None:
+        payload = {
+            "rows": [{
+                "weekday": "星期一",
+                "items": [{
+                    "bangumi_id": 100,
+                    "title": "试看动画",
+                    "base_url": "https://mikan.test",
+                }],
+            }],
+        }
+        detail = {
+            "groups": [{"preset": {
+                "name": "试看动画",
+                "source_type": "mikan",
+                "source_anime_id": "100",
+                "primary_rss_name": "Mikan · 测试组",
+                "rss_url": "https://mikan.test/RSS/Bangumi?bangumiId=100&subgroupid=1",
+            }}],
+        }
+        with patch("app.main.MikanCacheService") as cache_service:
+            cache_service.return_value.detail.return_value = detail
+            created = _create_mikan_trials(self.db, year=2026, season="夏", payload=payload)
+
+        self.assertEqual(len(created), 1)
+        subscription = self.db.get(Subscription, created[0].id)
+        self.assertIsNotNone(subscription)
+        self.assertEqual(subscription.subscription_mode, "trial")
+        self.assertEqual(subscription.source_type, "mikan")
 
 
 if __name__ == "__main__":
