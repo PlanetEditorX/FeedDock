@@ -11,6 +11,7 @@ from app.downloader import DownloaderResult
 from app.database import Base
 from app.models import FeedItem, Subscription, SystemLog
 from app.rss_service import (
+    _existing_video_matches,
     extract_download_url,
     match_title,
     preview_subscription,
@@ -21,6 +22,12 @@ from app.rss_service import (
 
 
 class RSSServiceTests(unittest.TestCase):
+    def test_bulk_trial_does_not_scan_shared_trial_directory_for_existing_video(self):
+        item = SimpleNamespace(desired_name="Demo - S01E01", save_path="/media/试看", episode="1")
+        subscription = SimpleNamespace(trial_bulk=True, rename_enabled=True, season=1)
+
+        self.assertIsNone(_existing_video_matches(item, subscription, SimpleNamespace()))
+
     def test_keyword_matching(self):
         self.assertTrue(match_title("Example 1080p 简体", "1080p,简体", "合集")[0])
         self.assertFalse(match_title("Example 1080p 合集", "1080p", "合集")[0])

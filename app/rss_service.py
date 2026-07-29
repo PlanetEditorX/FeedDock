@@ -428,6 +428,11 @@ def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Sess
     renamed by another media manager after FeedDock originally created them.
     """
 
+    # Batch trials share one flat directory. A local E01 from another title is
+    # not evidence that this trial episode has already been downloaded.
+    if getattr(subscription, "trial_bulk", False):
+        return None
+
     policy = load_application_preferences(db).rss
     if not subscription.rename_enabled or not item.desired_name:
         return None
