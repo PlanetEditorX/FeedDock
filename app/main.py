@@ -67,6 +67,7 @@ from .subscription_sources import (
 )
 from .rss_candidates import search_subscription_rss_candidates
 from .rss_service import (
+    add_log,
     calculate_missing_episodes,
     dispatch_scheduled_downloads,
     preview_subscription,
