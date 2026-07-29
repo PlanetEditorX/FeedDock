@@ -153,7 +153,7 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 
 
 /* Mikan season catalog */
-.catalog-preorder { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
+.catalog-preorder { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 20px 0; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .catalog-preorder > div { min-width: 0; }
 .catalog-preorder h3, .catalog-preorder p { margin: 0; }
 .catalog-preorder h3 { font-size: 15px; }
@@ -220,7 +220,7 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
   .catalog-search, .catalog-controls .form-actions { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
-  .catalog-preorder { align-items: flex-start; flex-direction: column; }
+  .catalog-preorder { align-items: flex-start; flex-direction: column; margin: 16px 0; }
   .catalog-preorder button { width: 100%; }
   .modal { padding: 0; align-items: end; }
   .modal-card { width: 100%; max-height: 92vh; border-radius: 15px 15px 0 0; }

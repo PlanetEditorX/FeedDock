@@ -2364,7 +2364,7 @@ document.getElementById('mikanPreorderToggle').addEventListener('click', async (
   try {
     const data = await api(`/api/discovery/mikan/preorder?enabled=${nextEnabled ? 'true' : 'false'}`, { method: 'PUT' });
     renderMikanPreorderState(Boolean(data.enabled));
-    showNotice(data.enabled ? '已开启预定新番；强制更新目录时会自动加入试看' : '已关闭预定新番');
+    showNotice(data.enabled ? '已开启预定新番；定期更新季度目录时会自动加入试看' : '已关闭预定新番');
   } catch (error) {
     showNotice(error.message, false);
   } finally { button.disabled = false; }
@@ -2381,7 +2381,7 @@ document.getElementById('trialSubscription').addEventListener('click', async () 
     resetSubscriptionForm();
     showNotice('已加入试看，首个可用剧集将推送到 qBittorrent');
     await reloadAll();
-    showAppView('subscriptions');
+    showAppView('add-catalog');
   } catch (error) { showNotice(error.message, false); }
   finally { button.disabled = false; }
 });
