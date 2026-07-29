@@ -345,6 +345,9 @@ def scrape_completed_item(
 ) -> ScrapeResult:
     """Write media-library sidecar metadata for one completed download."""
 
+    if subscription.trial_bulk:
+        return ScrapeResult(False, "批量试看不收集元数据或刮削")
+
     metadata = config or load_metadata_config(db)
     try:
         item_directory = _safe_media_directory(
@@ -568,6 +571,8 @@ def cleanup_orphaned_metadata(
     return CleanupResult(True, message, removed, affected)
 
 def scrape_local_metadata(db: Session, subscription: Subscription) -> ScrapeResult:
+    if subscription.trial_bulk:
+        return ScrapeResult(False, "批量试看不收集元数据或刮削")
     items = list(
         db.scalars(
             select(FeedItem)

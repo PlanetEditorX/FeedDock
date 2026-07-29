@@ -32,6 +32,7 @@ class SubscriptionCreate(BaseModel):
     source_anime_id: str = Field(default="", max_length=120)
     canonical_key: str = Field(default="", max_length=255)
     subscription_mode: Literal["subscribed", "trial"] = "subscribed"
+    trial_bulk: bool = False
     reference_title: str = ""
     tmdb_title: str = ""
     bgm_url: str = ""
@@ -97,6 +98,7 @@ class SubscriptionUpdate(BaseModel):
     source_anime_id: str | None = Field(default=None, max_length=120)
     canonical_key: str | None = Field(default=None, max_length=255)
     subscription_mode: Literal["subscribed", "trial"] | None = None
+    trial_bulk: bool | None = None
     reference_title: str | None = None
     tmdb_title: str | None = None
     bgm_url: str | None = None
@@ -208,6 +210,7 @@ class SubscriptionOut(BaseModel):
     source_anime_id: str = ""
     canonical_key: str = ""
     subscription_mode: Literal["subscribed", "trial"] = "subscribed"
+    trial_bulk: bool = False
     reference_title: str
     tmdb_title: str
     bgm_url: str

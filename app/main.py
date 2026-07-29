@@ -59,6 +59,7 @@ from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
 from .download_cleanup import cleanup_completed_torrent_records
 from .subscription_monitor import reset_monitor_state_for_changes
+from .trial import BULK_TRIAL_SAVE_PATH_TEMPLATE, SINGLE_TRIAL_SAVE_PATH_TEMPLATE, select_trial_preset
 from .subscription_sources import (
     classify_subscription_source,
     get_subscription_source,
@@ -246,6 +247,12 @@ def _subscription_values(
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
+    if values.get("subscription_mode") == "trial":
+        values["save_path_template"] = (
+            BULK_TRIAL_SAVE_PATH_TEMPLATE
+            if values.get("trial_bulk")
+            else SINGLE_TRIAL_SAVE_PATH_TEMPLATE
+        )
     prepare_subscription_identity(values, existing=existing)
     if db is not None:
         # qBittorrent, FeedDock scraping, and subscription rendering must use
@@ -331,11 +338,11 @@ def _create_mikan_trials(
             except Exception as exc:
                 add_log(db, "WARNING", f"试看未能读取 Mikan RSS：{item.get('title') or '未命名番剧'}", str(exc))
                 continue
-            preset = next((group.get("preset") for group in detail.get("groups", []) if group.get("preset")), None)
-            if not isinstance(preset, dict):
+            preset = select_trial_preset(detail.get("groups", []))
+            if preset is None:
                 continue
             values = dict(preset)
-            values["subscription_mode"] = "trial"
+            values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
             if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
                 continue
@@ -369,11 +376,11 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
             except Exception as exc:
                 add_log(db, "WARNING", f"试看未能读取 {source_id} RSS：{item.get('title') or '未命名番剧'}", str(exc))
                 continue
-            preset = next((group.get("preset") for group in detail.get("groups", []) if group.get("preset")), None)
-            if not isinstance(preset, dict):
+            preset = select_trial_preset(detail.get("groups", []))
+            if preset is None:
                 continue
             values = dict(preset)
-            values["subscription_mode"] = "trial"
+            values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
             if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
                 continue
@@ -1717,6 +1724,8 @@ def apply_subscription_metadata(
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    if subscription.trial_bulk:
+        raise HTTPException(status_code=409, detail="批量试看不收集元数据或刮削")
     try:
         MetadataService().apply(
             db,
@@ -1748,6 +1757,8 @@ def sync_subscription_metadata(
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    if subscription.trial_bulk:
+        raise HTTPException(status_code=409, detail="批量试看不收集元数据或刮削")
     try:
         MetadataService().sync(db, subscription, payload.provider)
         _refresh_subscription_identity(db, subscription)
@@ -1868,6 +1879,8 @@ def scrape_subscription_media(
     subscription = db.get(Subscription, subscription_id)
     if subscription is None:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    if subscription.trial_bulk:
+        raise HTTPException(status_code=409, detail="批量试看不收集元数据或刮削")
     completed_count = int(
         db.scalar(
             select(func.count())

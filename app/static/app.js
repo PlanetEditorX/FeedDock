@@ -1310,7 +1310,7 @@ function createSubscriptionCard(sub) {
   titleRow.className = 'subscription-title';
   titleRow.append(text('h3', sub.canonical_title || sub.name));
   if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
-  const stateLabel = sub.last_error ? '异常' : sub.subscription_mode === 'trial' ? '试看' : sub.enabled ? '启用' : '停用';
+  const stateLabel = sub.last_error ? '异常' : sub.subscription_mode === 'trial' ? '已试看' : sub.enabled ? '启用' : '停用';
   titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.subscription_mode === 'trial' ? 'scheduled' : sub.enabled ? 'queued' : 'skipped'}`));
   content.append(titleRow);
   if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
@@ -1372,7 +1372,7 @@ function createSubscriptionCard(sub) {
     showNotice(result.hidden ? '订阅已删除，并已从添加番剧中隐藏' : '订阅已删除');
     await reloadAll();
   });
-  controls.append(edit, updateRss, sync, scrape, toggle, remove);
+  controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, remove);
   content.append(controls);
   card.append(content);
   return card;

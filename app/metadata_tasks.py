@@ -34,7 +34,13 @@ def refresh_all_metadata() -> dict[str, Any]:
     totals = {"subscriptions": 0, "updated": 0, "errors": 0}
     try:
         with SessionLocal() as db:
-            subscriptions = list(db.scalars(select(Subscription).order_by(Subscription.id)))
+            subscriptions = list(
+                db.scalars(
+                    select(Subscription)
+                    .where(Subscription.trial_bulk.is_(False))
+                    .order_by(Subscription.id)
+                )
+            )
             _add_log(db, "INFO", "开始同步订阅元数据", f"待处理订阅：{len(subscriptions)}")
             db.commit()
             service = MetadataService(timeout=load_application_preferences(db).rss.timeout_seconds)
@@ -117,7 +123,14 @@ def scrape_completed_media(subscription_id: int | None = None) -> dict[str, Any]
     try:
         with SessionLocal() as db:
             config = load_metadata_config(db)
-            query = select(FeedItem).where(FeedItem.completed_at.is_not(None))
+            query = (
+                select(FeedItem)
+                .join(Subscription)
+                .where(
+                    FeedItem.completed_at.is_not(None),
+                    Subscription.trial_bulk.is_(False),
+                )
+            )
             if subscription_id is not None:
                 query = query.where(FeedItem.subscription_id == subscription_id)
             items = list(db.scalars(query.order_by(FeedItem.id)))

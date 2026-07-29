@@ -358,6 +358,8 @@ def calculate_missing_episodes(db: Session, subscription: Subscription) -> list[
 
 
 def _sync_metadata_if_due(db: Session, subscription: Subscription) -> None:
+    if subscription.trial_bulk:
+        return
     config = load_metadata_config(db)
     global_enabled = bool(config.auto_scrape_enabled)
     if not subscription.auto_metadata and not global_enabled:
@@ -470,7 +472,9 @@ def _existing_video_matches(item: FeedItem, subscription: Subscription, db: Sess
 
 
 
-def _pending_scrape_state(db: Session) -> tuple[str, str]:
+def _pending_scrape_state(db: Session, subscription: Subscription) -> tuple[str, str]:
+    if subscription.trial_bulk:
+        return "skipped", "批量试看不收集元数据或刮削"
     config = load_metadata_config(db)
     actions: list[str] = []
     if config.auto_scrape_enabled:
@@ -492,7 +496,7 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
     item.save_path = save_path
     item.desired_name = desired_name
     item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
-    item.scrape_status, item.scrape_message = _pending_scrape_state(db)
+    item.scrape_status, item.scrape_message = _pending_scrape_state(db, subscription)
     add_log(
         db,
         "INFO",
@@ -877,14 +881,14 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name
         item.qbit_tag = f"feeddock-item-{item.id}"
-        item.scrape_status, item.scrape_message = _pending_scrape_state(db)
+        item.scrape_status, item.scrape_message = _pending_scrape_state(db, subscription)
         automation = load_automation_config(db)
         if automation.download_enabled:
             item.status = "scheduled"
             item.reason = f"等待每日 {automation.daily_time}（{automation.timezone}）统一推送"
             item.rename_status = "pending"
             item.rename_message = "等待定时推送"
-            item.scrape_status, item.scrape_message = _pending_scrape_state(db)
+            item.scrape_status, item.scrape_message = _pending_scrape_state(db, subscription)
             add_log(
                 db,
                 "INFO",

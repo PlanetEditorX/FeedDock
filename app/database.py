@@ -32,6 +32,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "source_anime_id": "VARCHAR(120) NOT NULL DEFAULT ''",
     "canonical_key": "VARCHAR(255) NOT NULL DEFAULT ''",
     "subscription_mode": "VARCHAR(20) NOT NULL DEFAULT 'subscribed'",
+    "trial_bulk": "BOOLEAN NOT NULL DEFAULT 0",
     "reference_title": "TEXT NOT NULL DEFAULT ''",
     "tmdb_title": "TEXT NOT NULL DEFAULT ''",
     "bgm_url": "TEXT NOT NULL DEFAULT ''",

@@ -346,6 +346,8 @@ class SubscriptionManagementTests(unittest.TestCase):
         subscription = self.db.get(Subscription, created[0].id)
         self.assertIsNotNone(subscription)
         self.assertEqual(subscription.subscription_mode, "trial")
+        self.assertTrue(subscription.trial_bulk)
+        self.assertEqual(subscription.save_path_template, "{base}/试看")
         self.assertEqual(subscription.source_type, "mikan")
 
 

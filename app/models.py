@@ -46,6 +46,7 @@ class Subscription(Base):
     canonical_key: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     # Trial subscriptions retain their RSS identity but stop after one episode.
     subscription_mode: Mapped[str] = mapped_column(String(20), default="subscribed", nullable=False)
+    trial_bulk: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Metadata used to identify and organize a title. These fields are optional
     # and do not call third-party metadata APIs by themselves.

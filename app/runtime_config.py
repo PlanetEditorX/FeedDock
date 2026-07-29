@@ -605,6 +605,7 @@ def save_metadata_config(
                 FeedItem.status == "queued",
                 FeedItem.completed_at.is_not(None),
                 FeedItem.scrape_status == "skipped",
+                FeedItem.subscription.has(Subscription.trial_bulk.is_(False)),
             )
             .values(
                 scrape_status="pending",
