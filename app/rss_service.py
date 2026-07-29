@@ -724,6 +724,21 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭；媒体目录清理已执行")
         db.commit()
         return stats
+    if subscription.subscription_mode == "trial":
+        # The first successful trial item remains in history. Later refreshes
+        # preserve the subscription for promotion but never enqueue episode two.
+        trial_item = db.scalar(
+            select(FeedItem.id).where(
+                FeedItem.subscription_id == subscription.id,
+                FeedItem.status.in_(("scheduled", "queued", "completed")),
+            )
+        )
+        if trial_item is not None:
+            subscription.last_checked_at = datetime.now(timezone.utc)
+            subscription.last_error = ""
+            add_log(db, "INFO", f"试看已完成，停止后续下载：{subscription.name}")
+            db.commit()
+            return stats
     _refresh_total_episodes_if_due(db, subscription)
     _sync_metadata_if_due(db, subscription)
     try:
@@ -810,6 +825,16 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         elif eligible:
             latest_candidate = max(eligible, key=lambda candidate: candidate["order"])
 
+    trial_candidate: dict[str, Any] | None = None
+    if subscription.subscription_mode == "trial":
+        eligible = [candidate for candidate in candidates if candidate["matched"] and candidate["download_url"]]
+        if eligible:
+            numbered = [candidate for candidate in eligible if candidate["episode_number"] is not None]
+            trial_candidate = min(
+                numbered or eligible,
+                key=lambda candidate: (candidate["episode_number"] is None, candidate["episode_number"] or 0, candidate["order"]),
+            )
+
     for candidate in candidates:
         item = FeedItem(
             subscription_id=subscription.id,
@@ -834,6 +859,11 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
         if subscription.only_latest and latest_candidate is not candidate:
             item.status = "skipped"
             item.reason = "已启用“只下载最新集”"
+            stats["skipped"] += 1
+            continue
+        if subscription.subscription_mode == "trial" and trial_candidate is not candidate:
+            item.status = "skipped"
+            item.reason = "试看模式只下载首个可用剧集"
             stats["skipped"] += 1
             continue
         if not candidate["download_url"]:

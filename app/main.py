@@ -127,6 +127,7 @@ from .schemas import (
     NotificationSettingsUpdate,
     MikanBangumiDetailOut,
     MikanCatalogOut,
+    MikanTrialRequest,
     MikanWeekdayFilterOut,
     MikanWeekdayFilterUpdate,
     ProxySettingsUpdate,
@@ -304,6 +305,48 @@ def _apply_mikan_hidden_filters(
     payload["hidden_count"] = total_hidden
     payload["source_id"] = "mikan"
     return payload
+
+
+def _create_mikan_trials(
+    db: Session,
+    *,
+    year: int,
+    season: str,
+    payload: dict[str, Any] | None = None,
+) -> list[Subscription]:
+    """Use the first Mikan RSS group for each visible, unsubscribed title."""
+    catalog = payload or MikanCacheService(DiscoveryService()).catalog(db, year, season)
+    decorated = _apply_mikan_hidden_filters(catalog, db, year=year, season=season)
+    service = MikanCacheService(DiscoveryService())
+    created: list[Subscription] = []
+    for row in decorated.get("rows", []):
+        for item in row.get("items", []):
+            if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
+                continue
+            try:
+                detail = service.detail(
+                    db, int(item["bangumi_id"]), str(item.get("base_url") or ""), str(item.get("title") or "")
+                )
+            except Exception as exc:
+                add_log(db, "WARNING", f"试看未能读取 Mikan RSS：{item.get('title') or '未命名番剧'}", str(exc))
+                continue
+            preset = next((group.get("preset") for group in detail.get("groups", []) if group.get("preset")), None)
+            if not isinstance(preset, dict):
+                continue
+            values = dict(preset)
+            values["subscription_mode"] = "trial"
+            values = _subscription_values(SubscriptionCreate.model_validate(values), db)
+            if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
+                continue
+            subscription = Subscription(**values)
+            db.add(subscription)
+            db.flush()
+            created.append(subscription)
+    if created:
+        add_log(db, "INFO", f"已创建 {len(created)} 条 Mikan 试看订阅", f"季度：{year} {season}")
+        db.commit()
+    return created
+
 
 def _subscription_out(db: Session, subscription: Subscription) -> SubscriptionOut:
     output = SubscriptionOut.model_validate(subscription)
@@ -1130,6 +1173,7 @@ def mikan_catalog(
     dependencies=[Depends(require_admin)],
 )
 def refresh_mikan_catalog(
+    background_tasks: BackgroundTasks,
     year: int = Query(ge=2000, le=2100),
     season: str = Query(pattern="^(冬|春|夏|秋)$"),
     q: str = Query(default="", max_length=200),
@@ -1139,11 +1183,40 @@ def refresh_mikan_catalog(
         payload = MikanCacheService(DiscoveryService()).catalog(
             db, year, season, q, force_refresh=True
         )
-        return _apply_mikan_hidden_filters(payload, db, year=year, season=season)
+        result = _apply_mikan_hidden_filters(payload, db, year=year, season=season)
+        if get_app_setting("mikan_preorder_enabled", "0", db) == "1":
+            created = _create_mikan_trials(db, year=year, season=season, payload=payload)
+            for subscription in created:
+                background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-preorder")
+            result["trial_created"] = len(created)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Mikan 强制更新失败：{exc}") from exc
+
+
+@app.get("/api/discovery/mikan/preorder", dependencies=[Depends(require_admin)])
+def get_mikan_preorder(db: Session = Depends(get_db)) -> dict[str, bool]:
+    return {"enabled": get_app_setting("mikan_preorder_enabled", "0", db) == "1"}
+
+
+@app.put("/api/discovery/mikan/preorder", dependencies=[Depends(require_admin)])
+def set_mikan_preorder(enabled: bool, db: Session = Depends(get_db)) -> dict[str, bool]:
+    set_app_setting(db, "mikan_preorder_enabled", "1" if enabled else "0")
+    return {"enabled": enabled}
+
+
+@app.post("/api/discovery/mikan/trials", dependencies=[Depends(require_admin)])
+def create_mikan_trials(
+    payload: MikanTrialRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, int | str]:
+    created = _create_mikan_trials(db, year=payload.year, season=payload.season)
+    for subscription in created:
+        background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-trial-batch")
+    return {"created": len(created), "message": f"已加入 {len(created)} 部 Mikan 试看，首个可用剧集将自动下载"}
 
 
 @app.put(

@@ -1196,6 +1196,14 @@ async function loadMikanCatalog(form, forceRefresh = false) {
   refreshButton.disabled = true;
   activeButton.textContent = forceRefresh ? '正在强制更新…' : '正在读取缓存…';
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
+  const preorder = document.getElementById('mikanPreorderEnabled');
+  const preorderControl = document.getElementById('mikanPreorderControl');
+  preorderControl.classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  document.getElementById('createMikanTrials').classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  if (activeCatalogSource === 'mikan') {
+    const preorderState = await api('/api/discovery/mikan/preorder');
+    preorder.checked = Boolean(preorderState.enabled);
+  }
   state.textContent = forceRefresh
     ? `正在更新 ${source.label} 的 ${year} ${season}番剧周历…`
     : `正在读取 ${source.label} 的 ${year} ${season}缓存…`;
@@ -1289,7 +1297,8 @@ function createSubscriptionCard(sub) {
   titleRow.className = 'subscription-title';
   titleRow.append(text('h3', sub.canonical_title || sub.name));
   if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
-  titleRow.append(text('span', sub.last_error ? '异常' : sub.enabled ? '启用' : '停用', `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`));
+  const stateLabel = sub.last_error ? '异常' : sub.subscription_mode === 'trial' ? '试看' : sub.enabled ? '启用' : '停用';
+  titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.subscription_mode === 'trial' ? 'scheduled' : sub.enabled ? 'queued' : 'skipped'}`));
   content.append(titleRow);
   if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
   const details = document.createElement('details');
@@ -1341,6 +1350,15 @@ function createSubscriptionCard(sub) {
     showNotice('订阅状态已更新');
     await reloadAll();
   });
+  if (sub.subscription_mode === 'trial') {
+    const promote = text('button', '转为订阅', 'secondary');
+    promote.addEventListener('click', async () => {
+      await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ subscription_mode: 'subscribed' }) });
+      showNotice('试看已转为持续订阅，后续集数会在下次 RSS 检查时下载');
+      await reloadAll();
+    });
+    controls.append(promote);
+  }
   const remove = text('button', '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
@@ -2323,6 +2341,36 @@ document.getElementById('batchExportSubscriptions').addEventListener('click', ()
   exportSubscriptionData(ids).catch((error) => showNotice(error.message, false));
 });
 document.getElementById('batchImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
+document.getElementById('mikanPreorderEnabled').addEventListener('change', async (event) => {
+  if (activeCatalogSource !== 'mikan') {
+    event.currentTarget.checked = false;
+    showNotice('预定新番仅适用于 Mikan 目录', false);
+    return;
+  }
+  try {
+    const data = await api(`/api/discovery/mikan/preorder?enabled=${event.currentTarget.checked ? 'true' : 'false'}`, { method: 'PUT' });
+    event.currentTarget.checked = data.enabled;
+    showNotice(data.enabled ? '已开启预定新番；强制更新目录时会自动加入试看' : '已关闭预定新番');
+  } catch (error) {
+    event.currentTarget.checked = !event.currentTarget.checked;
+    showNotice(error.message, false);
+  }
+});
+document.getElementById('createMikanTrials').addEventListener('click', async () => {
+  if (activeCatalogSource !== 'mikan') { showNotice('全部试看仅适用于 Mikan 目录', false); return; }
+  const form = document.getElementById('mikanCatalogForm');
+  const year = form.elements.year.value;
+  const season = form.elements.season.value;
+  if (!window.confirm(`将 ${year} ${season}中所有未隐藏、未订阅的 Mikan 番剧加入试看，并仅下载首个可用剧集。确认继续吗？`)) return;
+  const button = document.getElementById('createMikanTrials');
+  button.disabled = true;
+  try {
+    const result = await api('/api/discovery/mikan/trials', { method: 'POST', body: JSON.stringify({ year: Number(year), season }) });
+    showNotice(result.message);
+    await reloadAll();
+  } catch (error) { showNotice(error.message, false); }
+  finally { button.disabled = false; }
+});
 document.getElementById('exportSubscriptions').addEventListener('click', () => exportSubscriptionData().catch((error) => showNotice(error.message, false)));
 document.getElementById('openImportSubscriptions').addEventListener('click', () => openSubscriptionImportModal());
 document.getElementById('openCollectionImport').addEventListener('click', () => openSubscriptionImportModal({ collection: true }));

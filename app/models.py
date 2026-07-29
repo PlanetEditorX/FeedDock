@@ -44,6 +44,8 @@ class Subscription(Base):
     source_type: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     source_anime_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     canonical_key: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    # Trial subscriptions retain their RSS identity but stop after one episode.
+    subscription_mode: Mapped[str] = mapped_column(String(20), default="subscribed", nullable=False)
 
     # Metadata used to identify and organize a title. These fields are optional
     # and do not call third-party metadata APIs by themselves.

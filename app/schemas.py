@@ -31,6 +31,7 @@ class SubscriptionCreate(BaseModel):
     source_type: str = Field(default="", max_length=32)
     source_anime_id: str = Field(default="", max_length=120)
     canonical_key: str = Field(default="", max_length=255)
+    subscription_mode: Literal["subscribed", "trial"] = "subscribed"
     reference_title: str = ""
     tmdb_title: str = ""
     bgm_url: str = ""
@@ -95,6 +96,7 @@ class SubscriptionUpdate(BaseModel):
     source_type: str | None = Field(default=None, max_length=32)
     source_anime_id: str | None = Field(default=None, max_length=120)
     canonical_key: str | None = Field(default=None, max_length=255)
+    subscription_mode: Literal["subscribed", "trial"] | None = None
     reference_title: str | None = None
     tmdb_title: str | None = None
     bgm_url: str | None = None
@@ -205,6 +207,7 @@ class SubscriptionOut(BaseModel):
     source_type: str = "other"
     source_anime_id: str = ""
     canonical_key: str = ""
+    subscription_mode: Literal["subscribed", "trial"] = "subscribed"
     reference_title: str
     tmdb_title: str
     bgm_url: str
@@ -272,6 +275,11 @@ class SubscriptionPreviewRequest(SubscriptionCreate):
     @classmethod
     def strip_sample_title(cls, value: str) -> str:
         return value.strip()
+
+
+class MikanTrialRequest(BaseModel):
+    year: int = Field(ge=2000, le=2100)
+    season: Literal["冬", "春", "夏", "秋"]
 
 
 class SubscriptionPreviewOut(BaseModel):

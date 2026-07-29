@@ -154,6 +154,16 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertEqual(restored, {"updated": 1, "hidden": 0})
         self.assertEqual(list(self.db.scalars(select(AnimePreference))), [])
 
+    def test_trial_subscription_mode_is_persisted(self) -> None:
+        subscription = Subscription(
+            name="试看动画",
+            rss_url="https://example.test/trial.xml",
+            subscription_mode="trial",
+        )
+        self.db.add(subscription)
+        self.db.commit()
+        self.assertEqual(self.db.get(Subscription, subscription.id).subscription_mode, "trial")
+
 
     def test_auto_skip_blocks_enabling_subscription_without_rename(self) -> None:
         subscription = Subscription(
@@ -297,6 +307,8 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("loadHiddenAnimePreferences", app_js)
         self.assertIn("取消隐藏", app_js)
         self.assertIn('data-view-target="settings-hidden"', index)
+        self.assertIn('id="createMikanTrials"', index)
+        self.assertIn('id="mikanPreorderEnabled"', index)
         self.assertIn('name="primary-navigation"', index)
         styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
         self.assertEqual(index.count('class="nav-chevron"'), 4)
