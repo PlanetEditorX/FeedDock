@@ -155,7 +155,16 @@ legend { padding: 0 8px; color: var(--text); font-weight: 750; }
 /* Mikan season catalog */
 .catalog-controls { display: grid; grid-template-columns: 140px 140px minmax(240px, 1fr) auto; gap: 14px; align-items: end; }
 .catalog-controls label { display: grid; gap: 6px; color: var(--muted); }
-.catalog-controls .form-actions { padding-bottom: 1px; }
+/* The preorder toggle adds a fifth catalog-control cell. Keep commands on a
+   dedicated full-width row so they never collapse into a narrow single cell. */
+.catalog-controls .form-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  width: 100%;
+  padding-bottom: 1px;
+}
+.catalog-controls .form-actions > button { width: 100%; min-width: 0; }
 .mikan-catalog { display: grid; gap: 18px; margin-top: 18px; }
 .mikan-weekday-section { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
 .mikan-weekday-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
