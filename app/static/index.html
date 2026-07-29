@@ -249,7 +249,7 @@
 <label class="checkbox-label"><input checked="" name="rename_enabled" type="checkbox"/>下载后通过 qBittorrent 规范化文件名</label>
 <label class="checkbox-label"><input name="missing_detection" type="checkbox"/>遗漏检测</label><label class="checkbox-label"><input name="only_latest" type="checkbox"/>只下载最新集</label><label class="checkbox-label"><input name="auto_disable_when_complete" type="checkbox"/>全部下载完成后自动停用</label><label>连续未更新告警（天，0 关闭）<input max="3650" min="0" name="stale_days" type="number" value="0"/></label><label class="checkbox-label"><input checked="" name="enabled" type="checkbox"/>启用订阅</label>
 </div><div class="preview-box muted" id="subscriptionPreview">尚未预览。</div></details>
-<div class="form-actions"><button id="saveSubscription" type="submit">保存订阅</button><button class="secondary" id="previewSubscription" type="button">预览规则和命名</button><button class="secondary" id="cancelSubscriptionEdit" type="button">取消添加</button></div>
+<div class="form-actions"><button id="saveSubscription" type="submit">保存订阅</button><button class="secondary hidden" id="trialSubscription" type="button">试看</button><button class="secondary" id="previewSubscription" type="button">预览规则和命名</button><button class="secondary" id="cancelSubscriptionEdit" type="button">取消添加</button></div>
 </form>
 <p class="hint panel-body">下载根目录自动与 qBittorrent 保持一致；目录结构请通过模板设置。路径变量：<code>{base}</code>、<code>{media_folder}</code>、<code>{title}</code>、<code>{season:02}</code>、<code>{episode:02}</code>、<code>{year}</code>、<code>{tmdb_id}</code>。</p>
 </section>

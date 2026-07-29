@@ -165,6 +165,7 @@ def build_subscription_index(subscriptions: Iterable[Subscription]) -> tuple[dic
             "subscription_id": subscription.id,
             "source_type": source_type,
             "source_label": source.label,
+            "subscription_mode": subscription.subscription_mode,
             "enabled": bool(subscription.enabled),
             "source_anime_id": subscription.source_anime_id or source_anime_id_from_url(source_type, subscription.rss_url),
         }
@@ -242,17 +243,22 @@ def decorate_item(
     result = dict(item)
     key = item_identity(result)
     matches = matching_subscriptions(result, subscription_index, alias_index)
+    subscribed_matches = [record for record in matches if record.get("subscription_mode") != "trial"]
+    trial_matches = [record for record in matches if record.get("subscription_mode") == "trial"]
     source_labels: list[str] = []
-    for record in matches:
+    for record in subscribed_matches:
         if record["source_label"] not in source_labels:
             source_labels.append(record["source_label"])
-    subscribed_here = any(record["source_type"] == current_source for record in matches)
+    subscribed_here = any(record["source_type"] == current_source for record in subscribed_matches)
     result["canonical_key"] = key
     result["subscriptions"] = matches
-    result["subscribed"] = bool(matches)
+    result["subscribed"] = bool(subscribed_matches)
+    result["trialed"] = bool(trial_matches) and not bool(subscribed_matches)
     result["subscribed_here"] = subscribed_here
     result["subscribed_sources"] = source_labels
-    if subscribed_here:
+    if result["trialed"]:
+        result["subscription_badge"] = "已试看"
+    elif subscribed_here:
         other_sources = [label for label in source_labels if label != get_subscription_source(current_source).label]
         result["subscription_badge"] = "✓ 已订阅" + (f" · {'、'.join(other_sources)} 也已订阅" if other_sources else "")
     else:

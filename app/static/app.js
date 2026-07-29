@@ -103,7 +103,7 @@ async function openCatalogSource(sourceId, { autoLoad = false } = {}) {
   showAppView('add-catalog');
   const preorderControl = document.getElementById('mikanPreorderControl');
   preorderControl.classList.toggle('hidden', activeCatalogSource !== 'mikan');
-  document.getElementById('createMikanTrials').classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  document.getElementById('createMikanTrials').classList.toggle('hidden', !['mikan', 'anibt', 'ag'].includes(activeCatalogSource));
   if (activeCatalogSource === 'mikan') await loadMikanPreorderState();
   const state = document.getElementById('mikanCatalogState');
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
@@ -251,6 +251,7 @@ function resetSubscriptionForm() {
   document.getElementById('subscriptionFormTitle').textContent = '添加订阅';
   renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, 'other'));
   document.getElementById('saveSubscription').textContent = '保存订阅';
+  document.getElementById('trialSubscription').classList.add('hidden');
   document.getElementById('cancelSubscriptionEdit').textContent = '取消添加';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   document.getElementById('searchRssCandidates').classList.add('hidden');
@@ -681,6 +682,12 @@ function applyDiscoveryPreset(preset) {
     'missing_detection', 'only_latest', 'auto_disable_when_complete', 'stale_days', 'enabled', 'sample_title', 'bangumi_id',
   ];
   fields.forEach((field) => setFormValue(subscriptionForm, field, preset[field]));
+  const alreadyTracked = currentSubscriptions.some((subscription) => (
+    String(subscription.rss_url || '') === String(preset.rss_url || '')
+    || (preset.source_anime_id && String(subscription.source_type || '') === String(preset.source_type || '')
+      && String(subscription.source_anime_id || '') === String(preset.source_anime_id || ''))
+  ));
+  document.getElementById('trialSubscription').classList.toggle('hidden', alreadyTracked);
   syncMetadataSearchQuery({ force: true });
   document.getElementById('subscriptionFormTitle').textContent = `添加订阅：${preset.name || '未命名番剧'}`;
   subscriptionPreviewBox.textContent = preset.sample_title
@@ -785,29 +792,34 @@ function syncMikanCatalogSubscriptionState(subscriptions) {
   const currentSourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
   currentMikanCatalogData.rows.forEach((row) => row.items.forEach((item) => {
     const matches = subscriptions.filter((subscription) => subscriptionMatchesCatalogItem(subscription, item));
+    const subscribedMatches = matches.filter((subscription) => subscription.subscription_mode !== 'trial');
+    const trialMatches = matches.filter((subscription) => subscription.subscription_mode === 'trial');
     const sourceLabels = [];
-    matches.forEach((subscription) => {
+    subscribedMatches.forEach((subscription) => {
       const label = subscriptionSourceState.getSource(
         subscriptionSources,
         subscription.source_type || 'other',
       ).label;
       if (!sourceLabels.includes(label)) sourceLabels.push(label);
     });
-    const subscribedHere = matches.some(
+    const subscribedHere = subscribedMatches.some(
       (subscription) => String(subscription.source_type || '') === activeCatalogSource,
     );
     const otherLabels = sourceLabels.filter((label) => label !== currentSourceLabel);
-    const badge = subscribedHere
+    const trialed = trialMatches.length > 0 && subscribedMatches.length === 0;
+    const badge = trialed ? '已试看' : subscribedHere
       ? `✓ 已订阅${otherLabels.length ? ` · ${otherLabels.join('、')} 也已订阅` : ''}`
       : (sourceLabels.length ? `${sourceLabels.join('、')} 已订阅` : '');
     const next = {
-      subscribed: matches.length > 0,
+      subscribed: subscribedMatches.length > 0,
+      trialed,
       subscribed_here: subscribedHere,
       subscribed_sources: sourceLabels,
       subscription_badge: badge,
     };
     if (
       Boolean(item.subscribed) !== next.subscribed
+      || Boolean(item.trialed) !== next.trialed
       || Boolean(item.subscribed_here) !== next.subscribed_here
       || String(item.subscription_badge || '') !== next.subscription_badge
       || JSON.stringify(item.subscribed_sources || []) !== JSON.stringify(next.subscribed_sources)
@@ -921,6 +933,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   if (!editing) card.type = 'button';
   card.className = 'mikan-anime-card';
   if (item.subscribed) card.classList.add('is-subscribed');
+  if (item.trialed) card.classList.add('is-trialed');
   if (editing) card.classList.add('is-filter-editing');
   if (hiddenDraft) card.classList.add('is-filter-hidden');
   if (!editing) {
@@ -954,7 +967,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   const titleRow = document.createElement('div');
   titleRow.className = 'mikan-anime-title-row';
   titleRow.append(text('strong', item.title));
-  if (item.subscribed) titleRow.append(text('span', item.subscription_badge || '✓ 已订阅', 'mikan-subscribed-badge'));
+  if (item.subscribed || item.trialed) titleRow.append(text('span', item.subscription_badge || (item.trialed ? '已试看' : '✓ 已订阅'), 'mikan-subscribed-badge'));
   info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
@@ -1202,7 +1215,7 @@ async function loadMikanCatalog(form, forceRefresh = false) {
   const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
   const preorderControl = document.getElementById('mikanPreorderControl');
   preorderControl.classList.toggle('hidden', activeCatalogSource !== 'mikan');
-  document.getElementById('createMikanTrials').classList.toggle('hidden', activeCatalogSource !== 'mikan');
+  document.getElementById('createMikanTrials').classList.toggle('hidden', !['mikan', 'anibt', 'ag'].includes(activeCatalogSource));
   if (activeCatalogSource === 'mikan') await loadMikanPreorderState();
   state.textContent = forceRefresh
     ? `正在更新 ${source.label} 的 ${year} ${season}番剧周历…`
@@ -1350,15 +1363,6 @@ function createSubscriptionCard(sub) {
     showNotice('订阅状态已更新');
     await reloadAll();
   });
-  if (sub.subscription_mode === 'trial') {
-    const promote = text('button', '转为订阅', 'secondary');
-    promote.addEventListener('click', async () => {
-      await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ subscription_mode: 'subscribed' }) });
-      showNotice('试看已转为持续订阅，后续集数会在下次 RSS 检查时下载');
-      await reloadAll();
-    });
-    controls.append(promote);
-  }
   const remove = text('button', '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
@@ -2365,16 +2369,35 @@ document.getElementById('mikanPreorderToggle').addEventListener('click', async (
     showNotice(error.message, false);
   } finally { button.disabled = false; }
 });
+
+document.getElementById('trialSubscription').addEventListener('click', async () => {
+  const formData = new FormData(subscriptionForm);
+  const button = document.getElementById('trialSubscription');
+  button.disabled = true;
+  try {
+    const payload = subscriptionPayload({ formData });
+    payload.subscription_mode = 'trial';
+    await api('/api/subscriptions', { method: 'POST', body: JSON.stringify(payload) });
+    resetSubscriptionForm();
+    showNotice('已加入试看，首个可用剧集将推送到 qBittorrent');
+    await reloadAll();
+    showAppView('subscriptions');
+  } catch (error) { showNotice(error.message, false); }
+  finally { button.disabled = false; }
+});
 document.getElementById('createMikanTrials').addEventListener('click', async () => {
-  if (activeCatalogSource !== 'mikan') { showNotice('全部试看仅适用于 Mikan 目录', false); return; }
   const form = document.getElementById('mikanCatalogForm');
   const year = form.elements.year.value;
   const season = form.elements.season.value;
-  if (!window.confirm(`将 ${year} ${season}中所有未隐藏、未订阅的 Mikan 番剧加入试看，并仅下载首个可用剧集。确认继续吗？`)) return;
+  const source = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource);
+  if (!window.confirm(`将 ${year} ${season}中所有未隐藏、未订阅、未试看过的 ${source.label} 番剧加入试看，并仅下载首个可用剧集。确认继续吗？`)) return;
   const button = document.getElementById('createMikanTrials');
   button.disabled = true;
   try {
-    const result = await api('/api/discovery/mikan/trials', { method: 'POST', body: JSON.stringify({ year: Number(year), season }) });
+    const path = activeCatalogSource === 'mikan'
+      ? '/api/discovery/mikan/trials'
+      : `/api/discovery/catalog/${activeCatalogSource}/trials`;
+    const result = await api(path, { method: 'POST', body: JSON.stringify({ year: Number(year), season }) });
     showNotice(result.message, Number(result.created || 0) > 0);
     await reloadAll();
   } catch (error) { showNotice(error.message, false); }

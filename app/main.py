@@ -321,7 +321,7 @@ def _create_mikan_trials(
     created: list[Subscription] = []
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
-            if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
+            if item.get("hidden") or item.get("subscribed") or item.get("trialed") or not int(item.get("bangumi_id") or 0):
                 continue
             try:
                 detail = service.detail(
@@ -344,6 +344,43 @@ def _create_mikan_trials(
             created.append(subscription)
     if created:
         add_log(db, "INFO", f"已创建 {len(created)} 条 Mikan 试看订阅", f"季度：{year} {season}")
+        db.commit()
+    return created
+
+
+def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: str) -> list[Subscription]:
+    """Create first-episode trial records for any supported native catalog."""
+    service = AnimeCatalogCacheService()
+    catalog = service.catalog(db, source_id, year, season)
+    decorated = decorate_catalog(
+        catalog,
+        source_id,
+        list(db.scalars(select(Subscription))),
+        list(db.scalars(select(AnimePreference).where(AnimePreference.hidden.is_(True)))),
+    )
+    created: list[Subscription] = []
+    for row in decorated.get("rows", []):
+        for item in row.get("items", []):
+            if item.get("hidden") or item.get("subscribed") or item.get("trialed"):
+                continue
+            try:
+                detail = service.detail(db, source_id, item)
+            except Exception as exc:
+                add_log(db, "WARNING", f"试看未能读取 {source_id} RSS：{item.get('title') or '未命名番剧'}", str(exc))
+                continue
+            preset = next((group.get("preset") for group in detail.get("groups", []) if group.get("preset")), None)
+            if not isinstance(preset, dict):
+                continue
+            values = dict(preset)
+            values["subscription_mode"] = "trial"
+            values = _subscription_values(SubscriptionCreate.model_validate(values), db)
+            if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
+                continue
+            subscription = Subscription(**values)
+            db.add(subscription)
+            db.flush()
+            created.append(subscription)
+    if created:
         db.commit()
     return created
 
@@ -982,6 +1019,24 @@ def source_catalog(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"{source_id} 番剧周历读取失败：{exc}") from exc
+
+
+@app.post("/api/discovery/catalog/{source_id}/trials", dependencies=[Depends(require_admin)])
+def create_catalog_trials(
+    source_id: str,
+    payload: MikanTrialRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict[str, int | str]:
+    if source_id not in {"anibt", "ag"}:
+        raise HTTPException(status_code=422, detail="该目录不支持批量试看")
+    created = _create_catalog_trials(db, source_id=source_id, year=payload.year, season=payload.season)
+    for subscription in created:
+        background_tasks.add_task(refresh_subscription, subscription.id, trigger=f"{source_id}-trial-batch")
+    return {
+        "created": len(created),
+        "message": f"已加入 {len(created)} 部{source_id}试看，首个可用剧集将自动下载" if created else "没有可加入试看的番剧，请确认目录已加载且作品尚未订阅或试看。",
+    }
 
 
 @app.post("/api/discovery/catalog/{source_id}/refresh", dependencies=[Depends(require_admin)])

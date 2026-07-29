@@ -603,6 +603,7 @@ class MikanCatalogItemOut(BaseModel):
     base_url: str
     hidden: bool = False
     subscribed: bool = False
+    trialed: bool = False
     subscribed_here: bool = False
     subscribed_sources: list[str] = Field(default_factory=list)
     subscription_badge: str = ""
