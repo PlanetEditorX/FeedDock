@@ -9,7 +9,6 @@ import time
 import re
 import threading
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import unquote, urlparse
 
@@ -20,6 +19,7 @@ from .config import settings
 from .database import SessionLocal
 from .debug_logging import debug_enabled, format_exception_details, log_event
 from .downloader import DownloaderResult, QBittorrentClient
+from .episode import apply_episode_offset, episode_number, parse_episode
 from .models import FeedItem, Subscription, SystemLog
 from .media_paths import map_downloader_path_to_local
 from .naming import is_video_file, media_folder_name, naming_context, render_desired_name
@@ -41,11 +41,6 @@ from .scraper import cleanup_orphaned_metadata
 _refresh_lock = threading.Lock()
 _MAGNET_RE = re.compile(r"magnet:\?[^\s\"'<>]+", re.IGNORECASE)
 _REGEX_HINT_RE = re.compile(r"[\\.^$*+?{}\[\]|()]")
-_DEFAULT_EPISODE_PATTERNS = (
-    re.compile(r"(?:\bE(?:P)?|Episode|第)\s*0*(\d{1,4}(?:\.5)?)(?:\s*[集话])?", re.IGNORECASE),
-    re.compile(r"-\s*0*(\d{1,4}(?:\.5)?)(?:\s*(?:v\d+)?\s*(?:\[|\(|$))", re.IGNORECASE),
-    re.compile(r"\[\s*0*(\d{1,4}(?:\.5)?)\s*\]"),
-)
 _MAX_TORRENT_FILE_BYTES = 20 * 1024 * 1024
 
 
@@ -132,52 +127,6 @@ def match_title(
     if includes and not any(_rule_matches(title, rule) for rule in includes):
         return False, "未命中任一匹配规则"
     return True, "匹配成功"
-
-
-def _normalize_episode_value(value: str) -> str:
-    cleaned = value.strip()
-    try:
-        number = Decimal(cleaned)
-    except InvalidOperation:
-        return cleaned
-    if number == number.to_integral_value():
-        return str(int(number))
-    return format(number.normalize(), "f")
-
-
-def episode_number(value: str) -> Decimal | None:
-    try:
-        return Decimal(value.strip())
-    except (InvalidOperation, AttributeError):
-        return None
-
-
-def parse_episode(title: str, custom_regex: str = "", group_index: int = 1) -> str:
-    if custom_regex:
-        try:
-            match = re.search(custom_regex, title, flags=re.IGNORECASE)
-        except re.error:
-            return ""
-        if match:
-            try:
-                value = match.group(group_index)
-            except IndexError:
-                value = match.group(1) if match.groups() else match.group(0)
-            if value is not None:
-                return _normalize_episode_value(str(value))
-
-    for pattern in _DEFAULT_EPISODE_PATTERNS:
-        match = pattern.search(title)
-        if match:
-            return _normalize_episode_value(match.group(1))
-    return ""
-
-
-def apply_episode_offset(value: str, offset: int) -> str:
-    number = episode_number(value)
-    if number is None:
-        return value
-    return _normalize_episode_value(str(number + Decimal(offset)))
 
 
 def _entry_value(entry: Any, key: str, default: Any = "") -> Any:

@@ -21,6 +21,7 @@
 ## 参考资料
 
 - [调试日志](reference/DEBUG_LOGGING.md)
+- [集数解析规则](reference/EPISODE_PARSING.md)
 - [验证报告](reference/VALIDATION.md)
 
 ## 历史设计资料

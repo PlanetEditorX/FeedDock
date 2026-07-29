@@ -6,14 +6,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.rss_parser import parse_feed
+from app.episode import apply_episode_offset, episode_number, parse_episode
 from app.downloader import DownloaderResult
 from app.database import Base
 from app.models import FeedItem, Subscription, SystemLog
 from app.rss_service import (
-    apply_episode_offset,
     extract_download_url,
     match_title,
-    parse_episode,
     preview_subscription,
     process_subscription,
     refresh_subscription,
@@ -32,6 +31,17 @@ class RSSServiceTests(unittest.TestCase):
         self.assertEqual(parse_episode("Example EP12"), "12")
         self.assertEqual(parse_episode("Example 第7集"), "7")
         self.assertEqual(parse_episode("Example S02E09", r"S\d+E(\d+)"), "9")
+
+    def test_episode_parser_returns_empty_value_for_invalid_custom_regex(self):
+        self.assertEqual(parse_episode("Example - 003 [1080p]", "["), "")
+
+    def test_episode_parser_falls_back_from_missing_capture_group(self):
+        self.assertEqual(parse_episode("Example EP013", r"EP(\d+)", 3), "13")
+
+    def test_episode_number_and_offset_keep_decimal_precision(self):
+        self.assertEqual(str(episode_number("13.50")), "13.50")
+        self.assertEqual(apply_episode_offset("13.50", -13), "0.5")
+        self.assertEqual(apply_episode_offset("special", 1), "special")
 
     def test_download_url_prefers_torrent_enclosure(self):
         entry = {
