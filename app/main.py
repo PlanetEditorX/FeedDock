@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -55,7 +56,7 @@ from .notification.service import preview_notification
 from .metadata_service import MetadataService
 from .metadata_tasks import refresh_all_metadata, scrape_completed_media
 from .models import AdminAccount, AnimePreference, FeedItem, Subscription, SystemLog
-from .naming import canonical_title, media_folder_name
+from .naming import canonical_title, media_folder_name, title_with_year
 from .postprocess import normalize_pending_items
 from .download_cleanup import cleanup_completed_torrent_records
 from .subscription_monitor import reset_monitor_state_for_changes
@@ -125,6 +126,7 @@ from .schemas import (
     LoginRequest,
     LogOut,
     LogSettingsUpdate,
+    ManualTrialStartRequest,
     MetadataApplyRequest,
     MetadataCandidateOut,
     MetadataRecordOut,
@@ -1957,6 +1959,74 @@ def start_trial_subscription(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=f"元数据刷新或试看启动失败：{exc}") from exc
+    return _subscription_out(db, subscription)
+
+
+@app.post(
+    "/api/subscriptions/{subscription_id}/trial/start-manual",
+    response_model=SubscriptionOut,
+    dependencies=[Depends(require_admin)],
+)
+def start_trial_subscription_manual(
+    subscription_id: int,
+    payload: ManualTrialStartRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    """Store user-confirmed metadata, then promote and enable a trial."""
+
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    if subscription.subscription_mode != "trial":
+        raise HTTPException(status_code=409, detail="该订阅不是试看订阅")
+    try:
+        subscription.name = title_with_year(payload.title, payload.year)
+        subscription.reference_title = payload.title
+        subscription.manual_title = payload.title
+        subscription.tmdb_title = ""
+        subscription.naming_mode = "manual"
+        subscription.media_type = payload.media_type
+        subscription.season = payload.season
+        subscription.season_mode = "manual"
+        subscription.metadata_year = payload.year
+        subscription.metadata_rating = payload.rating
+        subscription.metadata_source = "manual"
+        subscription.metadata_overview = payload.overview or subscription.metadata_overview
+        subscription.poster_url = payload.poster_url or subscription.poster_url
+        subscription.backdrop_url = payload.backdrop_url or subscription.backdrop_url
+        subscription.metadata_last_synced_at = datetime.now(timezone.utc)
+        subscription.metadata_confirmed = True
+        subscription.metadata_review_skipped = False
+        subscription.auto_metadata = False
+        subscription.tmdb_id = 0
+        subscription.bangumi_id = 0
+        subscription.anilist_id = 0
+        subscription.bgm_url = ""
+        if payload.air_date:
+            subscription.air_date = payload.air_date.isoformat()
+        if payload.total_episodes > 0:
+            subscription.total_episodes = payload.total_episodes
+            subscription.total_episodes_source = "manual"
+            subscription.total_episodes_locked = True
+        _refresh_subscription_identity(db, subscription)
+        values = _subscription_values(
+            SubscriptionUpdate(enabled=True),
+            db,
+            existing=subscription,
+        )
+        _validate_auto_skip_rename_requirement(db, values, existing=subscription)
+        _clear_trial_only_skips(db, subscription, values)
+        reset_monitor_state_for_changes(subscription, values)
+        for key, value in values.items():
+            setattr(subscription, key, value)
+        db.commit()
+        db.refresh(subscription)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"手动元数据保存或试看启动失败：{exc}") from exc
     return _subscription_out(db, subscription)
 
 

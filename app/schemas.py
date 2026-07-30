@@ -546,6 +546,24 @@ class MetadataApplyRequest(BaseModel):
     season_mode: str = Field(default="title", pattern="^(manual|latest|title)$")
 
 
+class ManualTrialStartRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    media_type: str = Field(default="tv", pattern="^(tv|movie)$")
+    year: int = Field(default=0, ge=0, le=9999)
+    season: int = Field(default=1, ge=0, le=999)
+    total_episodes: int = Field(default=0, ge=0, le=10000)
+    air_date: date | None = None
+    rating: float = Field(default=0.0, ge=0.0, le=10.0)
+    poster_url: str = Field(default="", max_length=4000)
+    backdrop_url: str = Field(default="", max_length=4000)
+    overview: str = Field(default="", max_length=20000)
+
+    @field_validator("title", "poster_url", "backdrop_url", "overview")
+    @classmethod
+    def strip_manual_metadata_text(cls, value: str) -> str:
+        return value.strip()
+
+
 class MetadataSyncRequest(BaseModel):
     provider: str = Field(default="auto", pattern="^(auto|tmdb|bangumi|anilist)$")
 

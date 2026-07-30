@@ -1764,7 +1764,10 @@ async function loadProxySettings() {
 
 let reviewSubscription = null;
 let reviewAction = 'confirm';
+let reviewAutoCloseTimer = null;
 function closeMetadataReview() {
+  if (reviewAutoCloseTimer) window.clearTimeout(reviewAutoCloseTimer);
+  reviewAutoCloseTimer = null;
   document.getElementById('metadataReviewModal').classList.add('hidden');
   document.getElementById('reviewSkip').classList.remove('hidden');
   document.querySelector('#metadataReviewModal .metadata-search-row').classList.remove('hidden');
@@ -1773,8 +1776,16 @@ function closeMetadataReview() {
   reviewAction = 'confirm';
 }
 function openMetadataReview(subscription, { action = 'confirm', required = false } = {}) {
+  if (reviewAutoCloseTimer) window.clearTimeout(reviewAutoCloseTimer);
+  reviewAutoCloseTimer = null;
   reviewSubscription = subscription;
   reviewAction = action;
+  const manualOption = document.getElementById('reviewManualOption');
+  manualOption.hidden = action !== 'start-trial';
+  manualOption.disabled = action !== 'start-trial';
+  document.getElementById('reviewProvider').value = 'tmdb';
+  document.querySelector('#metadataReviewModal .metadata-query').classList.remove('hidden');
+  document.getElementById('reviewSearch').classList.remove('hidden');
   document.getElementById('metadataReviewTitle').textContent = required ? `选择元数据后启动：${subscription.name}` : `确认：${subscription.name}`;
   document.getElementById('reviewQuery').value = subscription.name || subscription.reference_title || '';
   document.getElementById('reviewSkip').classList.toggle('hidden', required);
@@ -1783,6 +1794,86 @@ function openMetadataReview(subscription, { action = 'confirm', required = false
     ? '步骤 1/3：选择匹配的元数据。选择后还会显示季度、集数和首播日期，最终确认前不会启动订阅。'
     : '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
   document.getElementById('metadataReviewModal').classList.remove('hidden'); document.body.classList.add('modal-open');
+}
+
+function manualMetadataTitle(value) {
+  return String(value || '').trim().replace(/\s*[\(（]\d{4}[\)）]\s*$/, '');
+}
+
+function renderManualTrialMetadataForm() {
+  if (!reviewSubscription || reviewAction !== 'start-trial') return;
+  const subscription = reviewSubscription;
+  const container = document.getElementById('reviewResults');
+  container.replaceChildren(); container.className = 'metadata-results';
+  document.getElementById('metadataReviewTitle').textContent = `手动填写元数据后启动：${subscription.name}`;
+  const titleYear = String(subscription.name || '').match(/[\(（](\d{4})[\)）]\s*$/);
+  const form = document.createElement('form'); form.className = 'manual-metadata-form';
+  form.innerHTML = `
+    <p class="metadata-step">步骤 2/3 · 手动核对信息</p>
+    <div class="manual-metadata-grid">
+      <label class="manual-metadata-wide">番剧标题<input name="title" required maxlength="200"></label>
+      <label>类型<select name="media_type"><option value="tv">剧集</option><option value="movie">电影</option></select></label>
+      <label>年份<input name="year" type="number" min="0" max="9999"></label>
+      <label>季度<input name="season" type="number" min="0" max="999"></label>
+      <label>总集数<input name="total_episodes" type="number" min="0" max="10000"></label>
+      <label>首播日期<input name="air_date" type="date"></label>
+      <label>评分<input name="rating" type="number" min="0" max="10" step="0.1"></label>
+      <label class="manual-metadata-wide">海报图片 URL<input name="poster_url" type="url" maxlength="4000"></label>
+      <label class="manual-metadata-wide">背景图片 URL<input name="backdrop_url" type="url" maxlength="4000"></label>
+      <label class="manual-metadata-wide">简介<textarea name="overview" rows="5" maxlength="20000"></textarea></label>
+    </div>
+    <p class="hint">留空的图片和简介将保留试看订阅已有的目录数据；手动填写的总集数会被锁定，避免后续被错误覆盖。</p>
+    <div class="card-actions"><button type="submit">确认手动信息并启动</button></div>
+  `;
+  form.elements.title.value = manualMetadataTitle(subscription.name || subscription.reference_title);
+  form.elements.media_type.value = subscription.media_type || 'tv';
+  form.elements.year.value = subscription.metadata_year || titleYear?.[1] || '';
+  form.elements.season.value = inferSeasonFromTitle(subscription.name) || subscription.season || 1;
+  form.elements.total_episodes.value = subscription.total_episodes || '';
+  form.elements.air_date.value = subscription.air_date || '';
+  form.elements.rating.value = subscription.metadata_rating || '';
+  form.elements.poster_url.value = subscription.poster_url || '';
+  form.elements.backdrop_url.value = subscription.backdrop_url || '';
+  form.elements.overview.value = subscription.metadata_overview || '';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity() || !reviewSubscription) return;
+    const button = form.querySelector('button[type="submit"]');
+    const activeSubscription = reviewSubscription;
+    const payload = {
+      title: form.elements.title.value.trim(),
+      media_type: form.elements.media_type.value,
+      year: Number(form.elements.year.value || 0),
+      season: Number(form.elements.season.value || 1),
+      total_episodes: Number(form.elements.total_episodes.value || 0),
+      air_date: form.elements.air_date.value || null,
+      rating: Number(form.elements.rating.value || 0),
+      poster_url: form.elements.poster_url.value.trim(),
+      backdrop_url: form.elements.backdrop_url.value.trim(),
+      overview: form.elements.overview.value.trim(),
+    };
+    button.disabled = true; button.textContent = '正在保存并启动…';
+    try {
+      await api(`/api/subscriptions/${activeSubscription.id}/trial/start-manual`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      await reloadAll();
+      renderTrialStartSuccess({
+        title: payload.title,
+        year: payload.year,
+        provider: 'manual',
+        media_type: payload.media_type,
+        total_episodes: payload.total_episodes,
+        air_date: payload.air_date || '',
+      }, payload.season, null);
+      showNotice('手动元数据已保存并启动订阅');
+    } catch (error) {
+      button.disabled = false; button.textContent = '确认手动信息并启动';
+      showNotice(error.message, false);
+    }
+  });
+  container.append(form);
 }
 
 function inferSeasonFromTitle(value) {
@@ -1919,12 +2010,13 @@ function renderTrialStartSuccess(detail, season, seasonRow) {
   document.getElementById('metadataReviewTitle').textContent = '启动完成';
   document.querySelector('#metadataReviewModal .metadata-search-row').classList.add('hidden');
   const result = document.createElement('section'); result.className = 'metadata-start-success';
-  result.append(text('span', '步骤 3/3', 'metadata-step'));
   result.append(text('h3', '订阅已启动'));
-  result.append(text('p', `${titleWithYear(detail.title, detail.year)} · ${String(detail.provider).toUpperCase()}${detail.media_type === 'movie' ? '' : ` · 第 ${season} 季`}`));
+  const providerLabel = detail.provider === 'manual' ? '手动' : String(detail.provider).toUpperCase();
+  result.append(text('p', `${titleWithYear(detail.title, detail.year)} · ${providerLabel}${detail.media_type === 'movie' ? '' : ` · 第 ${season} 季`}`));
   result.append(text('p', `元数据已刷新 · ${detail.total_episodes || seasonRow?.episode_count || '未知'} 集 · ${seasonRow?.air_date || detail.air_date || '日期未知'}`, 'muted'));
-  const close = text('button', '完成'); close.type = 'button'; close.addEventListener('click', closeMetadataReview); result.append(close);
+  result.append(text('p', '此窗口将在 3 秒后自动关闭。', 'muted'));
   container.append(result);
+  reviewAutoCloseTimer = window.setTimeout(closeMetadataReview, 3000);
 }
 
 function renderReviewResults(results) {
@@ -2205,9 +2297,9 @@ async function runRssCandidateSearch() {
   const state = document.getElementById('rssCandidateState');
   const container = document.getElementById('rssCandidateResults');
   button.disabled = true;
-  state.textContent = '正在按当前番剧身份搜索 Mikan、ANI.BT 和 Anime Garden…';
+  state.textContent = '正在读取各站番剧与字幕组信息，请稍候…';
   state.className = 'hint';
-  container.replaceChildren(text('p', '正在读取各站番剧与字幕组信息…', 'muted'));
+  container.replaceChildren();
   try {
     const payload = await api(`/api/subscriptions/${rssCandidateSubscription.id}/rss-candidates`, {
       method: 'POST',
@@ -2475,7 +2567,8 @@ document.getElementById('runNetworkDiagnostics').addEventListener('click',async(
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
 document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);
 document.querySelector('[data-close-metadata-review]').addEventListener('click', closeMetadataReview);
-document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在智能搜索；无可靠结果时会自动逐级简化标题…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
+document.getElementById('reviewProvider').addEventListener('change',()=>{const manual=document.getElementById('reviewProvider').value==='manual';document.querySelector('#metadataReviewModal .metadata-query').classList.toggle('hidden',manual);document.getElementById('reviewSearch').classList.toggle('hidden',manual);if(manual)renderManualTrialMetadataForm();});
+document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;if(provider==='manual'){renderManualTrialMetadataForm();return;}const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在智能搜索；无可靠结果时会自动逐级简化标题…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
 document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称');});
 
 document.getElementById('useDefaultSourceFeed').addEventListener('click', () => {

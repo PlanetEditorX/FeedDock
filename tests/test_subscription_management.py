@@ -21,6 +21,7 @@ from app.main import (
     import_subscriptions,
     list_hidden_anime_preferences,
     start_trial_subscription,
+    start_trial_subscription_manual,
     system_status,
     update_hidden_anime_preferences,
 )
@@ -30,6 +31,7 @@ from app.models import AnimePreference, FeedItem, Subscription
 from app.schemas import (
     AnimePreferenceBatchUpdate,
     AnimePreferenceItem,
+    ManualTrialStartRequest,
     MetadataApplyRequest,
     SubscriptionBatchRequest,
     SubscriptionCreate,
@@ -231,6 +233,46 @@ class SubscriptionManagementTests(unittest.TestCase):
             list(self.db.scalars(select(FeedItem).where(FeedItem.subscription_id == subscription.id))),
             [],
         )
+
+    def test_starting_trial_with_manual_metadata_preserves_and_overrides_expected_fields(self) -> None:
+        subscription = Subscription(
+            name="手动试看",
+            rss_url="https://example.test/manual-trial.xml",
+            subscription_mode="trial",
+            enabled=False,
+            rename_enabled=True,
+            poster_url="https://example.test/catalog-poster.jpg",
+            metadata_overview="目录简介",
+        )
+        self.db.add(subscription)
+        self.db.commit()
+
+        started = start_trial_subscription_manual(
+            subscription.id,
+            ManualTrialStartRequest(
+                title="手动番剧",
+                year=2026,
+                season=2,
+                total_episodes=13,
+                air_date="2026-07-08",
+                rating=8.2,
+                poster_url="",
+                overview="手动简介",
+            ),
+            self.db,
+        )
+
+        self.assertTrue(started.enabled)
+        self.assertEqual(started.subscription_mode, "subscribed")
+        self.assertEqual(started.name, "手动番剧 (2026)")
+        self.assertEqual(started.manual_title, "手动番剧")
+        self.assertEqual(started.naming_mode, "manual")
+        self.assertEqual(started.metadata_source, "manual")
+        self.assertEqual(started.season, 2)
+        self.assertEqual(started.total_episodes, 13)
+        self.assertTrue(started.total_episodes_locked)
+        self.assertEqual(started.poster_url, "https://example.test/catalog-poster.jpg")
+        self.assertEqual(started.metadata_overview, "手动简介")
 
     def test_batch_enable_trial_requires_individual_metadata_selection(self) -> None:
         subscription = Subscription(
