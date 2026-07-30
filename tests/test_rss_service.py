@@ -191,6 +191,60 @@ class RSSServiceTests(unittest.TestCase):
             self.assertIn("新订阅自动刷新完成：Auto refresh demo", messages)
         engine.dispose()
 
+    def test_disabled_trial_runs_initial_refresh_and_stays_disabled(self):
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        factory = sessionmaker(bind=engine)
+        with factory() as db:
+            subscription = Subscription(
+                name="Trial refresh demo",
+                rss_url="https://example.test/trial.xml",
+                subscription_mode="trial",
+                enabled=False,
+                rename_enabled=False,
+            )
+            db.add(subscription)
+            db.commit()
+            subscription_id = subscription.id
+
+        entries = [{
+            "id": "trial-1",
+            "title": "Trial refresh demo - 01 [1080p]",
+            "link": "https://example.test/post/1",
+            "enclosures": [{
+                "href": "https://example.test/trial-1.torrent",
+                "type": "application/x-bittorrent",
+            }],
+        }]
+        fake_qbit = type("FakeQbit", (), {
+            "add_url": lambda self, *_args, **_kwargs: DownloaderResult(
+                True,
+                "qBittorrent 已确认试看任务",
+                torrent_hash="trial-hash",
+                verified=True,
+            )
+        })()
+        with (
+            patch("app.rss_service.SessionLocal", factory),
+            patch("app.rss_service._refresh_total_episodes_if_due"),
+            patch("app.rss_service._sync_metadata_if_due"),
+            patch("app.rss_service._load_subscription_entries", return_value=(entries, "测试 RSS")),
+            patch("app.rss_service.evaluate_missing_episodes"),
+            patch("app.rss_service.evaluate_stale_subscription"),
+            patch("app.rss_service.evaluate_subscription_completion"),
+            patch("app.rss_service.QBittorrentClient", return_value=fake_qbit),
+        ):
+            result = refresh_subscription(subscription_id, trigger="subscription-created")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["queued"], 1)
+        with factory() as db:
+            subscription = db.get(Subscription, subscription_id)
+            self.assertFalse(subscription.enabled)
+            self.assertEqual(subscription.subscription_mode, "trial")
+            self.assertEqual(db.query(FeedItem).one().status, "queued")
+        engine.dispose()
+
 
     def test_orphan_cleanup_runs_even_when_rss_switch_is_disabled(self):
         engine = create_engine("sqlite+pysqlite:///:memory:")

@@ -52,6 +52,8 @@ class TrialPolicyTests(unittest.TestCase):
 
         self.assertEqual(single["save_path_template"], SINGLE_TRIAL_SAVE_PATH_TEMPLATE)
         self.assertEqual(bulk["save_path_template"], BULK_TRIAL_SAVE_PATH_TEMPLATE)
+        self.assertFalse(single["enabled"])
+        self.assertFalse(bulk["enabled"])
 
 
 if __name__ == "__main__":

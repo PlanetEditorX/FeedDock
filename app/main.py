@@ -59,7 +59,13 @@ from .naming import canonical_title, media_folder_name
 from .postprocess import normalize_pending_items
 from .download_cleanup import cleanup_completed_torrent_records
 from .subscription_monitor import reset_monitor_state_for_changes
-from .trial import BULK_TRIAL_SAVE_PATH_TEMPLATE, SINGLE_TRIAL_SAVE_PATH_TEMPLATE, select_trial_preset
+from .trial import (
+    BULK_TRIAL_SAVE_PATH_TEMPLATE,
+    SINGLE_TRIAL_SAVE_PATH_TEMPLATE,
+    SUBSCRIBED_SAVE_PATH_TEMPLATE,
+    TRIAL_SKIP_REASON,
+    select_trial_preset,
+)
 from .subscription_sources import (
     classify_subscription_source,
     get_subscription_source,
@@ -247,18 +253,48 @@ def _subscription_values(
             values[key] = value.strip()
     if values.get("include_keywords") in {"无", "none", "None"}:
         values["include_keywords"] = ""
-    if values.get("subscription_mode") == "trial":
+    current_mode = existing.subscription_mode if existing is not None else "subscribed"
+    next_mode = values.get("subscription_mode", current_mode)
+    if existing is not None and current_mode == "trial" and values.get("enabled") is True and next_mode == "trial":
+        next_mode = "subscribed"
+        values["subscription_mode"] = "subscribed"
+    if next_mode == "trial":
+        values["enabled"] = False
         values["save_path_template"] = (
             BULK_TRIAL_SAVE_PATH_TEMPLATE
-            if values.get("trial_bulk")
+            if values.get("trial_bulk", existing.trial_bulk if existing is not None else False)
             else SINGLE_TRIAL_SAVE_PATH_TEMPLATE
         )
+    elif existing is not None and current_mode == "trial" and next_mode == "subscribed":
+        values["trial_bulk"] = False
+        if (
+            "save_path_template" not in values
+            and existing.save_path_template in {BULK_TRIAL_SAVE_PATH_TEMPLATE, SINGLE_TRIAL_SAVE_PATH_TEMPLATE}
+        ):
+            values["save_path_template"] = SUBSCRIBED_SAVE_PATH_TEMPLATE
     prepare_subscription_identity(values, existing=existing)
     if db is not None:
         # qBittorrent, FeedDock scraping, and subscription rendering must use
         # one identical container path. Customize only the folder template.
         values["custom_download_path"] = load_qbittorrent_config(db).download_path
     return values
+
+
+def _clear_trial_only_skips(db: Session, subscription: Subscription, values: dict[str, Any]) -> int:
+    """Make episodes skipped only by trial mode eligible after promotion."""
+
+    if subscription.subscription_mode != "trial":
+        return 0
+    if values.get("subscription_mode", subscription.subscription_mode) != "subscribed":
+        return 0
+    result = db.execute(
+        delete(FeedItem).where(
+            FeedItem.subscription_id == subscription.id,
+            FeedItem.status == "skipped",
+            FeedItem.reason == TRIAL_SKIP_REASON,
+        )
+    )
+    return int(result.rowcount or 0)
 
 
 
@@ -413,6 +449,13 @@ async def lifespan(_app: FastAPI):
     with SessionLocal() as db:
         initialize_admin(db)
         backfill_subscription_identities(db)
+        # Trial entries are retained for manual promotion or deletion only.
+        # Existing databases may still contain enabled trial rows from older versions.
+        db.execute(
+            update(Subscription)
+            .where(Subscription.subscription_mode == "trial", Subscription.enabled.is_(True))
+            .values(enabled=False)
+        )
         # Upgrade old subscriptions to the one-root model. qBittorrent and
         # FeedDock must see the same container path (normally /media).
         qbit_root = load_qbittorrent_config(db).download_path
@@ -1498,6 +1541,7 @@ def _import_subscription_definitions(
         if conflict == "skip":
             skipped += 1
             continue
+        _clear_trial_only_skips(db, existing, values)
         reset_monitor_state_for_changes(existing, values)
         for key, value in values.items():
             setattr(existing, key, value)
@@ -1605,13 +1649,26 @@ def batch_subscriptions(
             db.delete(subscription)
     else:
         enabled = payload.action == "enable"
-        if enabled:
-            for subscription in subscriptions:
-                _validate_auto_skip_rename_requirement(
-                    db, {"enabled": True}, existing=subscription
-                )
         for subscription in subscriptions:
-            subscription.enabled = enabled
+            if not (enabled and subscription.subscription_mode == "trial"):
+                if enabled:
+                    _validate_auto_skip_rename_requirement(
+                        db,
+                        {"enabled": True},
+                        existing=subscription,
+                    )
+                subscription.enabled = enabled
+                continue
+            values = _subscription_values(
+                SubscriptionUpdate(enabled=enabled),
+                db,
+                existing=subscription,
+            )
+            _validate_auto_skip_rename_requirement(db, values, existing=subscription)
+            _clear_trial_only_skips(db, subscription, values)
+            reset_monitor_state_for_changes(subscription, values)
+            for key, value in values.items():
+                setattr(subscription, key, value)
     db.commit()
     return {"action": payload.action, "affected": len(subscriptions), "hidden": hidden}
 
@@ -1652,6 +1709,7 @@ def update_subscription(
         request.state.debug_stage = "subscription.apply-values"
         values = _subscription_values(payload, db, existing=subscription)
         _validate_auto_skip_rename_requirement(db, values, existing=subscription)
+        _clear_trial_only_skips(db, subscription, values)
         reset_monitor_state_for_changes(subscription, values)
         for key, value in values.items():
             setattr(subscription, key, value)

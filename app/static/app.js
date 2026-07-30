@@ -1310,8 +1310,9 @@ function createSubscriptionCard(sub) {
   titleRow.className = 'subscription-title';
   titleRow.append(text('h3', sub.canonical_title || sub.name));
   if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
-  const stateLabel = sub.last_error ? '异常' : sub.subscription_mode === 'trial' ? '已试看' : sub.enabled ? '启用' : '停用';
-  titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.subscription_mode === 'trial' ? 'scheduled' : sub.enabled ? 'queued' : 'skipped'}`));
+  const isTrial = sub.subscription_mode === 'trial';
+  const stateLabel = sub.last_error ? '异常' : isTrial ? '已试看（已停用）' : sub.enabled ? '启用' : '停用';
+  titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`));
   content.append(titleRow);
   if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
   const details = document.createElement('details');
@@ -1363,7 +1364,13 @@ function createSubscriptionCard(sub) {
     showNotice('订阅状态已更新');
     await reloadAll();
   });
-  const remove = text('button', '删除', 'danger');
+  const start = text('button', '启动', 'secondary');
+  start.addEventListener('click', async () => {
+    await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: true }) });
+    showNotice('已由试看转为正式订阅并启动');
+    await reloadAll();
+  });
+  const remove = text('button', isTrial ? '删除并隐藏' : '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
     const result = await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
@@ -1372,7 +1379,8 @@ function createSubscriptionCard(sub) {
     showNotice(result.hidden ? '订阅已删除，并已从添加番剧中隐藏' : '订阅已删除');
     await reloadAll();
   });
-  controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, remove);
+  if (isTrial) controls.append(start, remove);
+  else controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, remove);
   content.append(controls);
   card.append(content);
   return card;

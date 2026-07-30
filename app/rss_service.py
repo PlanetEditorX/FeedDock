@@ -36,12 +36,23 @@ from .subscription_monitor import (
 from .runtime_config import get_app_setting, load_automation_config, load_metadata_config, load_qbittorrent_config
 from .settings_config import load_application_preferences
 from .scraper import cleanup_orphaned_metadata
+from .trial import TRIAL_SKIP_REASON
 
 
 _refresh_lock = threading.Lock()
 _MAGNET_RE = re.compile(r"magnet:\?[^\s\"'<>]+", re.IGNORECASE)
 _REGEX_HINT_RE = re.compile(r"[\\.^$*+?{}\[\]|()]")
 _MAX_TORRENT_FILE_BYTES = 20 * 1024 * 1024
+_TRIAL_SUCCESS_STATUSES = ("scheduled", "queued", "completed")
+
+
+def _trial_download_exists(db: Session, subscription: Subscription) -> bool:
+    return db.scalar(
+        select(FeedItem.id).where(
+            FeedItem.subscription_id == subscription.id,
+            FeedItem.status.in_(_TRIAL_SUCCESS_STATUSES),
+        )
+    ) is not None
 
 
 def _torrent_filename(url: str, content_disposition: str = "") -> str:
@@ -736,13 +747,8 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     if subscription.subscription_mode == "trial":
         # The first successful trial item remains in history. Later refreshes
         # preserve the subscription for promotion but never enqueue episode two.
-        trial_item = db.scalar(
-            select(FeedItem.id).where(
-                FeedItem.subscription_id == subscription.id,
-                FeedItem.status.in_(("scheduled", "queued", "completed")),
-            )
-        )
-        if trial_item is not None:
+        if _trial_download_exists(db, subscription):
+            subscription.enabled = False
             subscription.last_checked_at = datetime.now(timezone.utc)
             subscription.last_error = ""
             add_log(db, "INFO", f"试看已完成，停止后续下载：{subscription.name}")
@@ -872,7 +878,7 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             continue
         if subscription.subscription_mode == "trial" and trial_candidate is not candidate:
             item.status = "skipped"
-            item.reason = "试看模式只下载首个可用剧集"
+            item.reason = TRIAL_SKIP_REASON
             stats["skipped"] += 1
             continue
         if not candidate["download_url"]:
@@ -915,6 +921,8 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     evaluate_missing_episodes(db, subscription)
     evaluate_stale_subscription(db, subscription, now=now)
     evaluate_subscription_completion(db, subscription, now=now)
+    if subscription.subscription_mode == "trial" and _trial_download_exists(db, subscription):
+        subscription.enabled = False
     subscription.last_checked_at = now
     subscription.last_error = ""
     add_log(
@@ -953,7 +961,11 @@ def refresh_subscription(
             subscription = db.get(Subscription, subscription_id)
             if not subscription:
                 return {"ok": False, "message": "订阅不存在", "subscription_id": subscription_id}
-            if not subscription.enabled:
+            allow_trial_bootstrap = (
+                subscription.subscription_mode == "trial"
+                and not _trial_download_exists(db, subscription)
+            )
+            if not subscription.enabled and not allow_trial_bootstrap:
                 add_log(
                     db,
                     "INFO",

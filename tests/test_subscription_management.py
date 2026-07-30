@@ -24,13 +24,18 @@ from app.main import (
 )
 from app.settings_config import load_application_preferences, save_application_preferences, save_subscription_sort_preference
 from fastapi import HTTPException
-from app.models import AnimePreference, Subscription
+from app.models import AnimePreference, FeedItem, Subscription
 from app.schemas import (
     AnimePreferenceBatchUpdate,
     AnimePreferenceItem,
     SubscriptionBatchRequest,
     SubscriptionCreate,
     SubscriptionImportRequest,
+)
+from app.trial import (
+    BULK_TRIAL_SAVE_PATH_TEMPLATE,
+    SUBSCRIBED_SAVE_PATH_TEMPLATE,
+    TRIAL_SKIP_REASON,
 )
 
 
@@ -165,6 +170,49 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.db.add(subscription)
         self.db.commit()
         self.assertEqual(self.db.get(Subscription, subscription.id).subscription_mode, "trial")
+
+    def test_enabling_trial_promotes_it_and_releases_trial_only_skips(self) -> None:
+        subscription = Subscription(
+            name="试看动画",
+            rss_url="https://example.test/trial.xml",
+            subscription_mode="trial",
+            trial_bulk=True,
+            save_path_template=BULK_TRIAL_SAVE_PATH_TEMPLATE,
+            enabled=False,
+            rename_enabled=True,
+        )
+        self.db.add(subscription)
+        self.db.flush()
+        self.db.add_all([
+            FeedItem(
+                subscription_id=subscription.id,
+                fingerprint="trial-first",
+                title="试看动画 - 01",
+                status="queued",
+            ),
+            FeedItem(
+                subscription_id=subscription.id,
+                fingerprint="trial-skipped",
+                title="试看动画 - 02",
+                status="skipped",
+                reason=TRIAL_SKIP_REASON,
+            ),
+        ])
+        self.db.commit()
+
+        result = batch_subscriptions(
+            SubscriptionBatchRequest(ids=[subscription.id], action="enable"),
+            self.db,
+        )
+
+        self.assertEqual(result["affected"], 1)
+        promoted = self.db.get(Subscription, subscription.id)
+        self.assertTrue(promoted.enabled)
+        self.assertEqual(promoted.subscription_mode, "subscribed")
+        self.assertFalse(promoted.trial_bulk)
+        self.assertEqual(promoted.save_path_template, SUBSCRIBED_SAVE_PATH_TEMPLATE)
+        items = list(self.db.scalars(select(FeedItem).where(FeedItem.subscription_id == subscription.id)))
+        self.assertEqual([item.status for item in items], ["queued"])
 
 
     def test_auto_skip_blocks_enabling_subscription_without_rename(self) -> None:
@@ -317,6 +365,8 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn('.nav-menu[open] > summary .nav-chevron', styles)
         self.assertNotIn('.nav-menu > summary::after', styles)
         self.assertIn("writing-mode: horizontal-tb", styles)
+        self.assertIn("已试看（已停用）", app_js)
+        self.assertIn("if (isTrial) controls.append(start, remove);", app_js)
 
     def test_mikan_trials_create_a_trial_subscription(self) -> None:
         payload = {
@@ -347,6 +397,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIsNotNone(subscription)
         self.assertEqual(subscription.subscription_mode, "trial")
         self.assertTrue(subscription.trial_bulk)
+        self.assertFalse(subscription.enabled)
         self.assertEqual(subscription.save_path_template, "{base}/试看")
         self.assertEqual(subscription.source_type, "mikan")
 
