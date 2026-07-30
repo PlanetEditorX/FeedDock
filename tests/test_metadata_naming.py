@@ -195,6 +195,7 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertEqual(titled.season, 2)
         self.assertEqual(latest.recommended_season, 2)
         self.assertEqual(len(latest.available_seasons), 3)
+        self.assertEqual(titled.air_date, "2026-01-01")
 
     def test_emby_folder_and_episode_name(self):
         sub = self.subscription()

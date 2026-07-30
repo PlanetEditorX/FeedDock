@@ -402,20 +402,28 @@ class MetadataService:
         year = int(date_value[:4]) if len(date_value) >= 4 and date_value[:4].isdigit() else 0
         poster_path = str(season_detail.get("poster_path") or detail.get("poster_path") or "")
         backdrop_path = str(detail.get("backdrop_path") or "")
+        matched_season = next(
+            (row for row in rows if row["season_number"] == resolved_season),
+            None,
+        )
         if kind == "movie":
             total = 1
         else:
             total = len(season_detail.get("episodes") or [])
             if total <= 0:
-                match = next((row for row in rows if row["season_number"] == resolved_season), None)
-                total = int(match["episode_count"]) if match else 0
+                total = int(matched_season["episode_count"]) if matched_season else 0
+        selected_air_date = (
+            str(season_detail.get("air_date") or "")
+            or (str(matched_season.get("air_date") or "") if matched_season else "")
+            or date_value
+        )
         return MetadataRecord(
             provider="tmdb", id=metadata_id, media_type=kind, title=title or original,
             original_title=original, year=year, overview=str(detail.get("overview") or "").strip(),
             poster_url=(f"{_tmdb_image_root(config)}/original{poster_path}" if poster_path else ""),
             backdrop_url=(f"{_tmdb_image_root(config)}/original{backdrop_path}" if backdrop_path else ""),
             detail_url=f"https://www.themoviedb.org/{kind}/{metadata_id}", total_episodes=total,
-            season=resolved_season, air_date=date_value[:10], available_seasons=rows,
+            season=resolved_season, air_date=selected_air_date[:10], available_seasons=rows,
             recommended_season=resolved_season, rating=round(float(detail.get("vote_average") or 0.0), 2),
         )
 

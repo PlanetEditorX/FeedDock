@@ -1755,6 +1755,7 @@ let reviewAction = 'confirm';
 function closeMetadataReview() {
   document.getElementById('metadataReviewModal').classList.add('hidden');
   document.getElementById('reviewSkip').classList.remove('hidden');
+  document.querySelector('#metadataReviewModal .metadata-search-row').classList.remove('hidden');
   document.body.classList.remove('modal-open');
   reviewSubscription = null;
   reviewAction = 'confirm';
@@ -1765,28 +1766,175 @@ function openMetadataReview(subscription, { action = 'confirm', required = false
   document.getElementById('metadataReviewTitle').textContent = required ? `选择元数据后启动：${subscription.name}` : `确认：${subscription.name}`;
   document.getElementById('reviewQuery').value = subscription.name || subscription.reference_title || '';
   document.getElementById('reviewSkip').classList.toggle('hidden', required);
+  document.querySelector('#metadataReviewModal .metadata-search-row').classList.remove('hidden');
   document.getElementById('reviewResults').textContent = required
-    ? '启动试看订阅前必须选择匹配的元数据。先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList。'
+    ? '步骤 1/3：选择匹配的元数据。选择后还会显示季度、集数和首播日期，最终确认前不会启动订阅。'
     : '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
   document.getElementById('metadataReviewModal').classList.remove('hidden'); document.body.classList.add('modal-open');
 }
 
+function inferSeasonFromTitle(value) {
+  const title = String(value || '');
+  const numericPatterns = [
+    /第\s*(\d{1,3})\s*[季期部]/i,
+    /(?:season|series)\s*(\d{1,3})/i,
+    /\bS(\d{1,3})\b/i,
+    /\b(\d{1,2})(?:st|nd|rd|th)\s+season\b/i,
+  ];
+  for (const pattern of numericPatterns) {
+    const match = title.match(pattern);
+    if (match) return Number.parseInt(match[1], 10) || 0;
+  }
+  const chinese = title.match(/第\s*([一二两三四五六七八九十]{1,3})\s*[季期部]/);
+  if (!chinese) return 0;
+  const values = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12, 十三: 13, 十四: 14, 十五: 15 };
+  return values[chinese[1]] || 0;
+}
+
+function reviewFact(label, value) {
+  const item = document.createElement('div'); item.className = 'metadata-confirmation-fact';
+  item.append(text('span', label, 'muted'), text('strong', value || '未知'));
+  return item;
+}
+
+async function loadTrialMetadataDetail(candidate, selectedSeason = null) {
+  if (!reviewSubscription) return;
+  const container = document.getElementById('reviewResults');
+  const subscription = reviewSubscription;
+  const queryTitle = subscription.name || subscription.reference_title || candidate.title || '';
+  const inferredSeason = inferSeasonFromTitle(queryTitle);
+  const requestedSeason = selectedSeason !== null ? selectedSeason : (inferredSeason || subscription.season || 1);
+  const params = new URLSearchParams({
+    provider: candidate.provider,
+    metadata_id: String(candidate.id),
+    media_type: candidate.media_type || 'tv',
+    season: String(requestedSeason),
+    season_mode: selectedSeason === null ? 'title' : 'manual',
+    query_title: queryTitle,
+  });
+  container.className = 'metadata-results muted';
+  container.textContent = '正在读取季度、集数和首播信息…';
+  try {
+    const detail = await api(`/api/metadata/detail?${params}`);
+    renderTrialMetadataConfirmation(candidate, detail, inferredSeason);
+  } catch (error) {
+    container.className = 'metadata-results error-text';
+    container.textContent = `元数据详情读取失败：${error.message}`;
+  }
+}
+
+function renderTrialMetadataConfirmation(candidate, detail, inferredSeason) {
+  const container = document.getElementById('reviewResults');
+  container.replaceChildren(); container.className = 'metadata-results';
+  document.getElementById('metadataReviewTitle').textContent = `启动前确认：${reviewSubscription.name}`;
+
+  const card = document.createElement('article'); card.className = 'metadata-card metadata-confirmation';
+  if (detail.poster_url || candidate.poster_url) {
+    const img = document.createElement('img'); img.src = detail.poster_url || candidate.poster_url; img.loading = 'lazy'; img.alt = ''; card.append(img);
+  }
+  const body = document.createElement('div'); body.className = 'metadata-card-body';
+  body.append(text('span', '步骤 2/3 · 核对匹配结果', 'metadata-step'));
+  body.append(text('strong', titleWithYear(detail.title || candidate.title, detail.year || candidate.year), 'metadata-confirmation-title'));
+  if (detail.original_title && detail.original_title !== detail.title) body.append(text('span', `原名：${detail.original_title}`, 'muted'));
+
+  const resolvedSeason = Number(detail.recommended_season ?? detail.season ?? 1);
+  const seasons = Array.isArray(detail.available_seasons) ? detail.available_seasons : [];
+  const resolvedRow = seasons.find(row => Number(row.season_number) === resolvedSeason);
+  const facts = document.createElement('div'); facts.className = 'metadata-confirmation-facts';
+  facts.append(
+    reviewFact('来源', String(detail.provider || candidate.provider).toUpperCase()),
+    reviewFact('匹配季度', detail.media_type === 'movie' ? '电影' : `第 ${resolvedSeason} 季`),
+    reviewFact('总集数', String(detail.total_episodes || resolvedRow?.episode_count || '未知')),
+    reviewFact('首播日期', resolvedRow?.air_date || detail.air_date || '未知'),
+  );
+  body.append(facts);
+
+  if (inferredSeason > 0 && detail.media_type !== 'movie' && resolvedSeason !== inferredSeason) {
+    body.append(text('p', `⚠ 订阅标题看起来是第 ${inferredSeason} 季，但当前元数据匹配为第 ${resolvedSeason} 季。请切换到正确季度后再启动。`, 'metadata-season-warning'));
+  }
+
+  if (seasons.length && detail.media_type !== 'movie') {
+    const seasonLabel = document.createElement('label'); seasonLabel.className = 'metadata-season-picker';
+    seasonLabel.append(text('span', '选择季度（切换后会重新读取该季详情）'));
+    const select = document.createElement('select');
+    seasons.forEach((row) => {
+      const number = Number(row.season_number);
+      const option = document.createElement('option'); option.value = String(number);
+      const seasonName = number === 0 ? '特别篇' : `第 ${number} 季`;
+      option.textContent = `${seasonName} · ${row.episode_count || '未知'} 集 · ${row.air_date || '日期未知'}`;
+      option.selected = number === resolvedSeason; select.append(option);
+    });
+    select.addEventListener('change', () => loadTrialMetadataDetail(candidate, Number(select.value)));
+    seasonLabel.append(select); body.append(seasonLabel);
+  } else if (detail.media_type !== 'movie') {
+    body.append(text('p', '该来源没有提供可切换的季度列表，请重点核对标题、集数和日期。', 'hint'));
+  }
+
+  if (detail.overview) body.append(text('p', detail.overview.slice(0, 260), 'metadata-overview'));
+  const actions = document.createElement('div'); actions.className = 'card-actions';
+  const back = text('button', '返回候选列表', 'secondary'); back.type = 'button';
+  back.addEventListener('click', () => document.getElementById('reviewSearch').click());
+  const confirmLabel = detail.media_type === 'movie' ? '确认并启动' : `确认第 ${resolvedSeason} 季并启动`;
+  const confirm = text('button', confirmLabel); confirm.type = 'button';
+  confirm.addEventListener('click', async () => {
+    if (!reviewSubscription) return;
+    const subscription = reviewSubscription;
+    confirm.disabled = true; back.disabled = true;
+    confirm.textContent = '正在刷新元数据并启动…';
+    try {
+      const payload = {
+        provider: detail.provider || candidate.provider,
+        metadata_id: detail.id || candidate.id,
+        media_type: detail.media_type || candidate.media_type || 'tv',
+        season: resolvedSeason,
+        season_mode: 'manual',
+      };
+      await api(`/api/subscriptions/${subscription.id}/trial/start`, { method: 'POST', body: JSON.stringify(payload) });
+      await reloadAll();
+      renderTrialStartSuccess(detail, resolvedSeason, resolvedRow);
+      showNotice(`已确认第 ${resolvedSeason} 季并启动订阅`);
+    } catch (error) {
+      confirm.disabled = false; back.disabled = false; confirm.textContent = confirmLabel;
+      showNotice(error.message, false);
+    }
+  });
+  actions.append(back, confirm); body.append(actions); card.append(body); container.append(card);
+}
+
+function renderTrialStartSuccess(detail, season, seasonRow) {
+  const container = document.getElementById('reviewResults');
+  container.replaceChildren(); container.className = 'metadata-results';
+  document.getElementById('metadataReviewTitle').textContent = '启动完成';
+  document.querySelector('#metadataReviewModal .metadata-search-row').classList.add('hidden');
+  const result = document.createElement('section'); result.className = 'metadata-start-success';
+  result.append(text('span', '步骤 3/3', 'metadata-step'));
+  result.append(text('h3', '订阅已启动'));
+  result.append(text('p', `${titleWithYear(detail.title, detail.year)} · ${String(detail.provider).toUpperCase()}${detail.media_type === 'movie' ? '' : ` · 第 ${season} 季`}`));
+  result.append(text('p', `元数据已刷新 · ${detail.total_episodes || seasonRow?.episode_count || '未知'} 集 · ${seasonRow?.air_date || detail.air_date || '日期未知'}`, 'muted'));
+  const close = text('button', '完成'); close.type = 'button'; close.addEventListener('click', closeMetadataReview); result.append(close);
+  container.append(result);
+}
+
 function renderReviewResults(results) {
   const container = document.getElementById('reviewResults'); container.replaceChildren(); container.className = 'metadata-results';
+  if (reviewAction === 'start-trial' && reviewSubscription) {
+    document.getElementById('metadataReviewTitle').textContent = `选择元数据后启动：${reviewSubscription.name}`;
+  }
   if (!results.length) { container.append(text('p', '没有找到结果，可切换另一个来源或跳过。', 'empty')); return; }
   results.forEach(candidate => {
     const card = document.createElement('article'); card.className = 'metadata-card';
     if (candidate.poster_url) { const img=document.createElement('img'); img.src=candidate.poster_url; img.loading='lazy'; card.append(img); }
     const body=document.createElement('div'); body.className='metadata-card-body'; body.append(text('strong', titleWithYear(candidate.title,candidate.year)));
+    body.append(text('span', `${String(candidate.provider).toUpperCase()} · ${candidate.media_type === 'movie' ? '电影' : '剧集'} · 匹配 ${(Number(candidate.score || 0) * 100).toFixed(0)}%`, 'muted'));
     if (candidate.overview) body.append(text('p',candidate.overview.slice(0,220),'metadata-overview'));
-    const choose=text('button','确认此条目'); choose.type='button'; choose.addEventListener('click', async()=>{
+    const choose=text('button', reviewAction === 'start-trial' ? '选择并检查季度' : '确认此条目'); choose.type='button'; choose.addEventListener('click', async()=>{
       if (!reviewSubscription) return;
       const subscription = reviewSubscription;
       const seasonMode=reviewSubscription.season_mode || 'title';
       const payload = {provider:candidate.provider, metadata_id:candidate.id, media_type:candidate.media_type || 'tv', season:reviewSubscription.season || 1, season_mode:seasonMode};
       if (reviewAction === 'start-trial') {
-        await api(`/api/subscriptions/${subscription.id}/trial/start`, {method:'POST', body:JSON.stringify(payload)});
-        closeMetadataReview(); await reloadAll(); showNotice(`已刷新 ${candidate.provider.toUpperCase()} 元数据并启动订阅`);
+        choose.disabled = true;
+        await loadTrialMetadataDetail(candidate);
         return;
       }
       await api(`/api/subscriptions/${subscription.id}/metadata/apply`, {method:'POST', body:JSON.stringify(payload)});

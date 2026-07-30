@@ -276,6 +276,18 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 #metadataReviewModal .modal-card { max-width: 900px; }
 #metadataReviewModal .metadata-search-row { padding: 1rem; }
 #metadataReviewModal #reviewResults { padding: 0 1rem 1rem; max-height: 60vh; overflow: auto; }
+.metadata-step { color: var(--accent); font-size: .86rem; font-weight: 700; }
+.metadata-confirmation-title { font-size: 1.05rem; }
+.metadata-confirmation-facts { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 8px; margin: 5px 0; }
+.metadata-confirmation-fact { display: grid; gap: 3px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.metadata-confirmation-fact span { font-size: .8rem; }
+.metadata-season-picker { display: grid; gap: 6px; margin-top: 4px; color: var(--muted); }
+.metadata-season-warning { margin: 5px 0; padding: 10px; border: 1px solid #e4a72c; border-radius: 8px; color: #ffd47a; background: #533a102e; }
+.metadata-start-success { display: grid; justify-items: start; gap: 8px; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.metadata-start-success h3, .metadata-start-success p { margin: 0; }
+@media (max-width: 700px) {
+  .metadata-confirmation-facts { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
 
 
 /* Detailed debug log controls */

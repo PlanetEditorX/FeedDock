@@ -430,6 +430,13 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertNotIn("删除并隐藏", app_js)
         self.assertIn("/trial/start", app_js)
         self.assertIn("openMetadataReview(sub, { action: 'start-trial', required: true })", app_js)
+        self.assertIn("选择并检查季度", app_js)
+        self.assertIn("启动前确认", app_js)
+        self.assertIn("匹配季度", app_js)
+        self.assertIn("启动完成", app_js)
+        self.assertIn("available_seasons", app_js)
+        self.assertIn("inferSeasonFromTitle", app_js)
+        self.assertIn("/api/metadata/detail", app_js)
         self.assertIn("if (isTrial) controls.append(start, remove);", app_js)
 
     def test_mikan_trials_create_a_trial_subscription(self) -> None:
