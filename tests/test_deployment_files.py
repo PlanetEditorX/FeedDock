@@ -142,6 +142,14 @@ class DeploymentFileTests(unittest.TestCase):
         for label in ("按星期", "按更新时间", "按添加时间", "按名字", "按评分"):
             self.assertIn(label, index)
         self.assertIn('<option value="trial">试看</option>', index)
+        state_options = (
+            '<option value="">全部状态</option>'
+            '<option value="enabled">启用</option>'
+            '<option value="trial">试看</option>'
+            '<option value="disabled">停用</option>'
+            '<option value="error">异常</option>'
+        )
+        self.assertIn(state_options, index)
         self.assertIn("state === 'trial' && sub.subscription_mode !== 'trial'", (ROOT / "app/static/app.js").read_text(encoding="utf-8"))
         self.assertIn(".subscription-list-filters > button", styles)
         self.assertIn("white-space: nowrap", styles)
