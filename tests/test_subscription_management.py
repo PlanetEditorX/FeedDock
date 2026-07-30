@@ -19,6 +19,7 @@ from app.main import (
     export_subscriptions,
     import_subscriptions,
     list_hidden_anime_preferences,
+    start_trial_subscription,
     system_status,
     update_hidden_anime_preferences,
 )
@@ -28,6 +29,7 @@ from app.models import AnimePreference, FeedItem, Subscription
 from app.schemas import (
     AnimePreferenceBatchUpdate,
     AnimePreferenceItem,
+    MetadataApplyRequest,
     SubscriptionBatchRequest,
     SubscriptionCreate,
     SubscriptionImportRequest,
@@ -171,7 +173,65 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.db.get(Subscription, subscription.id).subscription_mode, "trial")
 
-    def test_enabling_trial_promotes_it_and_releases_trial_only_skips(self) -> None:
+    def test_deleted_trial_is_not_hidden_from_catalog(self) -> None:
+        subscription = Subscription(
+            name="试看动画",
+            reference_title="试看动画",
+            canonical_key=title_key("试看动画"),
+            rss_url="https://example.test/trial-delete.xml",
+            subscription_mode="trial",
+        )
+        self.db.add(subscription)
+        self.db.commit()
+
+        result = delete_subscription(subscription.id, self.db)
+
+        self.assertEqual(result, {"ok": True, "hidden": False})
+        self.assertEqual(list(self.db.scalars(select(AnimePreference))), [])
+
+    @patch("app.main.MetadataService")
+    def test_starting_trial_requires_selected_metadata_and_refreshes_it(self, metadata_service) -> None:
+        subscription = Subscription(
+            name="试看动画",
+            rss_url="https://example.test/trial-start.xml",
+            subscription_mode="trial",
+            trial_bulk=True,
+            enabled=False,
+            rename_enabled=True,
+        )
+        self.db.add(subscription)
+        self.db.flush()
+        self.db.add(FeedItem(
+            subscription_id=subscription.id,
+            fingerprint="trial-skipped-before-start",
+            title="试看动画 - 02",
+            status="skipped",
+            reason=TRIAL_SKIP_REASON,
+        ))
+        self.db.commit()
+
+        started = start_trial_subscription(
+            subscription.id,
+            MetadataApplyRequest(
+                provider="tmdb",
+                metadata_id=123,
+                media_type="tv",
+                season=1,
+                season_mode="title",
+            ),
+            self.db,
+        )
+
+        metadata_service.return_value.apply.assert_called_once()
+        self.assertTrue(started.enabled)
+        self.assertEqual(started.subscription_mode, "subscribed")
+        self.assertFalse(started.trial_bulk)
+        self.assertEqual(
+            list(self.db.scalars(select(FeedItem).where(FeedItem.subscription_id == subscription.id))),
+            [],
+        )
+
+    def test_batch_enable_trial_requires_individual_metadata_selection(self) -> None:
         subscription = Subscription(
             name="试看动画",
             rss_url="https://example.test/trial.xml",
@@ -200,19 +260,17 @@ class SubscriptionManagementTests(unittest.TestCase):
         ])
         self.db.commit()
 
-        result = batch_subscriptions(
-            SubscriptionBatchRequest(ids=[subscription.id], action="enable"),
-            self.db,
-        )
+        with self.assertRaises(HTTPException) as raised:
+            batch_subscriptions(
+                SubscriptionBatchRequest(ids=[subscription.id], action="enable"),
+                self.db,
+            )
 
-        self.assertEqual(result["affected"], 1)
-        promoted = self.db.get(Subscription, subscription.id)
-        self.assertTrue(promoted.enabled)
-        self.assertEqual(promoted.subscription_mode, "subscribed")
-        self.assertFalse(promoted.trial_bulk)
-        self.assertEqual(promoted.save_path_template, SUBSCRIBED_SAVE_PATH_TEMPLATE)
-        items = list(self.db.scalars(select(FeedItem).where(FeedItem.subscription_id == subscription.id)))
-        self.assertEqual([item.status for item in items], ["queued"])
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("选择匹配的元数据", raised.exception.detail)
+        retained = self.db.get(Subscription, subscription.id)
+        self.assertFalse(retained.enabled)
+        self.assertEqual(retained.subscription_mode, "trial")
 
 
     def test_auto_skip_blocks_enabling_subscription_without_rename(self) -> None:
@@ -365,7 +423,11 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn('.nav-menu[open] > summary .nav-chevron', styles)
         self.assertNotIn('.nav-menu > summary::after', styles)
         self.assertIn("writing-mode: horizontal-tb", styles)
-        self.assertIn("已试看（已停用）", app_js)
+        self.assertIn("isTrial ? '已试看'", app_js)
+        self.assertNotIn("已试看（已停用）", app_js)
+        self.assertNotIn("删除并隐藏", app_js)
+        self.assertIn("/trial/start", app_js)
+        self.assertIn("openMetadataReview(sub, { action: 'start-trial', required: true })", app_js)
         self.assertIn("if (isTrial) controls.append(start, remove);", app_js)
 
     def test_mikan_trials_create_a_trial_subscription(self) -> None:

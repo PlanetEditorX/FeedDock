@@ -1311,7 +1311,7 @@ function createSubscriptionCard(sub) {
   titleRow.append(text('h3', sub.canonical_title || sub.name));
   if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
   const isTrial = sub.subscription_mode === 'trial';
-  const stateLabel = sub.last_error ? '异常' : isTrial ? '已试看（已停用）' : sub.enabled ? '启用' : '停用';
+  const stateLabel = sub.last_error ? '异常' : isTrial ? '已试看' : sub.enabled ? '启用' : '停用';
   titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`));
   content.append(titleRow);
   if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
@@ -1365,12 +1365,11 @@ function createSubscriptionCard(sub) {
     await reloadAll();
   });
   const start = text('button', '启动', 'secondary');
-  start.addEventListener('click', async () => {
-    await api(`/api/subscriptions/${sub.id}`, { method: 'PATCH', body: JSON.stringify({ enabled: true }) });
-    showNotice('已由试看转为正式订阅并启动');
-    await reloadAll();
+  start.addEventListener('click', () => {
+    openMetadataReview(sub, { action: 'start-trial', required: true });
+    document.getElementById('reviewSearch').click();
   });
-  const remove = text('button', isTrial ? '删除并隐藏' : '删除', 'danger');
+  const remove = text('button', '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
     const result = await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
@@ -1746,12 +1745,23 @@ async function loadProxySettings() {
 }
 
 let reviewSubscription = null;
-function closeMetadataReview() { document.getElementById('metadataReviewModal').classList.add('hidden'); document.body.classList.remove('modal-open'); reviewSubscription = null; }
-function openMetadataReview(subscription) {
+let reviewAction = 'confirm';
+function closeMetadataReview() {
+  document.getElementById('metadataReviewModal').classList.add('hidden');
+  document.getElementById('reviewSkip').classList.remove('hidden');
+  document.body.classList.remove('modal-open');
+  reviewSubscription = null;
+  reviewAction = 'confirm';
+}
+function openMetadataReview(subscription, { action = 'confirm', required = false } = {}) {
   reviewSubscription = subscription;
-  document.getElementById('metadataReviewTitle').textContent = `确认：${subscription.name}`;
+  reviewAction = action;
+  document.getElementById('metadataReviewTitle').textContent = required ? `选择元数据后启动：${subscription.name}` : `确认：${subscription.name}`;
   document.getElementById('reviewQuery').value = subscription.name || subscription.reference_title || '';
-  document.getElementById('reviewResults').textContent = '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
+  document.getElementById('reviewSkip').classList.toggle('hidden', required);
+  document.getElementById('reviewResults').textContent = required
+    ? '启动试看订阅前必须选择匹配的元数据。先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList。'
+    : '先尝试 TMDB；找不到正确条目时可切换 Bangumi 或 AniList，也可以完全跳过。';
   document.getElementById('metadataReviewModal').classList.remove('hidden'); document.body.classList.add('modal-open');
 }
 
@@ -1765,8 +1775,15 @@ function renderReviewResults(results) {
     if (candidate.overview) body.append(text('p',candidate.overview.slice(0,220),'metadata-overview'));
     const choose=text('button','确认此条目'); choose.type='button'; choose.addEventListener('click', async()=>{
       if (!reviewSubscription) return;
+      const subscription = reviewSubscription;
       const seasonMode=reviewSubscription.season_mode || 'title';
-      await api(`/api/subscriptions/${reviewSubscription.id}/metadata/apply`, {method:'POST', body:JSON.stringify({provider:candidate.provider, metadata_id:candidate.id, media_type:candidate.media_type || 'tv', season:reviewSubscription.season || 1, season_mode:seasonMode})});
+      const payload = {provider:candidate.provider, metadata_id:candidate.id, media_type:candidate.media_type || 'tv', season:reviewSubscription.season || 1, season_mode:seasonMode};
+      if (reviewAction === 'start-trial') {
+        await api(`/api/subscriptions/${subscription.id}/trial/start`, {method:'POST', body:JSON.stringify(payload)});
+        closeMetadataReview(); await reloadAll(); showNotice(`已刷新 ${candidate.provider.toUpperCase()} 元数据并启动订阅`);
+        return;
+      }
+      await api(`/api/subscriptions/${subscription.id}/metadata/apply`, {method:'POST', body:JSON.stringify(payload)});
       closeMetadataReview(); await reloadAll(); showNotice(`已确认 ${candidate.provider.toUpperCase()} 元数据`);
     });
     body.append(choose); card.append(body); container.append(card);

@@ -1642,33 +1642,29 @@ def batch_subscriptions(
     subscriptions = list(db.scalars(select(Subscription).where(Subscription.id.in_(payload.ids))))
     if not subscriptions:
         raise HTTPException(status_code=404, detail="未找到所选订阅")
+    if payload.action == "enable" and any(
+        subscription.subscription_mode == "trial" for subscription in subscriptions
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="试看订阅必须逐个选择匹配的元数据后启动",
+        )
     hidden = 0
     if payload.action == "delete":
         for subscription in subscriptions:
-            hidden += int(_hide_deleted_subscription(db, subscription))
+            if subscription.subscription_mode != "trial":
+                hidden += int(_hide_deleted_subscription(db, subscription))
             db.delete(subscription)
     else:
         enabled = payload.action == "enable"
         for subscription in subscriptions:
-            if not (enabled and subscription.subscription_mode == "trial"):
-                if enabled:
-                    _validate_auto_skip_rename_requirement(
-                        db,
-                        {"enabled": True},
-                        existing=subscription,
-                    )
-                subscription.enabled = enabled
-                continue
-            values = _subscription_values(
-                SubscriptionUpdate(enabled=enabled),
-                db,
-                existing=subscription,
-            )
-            _validate_auto_skip_rename_requirement(db, values, existing=subscription)
-            _clear_trial_only_skips(db, subscription, values)
-            reset_monitor_state_for_changes(subscription, values)
-            for key, value in values.items():
-                setattr(subscription, key, value)
+            if enabled:
+                _validate_auto_skip_rename_requirement(
+                    db,
+                    {"enabled": True},
+                    existing=subscription,
+                )
+            subscription.enabled = enabled
     db.commit()
     return {"action": payload.action, "affected": len(subscriptions), "hidden": hidden}
 
@@ -1705,6 +1701,14 @@ def update_subscription(
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
+    if (
+        subscription.subscription_mode == "trial"
+        and payload.enabled is True
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="试看订阅必须先选择匹配的元数据后启动",
+        )
     try:
         request.state.debug_stage = "subscription.apply-values"
         values = _subscription_values(payload, db, existing=subscription)
@@ -1803,6 +1807,58 @@ def apply_subscription_metadata(
 
 
 @app.post(
+    "/api/subscriptions/{subscription_id}/trial/start",
+    response_model=SubscriptionOut,
+    dependencies=[Depends(require_admin)],
+)
+def start_trial_subscription(
+    subscription_id: int,
+    payload: MetadataApplyRequest,
+    db: Session = Depends(get_db),
+) -> SubscriptionOut:
+    """Refresh selected metadata, then promote and enable a trial subscription."""
+
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    if subscription.subscription_mode != "trial":
+        raise HTTPException(status_code=409, detail="该订阅不是试看订阅")
+    try:
+        MetadataService().apply(
+            db,
+            subscription,
+            provider=payload.provider,
+            metadata_id=payload.metadata_id,
+            media_type=payload.media_type,
+            season=payload.season,
+            season_mode=payload.season_mode,
+        )
+        _refresh_subscription_identity(db, subscription)
+        values = _subscription_values(
+            SubscriptionUpdate(enabled=True),
+            db,
+            existing=subscription,
+        )
+        _validate_auto_skip_rename_requirement(db, values, existing=subscription)
+        _clear_trial_only_skips(db, subscription, values)
+        reset_monitor_state_for_changes(subscription, values)
+        for key, value in values.items():
+            setattr(subscription, key, value)
+        db.commit()
+        db.refresh(subscription)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"元数据刷新或试看启动失败：{exc}") from exc
+    return _subscription_out(db, subscription)
+
+
+@app.post(
     "/api/subscriptions/{subscription_id}/metadata/sync",
     response_model=SubscriptionOut,
     dependencies=[Depends(require_admin)],
@@ -1832,7 +1888,11 @@ def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> 
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    hidden = _hide_deleted_subscription(db, subscription)
+    hidden = (
+        False
+        if subscription.subscription_mode == "trial"
+        else _hide_deleted_subscription(db, subscription)
+    )
     db.delete(subscription)
     db.commit()
     return {"ok": True, "hidden": hidden}
