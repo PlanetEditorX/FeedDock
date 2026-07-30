@@ -339,6 +339,8 @@ class DeploymentFileTests(unittest.TestCase):
             self.assertIn(f'id="{element_id}"', index)
         self.assertIn('/api/metadata/search', script)
         self.assertIn('/api/metadata/detail', script)
+        self.assertIn('智能降级搜索', script)
+        self.assertIn('appendMetadataSearchNotice', script)
         self.assertIn('/api/actions/normalize-torrents', script)
         self.assertIn('def metadata_detail', main)
         self.assertIn('写入 NFO 与图片', index)

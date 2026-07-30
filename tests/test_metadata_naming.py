@@ -14,7 +14,13 @@ from app.models import FeedItem, Subscription
 from unittest.mock import patch
 
 from app.downloader import QBittorrentClient, TorrentNormalizeResult
-from app.metadata_service import MetadataRecord, MetadataService, infer_season_from_title
+from app.metadata_service import (
+    MetadataCandidate,
+    MetadataRecord,
+    MetadataService,
+    infer_season_from_title,
+    metadata_query_fallbacks,
+)
 from app.naming import media_folder_name, naming_context, remote_to_local_path, render_desired_name
 from app.scraper import CleanupResult, ScrapeResult, cleanup_orphaned_metadata, scrape_completed_item, scrape_subscription, trigger_tmm_scrape
 
@@ -172,6 +178,60 @@ class MetadataNamingTests(unittest.TestCase):
         self.assertEqual(infer_season_from_title("金牌得主 第二季"), 2)
         self.assertEqual(infer_season_from_title("Show Season 3"), 3)
         self.assertEqual(infer_season_from_title("Show S04"), 4)
+
+    def test_metadata_query_fallbacks_remove_year_season_and_subtitle_in_order(self):
+        self.assertEqual(
+            metadata_query_fallbacks("文豪野犬 汪！第二季（2026）"),
+            [
+                "文豪野犬 汪！第二季（2026）",
+                "文豪野犬 汪！第二季",
+                "文豪野犬 汪！",
+                "文豪野犬",
+            ],
+        )
+
+    def test_metadata_search_uses_base_title_after_unreliable_queries(self):
+        service = MetadataService()
+        searched: list[tuple[str, int]] = []
+
+        def fake_search(_db, _config, query, _media_type, year, _limit):
+            searched.append((query, year))
+            if query != "文豪野犬":
+                return []
+            return [
+                MetadataCandidate(
+                    provider="tmdb",
+                    id=14,
+                    media_type="tv",
+                    title="文豪野犬 (2016)",
+                    original_title="文豪ストレイドッグス",
+                    year=2016,
+                )
+            ]
+
+        with patch("app.metadata_service.load_metadata_config", return_value=SimpleNamespace()), patch.object(
+            service, "_search_tmdb", side_effect=fake_search
+        ):
+            results = service.search(
+                SimpleNamespace(),
+                provider="tmdb",
+                query="文豪野犬 汪！第二季（2026）",
+                media_type="tv",
+                year=2026,
+            )
+
+        self.assertEqual(
+            searched,
+            [
+                ("文豪野犬 汪！第二季（2026）", 2026),
+                ("文豪野犬 汪！第二季", 0),
+                ("文豪野犬 汪！", 0),
+                ("文豪野犬", 0),
+            ],
+        )
+        self.assertEqual(results[0]["search_query"], "文豪野犬")
+        self.assertEqual(results[0]["fallback_level"], 3)
+        self.assertEqual(len(results[0]["search_attempts"]), 4)
 
     def test_tmdb_latest_and_title_season_modes(self):
         config = SimpleNamespace(tmdb_read_access_token="token", language="zh-CN")

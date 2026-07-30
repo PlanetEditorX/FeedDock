@@ -607,6 +607,7 @@ function renderMetadataResults(results) {
   container.replaceChildren();
   container.className = 'metadata-results';
   if (!results.length) { container.append(text('p', '没有找到匹配条目。', 'empty')); return; }
+  appendMetadataSearchNotice(container, results);
   results.forEach((candidate) => {
     const card = document.createElement('article'); card.className = 'metadata-card';
     if (candidate.poster_url) { const img = document.createElement('img'); img.src = candidate.poster_url; img.loading = 'lazy'; img.alt = ''; card.append(img); }
@@ -622,6 +623,17 @@ function renderMetadataResults(results) {
     if (candidate.detail_url) actions.append(externalLink('查看来源', candidate.detail_url));
     body.append(actions); card.append(body); container.append(card);
   });
+}
+
+function appendMetadataSearchNotice(container, results) {
+  const matched = results[0];
+  if (!matched || !Number(matched.fallback_level || 0)) return;
+  const attempts = (matched.search_attempts || []).map(query => `“${query}”`).join(' → ');
+  container.append(text(
+    'p',
+    `智能降级搜索：完整标题未找到可靠结果，已自动改用“${matched.search_query}”匹配${attempts ? `。尝试过程：${attempts}` : ''}`,
+    'metadata-search-fallback',
+  ));
 }
 
 async function loadGlobalRules() {
@@ -1921,6 +1933,7 @@ function renderReviewResults(results) {
     document.getElementById('metadataReviewTitle').textContent = `选择元数据后启动：${reviewSubscription.name}`;
   }
   if (!results.length) { container.append(text('p', '没有找到结果，可切换另一个来源或跳过。', 'empty')); return; }
+  appendMetadataSearchNotice(container, results);
   results.forEach(candidate => {
     const card = document.createElement('article'); card.className = 'metadata-card';
     if (candidate.poster_url) { const img=document.createElement('img'); img.src=candidate.poster_url; img.loading='lazy'; card.append(img); }
@@ -2040,7 +2053,7 @@ async function searchMetadata({ automatic = false } = {}) {
   }
   const mediaType = subscriptionForm.elements.media_type.value || 'tv';
   const year = Number.parseInt(subscriptionForm.elements.metadata_year.value || '0', 10) || 0;
-  const container = document.getElementById('metadataSearchResults'); container.textContent = '正在搜索…'; container.className = 'metadata-results muted';
+  const container = document.getElementById('metadataSearchResults'); container.textContent = '正在智能搜索；无可靠结果时会自动逐级简化标题…'; container.className = 'metadata-results muted';
   try {
     const params = new URLSearchParams({ provider, q: query, media_type: mediaType, year: String(year), limit: '10' });
     const results = await api(`/api/metadata/search?${params}`);
@@ -2462,7 +2475,7 @@ document.getElementById('runNetworkDiagnostics').addEventListener('click',async(
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
 document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);
 document.querySelector('[data-close-metadata-review]').addEventListener('click', closeMetadataReview);
-document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在搜索…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
+document.getElementById('reviewSearch').addEventListener('click',async()=>{if(!reviewSubscription)return;const provider=document.getElementById('reviewProvider').value;const q=document.getElementById('reviewQuery').value.trim();const c=document.getElementById('reviewResults');c.textContent='正在智能搜索；无可靠结果时会自动逐级简化标题…';try{const params=new URLSearchParams({provider,q,media_type:reviewSubscription.media_type||'tv',year:String(reviewSubscription.metadata_year||0),limit:'10'});renderReviewResults(await api(`/api/metadata/search?${params}`));}catch(e){c.textContent=e.message;}});
 document.getElementById('reviewSkip').addEventListener('click',async()=>{if(!reviewSubscription)return;await api(`/api/subscriptions/${reviewSubscription.id}/metadata/skip`,{method:'POST',body:JSON.stringify({skipped:true})});closeMetadataReview();await reloadAll();showNotice('已跳过外部元数据匹配，将使用手动名称');});
 
 document.getElementById('useDefaultSourceFeed').addEventListener('click', () => {

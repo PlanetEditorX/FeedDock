@@ -30,6 +30,10 @@ class MetadataCandidate:
     detail_url: str = ""
     score: float = 0.0
     rating: float = 0.0
+    requested_query: str = ""
+    search_query: str = ""
+    search_attempts: list[str] = field(default_factory=list)
+    fallback_level: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,6 +64,52 @@ _CHINESE_NUMBERS = {
     "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
     "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
 }
+
+_METADATA_YEAR_SUFFIX = re.compile(r"\s*[\(（]\s*(?:19|20)\d{2}\s*[\)）]\s*$")
+_METADATA_SEASON_PATTERNS = (
+    re.compile(r"\s*第\s*(?:\d{1,3}|[一二两三四五六七八九十]{1,3})\s*[季期部]\s*", re.IGNORECASE),
+    re.compile(r"\s*(?:season|series)\s*\d{1,3}\s*", re.IGNORECASE),
+    re.compile(r"\s*\bS\d{1,3}\b\s*", re.IGNORECASE),
+    re.compile(r"\s*\b\d{1,2}(?:st|nd|rd|th)\s+season\b\s*", re.IGNORECASE),
+)
+
+
+def _clean_metadata_query(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def _metadata_base_title(value: str) -> str:
+    text = _clean_metadata_query(value)
+    for separator in ("：", ":", "—", "–", "～", "~"):
+        if separator in text:
+            prefix = text.split(separator, 1)[0].strip()
+            if len(re.sub(r"\W+", "", prefix)) >= 2:
+                return prefix
+    parts = text.split()
+    if len(parts) >= 2:
+        prefix = " ".join(parts[:-1]).strip()
+        suffix = parts[-1].strip("!！?？。·")
+        if re.search(r"[\u3400-\u9fff]", prefix) and 0 < len(suffix) <= 12:
+            return prefix
+    return text
+
+
+def metadata_query_fallbacks(value: str) -> list[str]:
+    """Build increasingly broad metadata queries while preserving their order."""
+
+    original = _clean_metadata_query(value)
+    if not original:
+        return []
+    queries = [original]
+    without_year = _clean_metadata_query(_METADATA_YEAR_SUFFIX.sub("", original))
+    queries.append(without_year)
+    without_season = without_year
+    for pattern in _METADATA_SEASON_PATTERNS:
+        without_season = pattern.sub(" ", without_season)
+    without_season = _clean_metadata_query(without_season)
+    queries.append(without_season)
+    queries.append(_metadata_base_title(without_season))
+    return list(dict.fromkeys(query for query in queries if query))
 
 
 def infer_season_from_title(value: str) -> int:
@@ -144,18 +194,39 @@ class MetadataService:
         if not query:
             raise ValueError("元数据搜索关键词不能为空")
         config = load_metadata_config(db)
-        if provider == "tmdb":
-            candidates = self._search_tmdb(db, config, query, media_type, year, limit)
-        elif provider == "bangumi":
-            candidates = self._search_bangumi(db, config, query, year, limit)
-        elif provider == "anilist":
-            candidates = self._search_anilist(db, query, year, limit)
-        else:
+        if provider not in {"tmdb", "bangumi", "anilist"}:
             raise ValueError("元数据来源必须是 tmdb、bangumi 或 anilist")
-        for candidate in candidates:
-            candidate.score = self._score(query, candidate.title, candidate.original_title, candidate.year, year)
-        candidates.sort(key=lambda item: item.score, reverse=True)
-        return [candidate.as_dict() for candidate in candidates[:limit]]
+
+        queries = metadata_query_fallbacks(query)
+        attempted: list[str] = []
+        query_had_year = bool(_METADATA_YEAR_SUFFIX.search(query))
+        for level, search_query in enumerate(queries):
+            attempted.append(search_query)
+            effective_year = 0 if query_had_year and level > 0 else year
+            if provider == "tmdb":
+                candidates = self._search_tmdb(db, config, search_query, media_type, effective_year, limit)
+            elif provider == "bangumi":
+                candidates = self._search_bangumi(db, config, search_query, effective_year, limit)
+            else:
+                candidates = self._search_anilist(db, search_query, effective_year, limit)
+            for candidate in candidates:
+                candidate.score = self._score(
+                    search_query,
+                    _METADATA_YEAR_SUFFIX.sub("", candidate.title),
+                    candidate.original_title,
+                    candidate.year,
+                    year,
+                )
+            candidates.sort(key=lambda item: item.score, reverse=True)
+            reliable = candidates and candidates[0].score >= 0.84
+            if reliable or (level == len(queries) - 1 and candidates):
+                for candidate in candidates:
+                    candidate.requested_query = query
+                    candidate.search_query = search_query
+                    candidate.search_attempts = attempted.copy()
+                    candidate.fallback_level = level
+                return [candidate.as_dict() for candidate in candidates[:limit]]
+        return []
 
     def get(
         self,

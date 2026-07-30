@@ -523,6 +523,10 @@ class MetadataCandidateOut(BaseModel):
     detail_url: str = ""
     score: float = 0.0
     rating: float = 0.0
+    requested_query: str = ""
+    search_query: str = ""
+    search_attempts: list[str] = Field(default_factory=list)
+    fallback_level: int = 0
 
 
 class MetadataRecordOut(MetadataCandidateOut):

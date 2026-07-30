@@ -285,6 +285,7 @@ td:nth-child(5) { min-width: 180px; white-space: pre-line; overflow-wrap: anywhe
 .metadata-season-warning { margin: 5px 0; padding: 10px; border: 1px solid #e4a72c; border-radius: 8px; color: #ffd47a; background: #533a102e; }
 .metadata-start-success { display: grid; justify-items: start; gap: 8px; padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .metadata-start-success h3, .metadata-start-success p { margin: 0; }
+.metadata-search-fallback { margin: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 @media (max-width: 700px) {
   .metadata-confirmation-facts { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
 }
