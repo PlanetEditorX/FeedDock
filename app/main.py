@@ -351,6 +351,77 @@ def _apply_mikan_hidden_filters(
     return payload
 
 
+def _catalog_subscription_data(
+    item: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    year: int,
+) -> dict[str, Any]:
+    """Copy already-loaded catalog data without invoking metadata providers."""
+
+    def first_text(*keys: str) -> str:
+        return next(
+            (
+                str(item.get(key) or "").strip()
+                for key in keys
+                if str(item.get(key) or "").strip()
+            ),
+            "",
+        )
+
+    try:
+        rating = max(0.0, min(10.0, float(item.get("rating") or 0.0)))
+    except (TypeError, ValueError):
+        rating = 0.0
+    try:
+        metadata_year = int(item.get("year") or year)
+    except (TypeError, ValueError):
+        metadata_year = year
+
+    return {
+        "reference_title": first_text("title", "title_original", "title_english"),
+        "poster_url": first_text("cover_proxy_url", "cover_url", "poster_url"),
+        "metadata_overview": first_text(
+            "metadata_overview",
+            "overview",
+            "description",
+            "summary",
+            "introduction",
+            "synopsis",
+        ),
+        "metadata_rating": rating,
+        "metadata_year": metadata_year,
+        "catalog_weekday": first_text("weekday") or str(row.get("weekday") or "").strip(),
+        "catalog_air_time": first_text("air_time", "update_at", "broadcast_time"),
+    }
+
+
+def _apply_catalog_subscription_data(
+    subscription: Subscription,
+    values: dict[str, Any],
+) -> bool:
+    """Backfill a trial from catalog fields without erasing richer values."""
+
+    changed = False
+    for field in (
+        "reference_title",
+        "poster_url",
+        "metadata_overview",
+        "catalog_weekday",
+        "catalog_air_time",
+    ):
+        value = str(values.get(field) or "").strip()
+        if value and getattr(subscription, field) != value:
+            setattr(subscription, field, value)
+            changed = True
+    for field in ("metadata_rating", "metadata_year"):
+        value = values.get(field) or 0
+        if value and getattr(subscription, field) != value:
+            setattr(subscription, field, value)
+            changed = True
+    return changed
+
+
 def _create_mikan_trials(
     db: Session,
     *,
@@ -363,9 +434,19 @@ def _create_mikan_trials(
     decorated = _apply_mikan_hidden_filters(catalog, db, year=year, season=season)
     service = MikanCacheService(DiscoveryService())
     created: list[Subscription] = []
+    updated = 0
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
-            if item.get("hidden") or item.get("subscribed") or item.get("trialed") or not int(item.get("bangumi_id") or 0):
+            if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
+                continue
+            catalog_values = _catalog_subscription_data(item, row, year=year)
+            if item.get("trialed"):
+                for match in item.get("subscriptions", []):
+                    if match.get("subscription_mode") != "trial":
+                        continue
+                    subscription = db.get(Subscription, int(match["subscription_id"]))
+                    if subscription and _apply_catalog_subscription_data(subscription, catalog_values):
+                        updated += 1
                 continue
             try:
                 detail = service.detail(
@@ -378,6 +459,7 @@ def _create_mikan_trials(
             if preset is None:
                 continue
             values = dict(preset)
+            values.update(catalog_values)
             values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
             if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
@@ -386,8 +468,13 @@ def _create_mikan_trials(
             db.add(subscription)
             db.flush()
             created.append(subscription)
-    if created:
-        add_log(db, "INFO", f"已创建 {len(created)} 条 Mikan 试看订阅", f"季度：{year} {season}")
+    if created or updated:
+        add_log(
+            db,
+            "INFO",
+            f"已创建 {len(created)} 条 Mikan 试看订阅，补齐 {updated} 条目录数据",
+            f"季度：{year} {season}",
+        )
         db.commit()
     return created
 
@@ -403,9 +490,19 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
         list(db.scalars(select(AnimePreference).where(AnimePreference.hidden.is_(True)))),
     )
     created: list[Subscription] = []
+    updated = 0
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
-            if item.get("hidden") or item.get("subscribed") or item.get("trialed"):
+            if item.get("hidden") or item.get("subscribed"):
+                continue
+            catalog_values = _catalog_subscription_data(item, row, year=year)
+            if item.get("trialed"):
+                for match in item.get("subscriptions", []):
+                    if match.get("subscription_mode") != "trial":
+                        continue
+                    subscription = db.get(Subscription, int(match["subscription_id"]))
+                    if subscription and _apply_catalog_subscription_data(subscription, catalog_values):
+                        updated += 1
                 continue
             try:
                 detail = service.detail(db, source_id, item)
@@ -416,6 +513,7 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
             if preset is None:
                 continue
             values = dict(preset)
+            values.update(catalog_values)
             values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
             if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
@@ -424,7 +522,7 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
             db.add(subscription)
             db.flush()
             created.append(subscription)
-    if created:
+    if created or updated:
         db.commit()
     return created
 
@@ -1086,7 +1184,11 @@ def create_catalog_trials(
         background_tasks.add_task(refresh_subscription, subscription.id, trigger=f"{source_id}-trial-batch")
     return {
         "created": len(created),
-        "message": f"已加入 {len(created)} 部{source_id}试看，首个可用剧集将自动下载" if created else "没有可加入试看的番剧，请确认目录已加载且作品尚未订阅或试看。",
+        "message": (
+            f"已加入 {len(created)} 部{source_id}试看，首个可用剧集将自动下载"
+            if created
+            else "没有新增试看；已有试看订阅的目录数据已同步。"
+        ),
     }
 
 
@@ -1325,7 +1427,7 @@ def create_mikan_trials(
     if not created:
         return {
             "created": 0,
-            "message": "没有创建试看：当前目录可能已全部订阅或隐藏，或未能从 Mikan 读取可用 RSS；请查看系统日志。",
+            "message": "没有新增试看；已有试看订阅的目录数据已同步。若仍有未加入作品，请查看系统日志。",
         }
     return {"created": len(created), "message": f"已加入 {len(created)} 部 Mikan 试看，首个可用剧集将自动下载"}
 

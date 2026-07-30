@@ -54,6 +54,8 @@ class Subscription(Base):
     tmdb_title: Mapped[str] = mapped_column(Text, default="", nullable=False)
     bgm_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
     air_date: Mapped[str] = mapped_column(String(10), default="", nullable=False)
+    catalog_weekday: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    catalog_air_time: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     season: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     season_mode: Mapped[str] = mapped_column(String(20), default="title", nullable=False)
 

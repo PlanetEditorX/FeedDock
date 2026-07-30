@@ -27,6 +27,7 @@ ANIBT_CATALOG = {
                 "animeId": "ani-543360",
                 "bgmId": "543360",
                 "cover": "https://anibt.net/cover.webp",
+                "description": "ANI.BT 目录简介",
                 "rating": 8.4,
                 "format": "23:30",
                 "rssReleaseCount": 8,
@@ -109,6 +110,7 @@ class NativeCatalogProviderTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[0].kwargs["params"]["season"], "2026-07")
         self.assertEqual(item["subject_id"], 543360)
         self.assertEqual(item["source_anime_id"], "ani-543360")
+        self.assertEqual(item["overview"], "ANI.BT 目录简介")
         self.assertEqual(detail["groups"][0]["name"], "示例字幕组")
         self.assertIn("bgmId=543360", detail["groups"][0]["rss_url"])
         self.assertEqual(detail["groups"][0]["preset"]["source_type"], "anibt")

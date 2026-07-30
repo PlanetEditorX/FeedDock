@@ -38,10 +38,17 @@
     return WEEKDAY_LABELS[index - 1] || '未设置星期';
   }
 
+  function subscriptionWeekdayIndex(subscription) {
+    const dateIndex = weekdayIndex(subscription?.air_date);
+    if (dateIndex <= 7) return dateIndex;
+    const catalogIndex = WEEKDAY_LABELS.indexOf(String(subscription?.catalog_weekday || '').trim());
+    return catalogIndex >= 0 ? catalogIndex + 1 : 99;
+  }
+
   function groupSubscriptionsByWeekday(subscriptions) {
     const groups = new Map();
     for (const subscription of sortSubscriptions(subscriptions, 'weekday')) {
-      const index = weekdayIndex(subscription?.air_date);
+      const index = subscriptionWeekdayIndex(subscription);
       if (!groups.has(index)) groups.set(index, []);
       groups.get(index).push(subscription);
     }
@@ -54,7 +61,7 @@
     const normalized = normalizeMode(mode);
     return [...(Array.isArray(subscriptions) ? subscriptions : [])].sort((left, right) => {
       if (normalized === 'weekday') {
-        return (weekdayIndex(left?.air_date) - weekdayIndex(right?.air_date))
+        return (subscriptionWeekdayIndex(left) - subscriptionWeekdayIndex(right))
           || compareName(left, right);
       }
       if (normalized === 'created') {
@@ -69,5 +76,5 @@
     });
   }
 
-  return { MODES, WEEKDAY_LABELS, normalizeMode, weekdayIndex, weekdayLabel, groupSubscriptionsByWeekday, sortSubscriptions };
+  return { MODES, WEEKDAY_LABELS, normalizeMode, weekdayIndex, weekdayLabel, subscriptionWeekdayIndex, groupSubscriptionsByWeekday, sortSubscriptions };
 });

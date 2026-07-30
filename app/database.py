@@ -37,6 +37,8 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "tmdb_title": "TEXT NOT NULL DEFAULT ''",
     "bgm_url": "TEXT NOT NULL DEFAULT ''",
     "air_date": "VARCHAR(10) NOT NULL DEFAULT ''",
+    "catalog_weekday": "VARCHAR(20) NOT NULL DEFAULT ''",
+    "catalog_air_time": "VARCHAR(80) NOT NULL DEFAULT ''",
     "season": "INTEGER NOT NULL DEFAULT 1",
     "season_mode": "VARCHAR(20) NOT NULL DEFAULT 'title'",
     "primary_rss_name": "VARCHAR(200) NOT NULL DEFAULT ''",

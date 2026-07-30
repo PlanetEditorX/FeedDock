@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import Base
 from app.anime_identity import hidden_for_item, title_key
 from app.main import (
+    _create_catalog_trials,
     _create_mikan_trials,
     batch_subscriptions,
     delete_subscription,
@@ -342,9 +343,10 @@ class SubscriptionManagementTests(unittest.TestCase):
               ...rows,
               {{ id: 4, name: '另一个周一', air_date: '2026-08-03' }},
               {{ id: 5, name: '日期未知', air_date: null }},
+              {{ id: 6, name: '目录周二', air_date: null, catalog_weekday: '星期二' }},
             ]);
             assert.deepEqual(groups.map((group) => [group.label, group.subscriptions.length]), [
-              ['星期一', 2], ['星期三', 1], ['星期日', 1], ['未设置星期', 1],
+              ['星期一', 2], ['星期二', 1], ['星期三', 1], ['星期日', 1], ['未设置星期', 1],
             ]);
             """
         )
@@ -438,6 +440,9 @@ class SubscriptionManagementTests(unittest.TestCase):
                     "bangumi_id": 100,
                     "title": "试看动画",
                     "base_url": "https://mikan.test",
+                    "cover_proxy_url": "/api/discovery/mikan/image?cover=100",
+                    "update_at": "每周一 23:00",
+                    "description": "来自 Mikan 目录的简介",
                 }],
             }],
         }
@@ -462,6 +467,64 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertFalse(subscription.enabled)
         self.assertEqual(subscription.save_path_template, "{base}/试看")
         self.assertEqual(subscription.source_type, "mikan")
+        self.assertEqual(subscription.poster_url, "/api/discovery/mikan/image?cover=100")
+        self.assertEqual(subscription.catalog_weekday, "星期一")
+        self.assertEqual(subscription.catalog_air_time, "每周一 23:00")
+        self.assertEqual(subscription.metadata_overview, "来自 Mikan 目录的简介")
+        self.assertEqual(subscription.metadata_year, 2026)
+
+        payload["rows"][0]["items"][0]["cover_proxy_url"] = "/api/discovery/mikan/image?cover=100-new"
+        payload["rows"][0]["items"][0]["description"] = "更新后的目录简介"
+        created_again = _create_mikan_trials(self.db, year=2026, season="夏", payload=payload)
+        self.db.refresh(subscription)
+        self.assertEqual(created_again, [])
+        self.assertEqual(subscription.poster_url, "/api/discovery/mikan/image?cover=100-new")
+        self.assertEqual(subscription.metadata_overview, "更新后的目录简介")
+
+    def test_native_catalog_trials_copy_catalog_card_data(self) -> None:
+        catalog = {
+            "rows": [{
+                "weekday": "星期二",
+                "items": [{
+                    "source_type": "anibt",
+                    "source_anime_id": "ani-543360",
+                    "subject_id": 543360,
+                    "title": "目录试看动画",
+                    "cover_url": "https://anibt.test/cover.webp",
+                    "overview": "来自 ANI.BT 目录的简介",
+                    "rating": 8.4,
+                    "air_time": "23:30",
+                }],
+            }],
+        }
+        detail = {
+            "groups": [{"preset": {
+                "name": "目录试看动画",
+                "source_type": "anibt",
+                "source_anime_id": "ani-543360",
+                "primary_rss_name": "ANI.BT · 测试组",
+                "rss_url": "https://anibt.test/rss.xml",
+                "bangumi_id": 543360,
+            }}],
+        }
+        with patch("app.main.AnimeCatalogCacheService") as service:
+            service.return_value.catalog.return_value = catalog
+            service.return_value.detail.return_value = detail
+            created = _create_catalog_trials(
+                self.db,
+                source_id="anibt",
+                year=2026,
+                season="夏",
+            )
+
+        self.assertEqual(len(created), 1)
+        subscription = self.db.get(Subscription, created[0].id)
+        self.assertEqual(subscription.poster_url, "https://anibt.test/cover.webp")
+        self.assertEqual(subscription.catalog_weekday, "星期二")
+        self.assertEqual(subscription.catalog_air_time, "23:30")
+        self.assertEqual(subscription.metadata_overview, "来自 ANI.BT 目录的简介")
+        self.assertEqual(subscription.metadata_rating, 8.4)
+        self.assertEqual(subscription.metadata_year, 2026)
 
 
 if __name__ == "__main__":

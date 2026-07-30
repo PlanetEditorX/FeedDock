@@ -15,6 +15,8 @@ _TEXT_FIELDS = (
     "metadata_overview",
     "poster_url",
     "backdrop_url",
+    "catalog_weekday",
+    "catalog_air_time",
     "primary_rss_name",
     "backup_rss_name",
     "include_keywords",
@@ -37,6 +39,8 @@ class SubscriptionCreate(BaseModel):
     tmdb_title: str = ""
     bgm_url: str = ""
     air_date: date | None = None
+    catalog_weekday: str = ""
+    catalog_air_time: str = ""
     season: int = Field(default=1, ge=0, le=999)
     season_mode: str = Field(default="title", pattern="^(manual|latest|title)$")
 
@@ -47,6 +51,7 @@ class SubscriptionCreate(BaseModel):
     bangumi_id: int = Field(default=0, ge=0)
     anilist_id: int = Field(default=0, ge=0)
     metadata_year: int = Field(default=0, ge=0, le=9999)
+    metadata_rating: float = Field(default=0.0, ge=0.0, le=10.0)
     metadata_source: str = Field(default="", max_length=32)
     metadata_overview: str = ""
     poster_url: str = ""
@@ -103,6 +108,8 @@ class SubscriptionUpdate(BaseModel):
     tmdb_title: str | None = None
     bgm_url: str | None = None
     air_date: date | None = None
+    catalog_weekday: str | None = None
+    catalog_air_time: str | None = None
     season: int | None = Field(default=None, ge=0, le=999)
     season_mode: str | None = Field(default=None, pattern="^(manual|latest|title)$")
 
@@ -113,6 +120,7 @@ class SubscriptionUpdate(BaseModel):
     bangumi_id: int | None = Field(default=None, ge=0)
     anilist_id: int | None = Field(default=None, ge=0)
     metadata_year: int | None = Field(default=None, ge=0, le=9999)
+    metadata_rating: float | None = Field(default=None, ge=0.0, le=10.0)
     metadata_source: str | None = Field(default=None, max_length=32)
     metadata_overview: str | None = None
     poster_url: str | None = None
@@ -215,6 +223,8 @@ class SubscriptionOut(BaseModel):
     tmdb_title: str
     bgm_url: str
     air_date: str
+    catalog_weekday: str
+    catalog_air_time: str
     season: int
     season_mode: str
     naming_mode: str

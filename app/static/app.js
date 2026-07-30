@@ -1324,8 +1324,13 @@ function createSubscriptionCard(sub) {
   meta.append(text('span', `原订阅名：${sub.name}`));
   meta.append(text('span', `媒体目录：${sub.media_folder || '—'}`));
   meta.append(text('span', `评分：${Number(sub.metadata_rating || 0) > 0 ? Number(sub.metadata_rating).toFixed(1) : '—'}`));
-  const weekday = subscriptionSorting.weekdayIndex(sub.air_date);
-  meta.append(text('span', `首播：${sub.air_date || '—'}${weekday <= 7 ? ` · ${subscriptionSorting.weekdayLabel(weekday)}` : ''}`));
+  const weekday = subscriptionSorting.subscriptionWeekdayIndex(sub);
+  const schedule = [
+    sub.air_date || '',
+    weekday <= 7 ? subscriptionSorting.weekdayLabel(weekday) : '',
+    sub.catalog_air_time || '',
+  ].filter(Boolean).join(' · ');
+  meta.append(text('span', `播出：${schedule || '—'}`));
   meta.append(text('span', `来源：${sub.metadata_source || (sub.metadata_review_skipped ? '已跳过' : '未确认')} · TMDB ${sub.tmdb_id || '—'} · Bangumi ${sub.bangumi_id || '—'} · AniList ${sub.anilist_id || '—'}`));
   meta.append(text('span', `季 ${sub.season}（${sub.season_mode || 'manual'}） · 总集数 ${sub.total_episodes || '未知'}（${sub.total_episodes_source || '未同步'}${sub.total_episodes_locked ? '，已锁定' : ''}）`));
   meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));

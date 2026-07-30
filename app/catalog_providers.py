@@ -174,6 +174,14 @@ class AniBtCatalogProvider(CatalogProvider):
                     "rating": float(raw.get("rating") or 0),
                     "cover_url": str(raw.get("cover") or ""),
                     "cover_proxy_url": "",
+                    "overview": str(
+                        raw.get("overview")
+                        or raw.get("description")
+                        or raw.get("summary")
+                        or raw.get("introduction")
+                        or raw.get("synopsis")
+                        or ""
+                    ).strip(),
                     "rss_release_count": int(raw.get("rssReleaseCount") or 0),
                     "official_url": f"{self.host}/anime/{subject_id}" if subject_id else self.host,
                     "air_time": str(raw.get("format") or ""),
@@ -317,6 +325,14 @@ class AnimeGardenCatalogProvider(CatalogProvider):
                 "rating": float(raw.get("score") or 0),
                 "cover_url": str(raw.get("cover") or ""),
                 "cover_proxy_url": "",
+                "overview": str(
+                    raw.get("overview")
+                    or raw.get("description")
+                    or raw.get("summary")
+                    or raw.get("introduction")
+                    or raw.get("synopsis")
+                    or ""
+                ).strip(),
                 "official_url": f"https://animes.garden/subject/{subject_id}" if subject_id else "https://animes.garden",
                 "air_time": air_time,
                 "weekday": weekday,
