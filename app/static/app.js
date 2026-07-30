@@ -148,6 +148,7 @@ function filteredSubscriptions(subscriptions) {
   const filtered = subscriptions.filter((sub) => {
     const haystack = [sub.name, sub.canonical_title, sub.primary_rss_name, sub.rss_url].join(' ').toLowerCase();
     if (query && !haystack.includes(query)) return false;
+    if (state === 'trial' && sub.subscription_mode !== 'trial') return false;
     if (state === 'enabled' && !sub.enabled) return false;
     if (state === 'disabled' && sub.enabled) return false;
     if (state === 'error' && !sub.last_error) return false;
