@@ -257,6 +257,7 @@ function resetSubscriptionForm() {
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   document.getElementById('searchRssCandidates').classList.add('hidden');
   document.getElementById('saveRssOnly').classList.add('hidden');
+  document.getElementById('saveRssOnly').textContent = '仅保存 RSS';
   document.getElementById('saveRssAndRefresh').classList.add('hidden');
   subscriptionForm.elements.rss_url.closest('details').open = false;
   subscriptionPreviewBox.textContent = '尚未预览。';
@@ -1277,8 +1278,11 @@ function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   document.getElementById('cancelSubscriptionEdit').textContent = '取消编辑';
   document.getElementById('cancelSubscriptionEdit').classList.remove('hidden');
   document.getElementById('searchRssCandidates').classList.remove('hidden');
-  document.getElementById('saveRssOnly').classList.remove('hidden');
-  document.getElementById('saveRssAndRefresh').classList.remove('hidden');
+  const saveRssOnly = document.getElementById('saveRssOnly');
+  const saveRssAndRefresh = document.getElementById('saveRssAndRefresh');
+  saveRssOnly.classList.remove('hidden');
+  saveRssOnly.textContent = sub.last_error ? '保存 RSS 并立即检查' : '仅保存 RSS';
+  saveRssAndRefresh.classList.toggle('hidden', Boolean(sub.last_error));
   const rssDetails = subscriptionForm.elements.rss_url.closest('details');
   rssDetails.open = focusRss;
   subscriptionPreviewBox.textContent = '请点击“预览规则和路径”确认修改后的结果。';
@@ -2343,9 +2347,11 @@ function quickRssPayload() {
 async function saveRssFields({ refresh = false } = {}) {
   const id = Number(subscriptionForm.elements.subscription_id.value || 0);
   if (!id) throw new Error('请先保存订阅，再单独更新 RSS');
+  const previous = currentSubscriptions.find((row) => row.id === id);
+  const shouldRefresh = refresh || Boolean(previous?.last_error);
   const saved = await api(`/api/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(quickRssPayload()) });
   populateSubscriptionForm(saved, { focusRss: true });
-  if (refresh) {
+  if (shouldRefresh) {
     const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
     showNotice(result.message || 'RSS 已保存，当前订阅检查已启动');
   } else {
@@ -2370,10 +2376,25 @@ subscriptionForm.addEventListener('submit', async (event) => {
   try {
     const path = id ? `/api/subscriptions/${id}` : '/api/subscriptions';
     const method = id ? 'PATCH' : 'POST';
-    const saved = await api(path, { method, body: JSON.stringify(subscriptionPayload({ formData })) });
+    const payload = subscriptionPayload({ formData });
+    const previous = id ? currentSubscriptions.find((row) => row.id === Number(id)) : null;
+    const rssChanged = Boolean(previous) && (
+      String(previous.rss_url || '') !== String(payload.rss_url || '')
+      || String(previous.backup_rss_url || '') !== String(payload.backup_rss_url || '')
+    );
+    const refreshAfterSave = Boolean(previous?.last_error && rssChanged);
+    const saved = await api(path, { method, body: JSON.stringify(payload) });
+    let refreshResult = null;
+    if (refreshAfterSave) {
+      refreshResult = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+    }
     formElement.reset();
     resetSubscriptionForm();
-    showNotice(id ? '订阅已更新' : '订阅已保存，正在自动刷新一次');
+    showNotice(
+      refreshAfterSave
+        ? (refreshResult?.message || 'RSS 已更新，异常订阅已立即刷新一次')
+        : (id ? '订阅已更新' : '订阅已保存，正在自动刷新一次'),
+    );
     await reloadAll();
     showAppView('subscriptions');
     if (!id && !saved.metadata_confirmed && !saved.metadata_review_skipped) openMetadataReview(saved);
