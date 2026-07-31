@@ -453,6 +453,8 @@ def _create_mikan_trials(
         subs = db.scalars(select(Subscription).where(Subscription.id.in_(trial_subscription_ids))).all()
         subscriptions_map = {sub.id: sub for sub in subs}
 
+    existing_rss_urls = set(db.scalars(select(Subscription.rss_url)).all())
+
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
             if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
@@ -480,8 +482,9 @@ def _create_mikan_trials(
             values.update(catalog_values)
             values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
-            if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
+            if str(values["rss_url"]) in existing_rss_urls:
                 continue
+            existing_rss_urls.add(str(values["rss_url"]))
             subscription = Subscription(**values)
             db.add(subscription)
             db.flush()
@@ -525,6 +528,8 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
         subs = db.scalars(select(Subscription).where(Subscription.id.in_(trial_subscription_ids))).all()
         subscriptions_map = {sub.id: sub for sub in subs}
 
+    existing_rss_urls = set(db.scalars(select(Subscription.rss_url)).all())
+
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
             if item.get("hidden") or item.get("subscribed"):
@@ -550,8 +555,9 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
             values.update(catalog_values)
             values.update(subscription_mode="trial", trial_bulk=True)
             values = _subscription_values(SubscriptionCreate.model_validate(values), db)
-            if db.scalar(select(Subscription.id).where(Subscription.rss_url == values["rss_url"])):
+            if str(values["rss_url"]) in existing_rss_urls:
                 continue
+            existing_rss_urls.add(str(values["rss_url"]))
             subscription = Subscription(**values)
             db.add(subscription)
             db.flush()
