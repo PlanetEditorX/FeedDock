@@ -437,6 +437,22 @@ def _create_mikan_trials(
     service = MikanCacheService(DiscoveryService())
     created: list[Subscription] = []
     updated = 0
+
+    trial_subscription_ids = set()
+    for row in decorated.get("rows", []):
+        for item in row.get("items", []):
+            if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
+                continue
+            if item.get("trialed"):
+                for match in item.get("subscriptions", []):
+                    if match.get("subscription_mode") == "trial":
+                        trial_subscription_ids.add(int(match["subscription_id"]))
+
+    subscriptions_map = {}
+    if trial_subscription_ids:
+        subs = db.scalars(select(Subscription).where(Subscription.id.in_(trial_subscription_ids))).all()
+        subscriptions_map = {sub.id: sub for sub in subs}
+
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
             if item.get("hidden") or item.get("subscribed") or not int(item.get("bangumi_id") or 0):
@@ -446,7 +462,7 @@ def _create_mikan_trials(
                 for match in item.get("subscriptions", []):
                     if match.get("subscription_mode") != "trial":
                         continue
-                    subscription = db.get(Subscription, int(match["subscription_id"]))
+                    subscription = subscriptions_map.get(int(match["subscription_id"]))
                     if subscription and _apply_catalog_subscription_data(subscription, catalog_values):
                         updated += 1
                 continue
@@ -493,6 +509,22 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
     )
     created: list[Subscription] = []
     updated = 0
+
+    trial_subscription_ids = set()
+    for row in decorated.get("rows", []):
+        for item in row.get("items", []):
+            if item.get("hidden") or item.get("subscribed"):
+                continue
+            if item.get("trialed"):
+                for match in item.get("subscriptions", []):
+                    if match.get("subscription_mode") == "trial":
+                        trial_subscription_ids.add(int(match["subscription_id"]))
+
+    subscriptions_map = {}
+    if trial_subscription_ids:
+        subs = db.scalars(select(Subscription).where(Subscription.id.in_(trial_subscription_ids))).all()
+        subscriptions_map = {sub.id: sub for sub in subs}
+
     for row in decorated.get("rows", []):
         for item in row.get("items", []):
             if item.get("hidden") or item.get("subscribed"):
@@ -502,7 +534,7 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
                 for match in item.get("subscriptions", []):
                     if match.get("subscription_mode") != "trial":
                         continue
-                    subscription = db.get(Subscription, int(match["subscription_id"]))
+                    subscription = subscriptions_map.get(int(match["subscription_id"]))
                     if subscription and _apply_catalog_subscription_data(subscription, catalog_values):
                         updated += 1
                 continue
