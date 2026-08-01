@@ -191,6 +191,14 @@ class ApplicationSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "自动重命名"):
             self.save_preferences(auto_skip_existing=True)
 
+    def test_qbittorrent_api_key_requires_official_format(self):
+        client = QBittorrentClient(
+            base_url="http://qbit.test",
+            auth_mode="api_key",
+            api_key="not-a-qbittorrent-key",
+        )
+        self.assertIn("qbt_ 开头的 32 位密钥", client._configuration_error())
+
     def test_qbittorrent_add_includes_seeding_limit(self):
         fake = _FakeQbitHttpClient([{"hash": "demo-hash", "name": "Demo", "state": "downloading"}])
         client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")

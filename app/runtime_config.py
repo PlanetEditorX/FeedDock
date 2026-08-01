@@ -16,8 +16,10 @@ from .media_paths import preferred_local_media_root
 
 QBIT_SETTING_KEYS = {
     "qbit_url",
+    "qbit_auth_mode",
     "qbit_username",
     "qbit_password",
+    "qbit_api_key",
     "qbit_category",
     "download_path",
 }
@@ -26,21 +28,27 @@ QBIT_SETTING_KEYS = {
 @dataclass(frozen=True, slots=True)
 class QBittorrentConfig:
     url: str
+    auth_mode: str
     username: str
     password: str
+    api_key: str
     category: str
     download_path: str
     source: str
 
     @property
     def configured(self) -> bool:
+        if self.auth_mode == "api_key":
+            return bool(self.url and self.api_key)
         return bool(self.url and self.username and self.password)
 
     def public_dict(self) -> dict[str, str | bool]:
         return {
             "qbit_url": self.url,
+            "qbit_auth_mode": self.auth_mode,
             "qbit_username": self.username,
             "qbit_password_configured": bool(self.password),
+            "qbit_api_key_configured": bool(self.api_key),
             "qbit_category": self.category,
             "download_path": self.download_path,
             "source": self.source,
@@ -51,8 +59,10 @@ class QBittorrentConfig:
 def _environment_config() -> QBittorrentConfig:
     return QBittorrentConfig(
         url=settings.qbit_url,
+        auth_mode=(settings.qbit_auth_mode if settings.qbit_auth_mode in {"password", "api_key"} else "password"),
         username=settings.qbit_username,
         password=settings.qbit_password,
+        api_key=settings.qbit_api_key,
         category=settings.qbit_category,
         download_path=settings.download_path,
         source="compose",
@@ -72,10 +82,15 @@ def _load_with_session(db: Session) -> QBittorrentConfig:
         return fallback
     if not rows:
         return fallback
+    auth_mode = rows.get("qbit_auth_mode", fallback.auth_mode).strip().lower()
+    if auth_mode not in {"password", "api_key"}:
+        auth_mode = "password"
     return QBittorrentConfig(
         url=rows.get("qbit_url", fallback.url).strip().rstrip("/"),
+        auth_mode=auth_mode,
         username=rows.get("qbit_username", fallback.username).strip(),
         password=rows.get("qbit_password", fallback.password),
+        api_key=rows.get("qbit_api_key", fallback.api_key),
         category=rows.get("qbit_category", fallback.category).strip(),
         download_path=rows.get("download_path", fallback.download_path).strip(),
         source="web",
@@ -92,15 +107,19 @@ def load_qbittorrent_config(db: Session | None = None) -> QBittorrentConfig:
 def validate_qbittorrent_values(
     *,
     qbit_url: str,
+    qbit_auth_mode: str,
     qbit_username: str,
     qbit_category: str,
     download_path: str,
-) -> tuple[str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     url = qbit_url.strip().rstrip("/")
+    auth_mode = qbit_auth_mode.strip().lower()
     username = qbit_username.strip()
     category = qbit_category.strip()
     path = download_path.strip()
 
+    if auth_mode not in {"password", "api_key"}:
+        raise ValueError("qBittorrent 认证方式必须是账号密码或 API 密钥")
     if url:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -117,7 +136,7 @@ def validate_qbittorrent_values(
         raise ValueError("下载保存路径必须是以 / 开头的绝对路径")
     if len(path) > 2000:
         raise ValueError("下载保存路径过长")
-    return url, username, category, path
+    return url, auth_mode, username, category, path
 
 
 def save_qbittorrent_config(
@@ -129,22 +148,33 @@ def save_qbittorrent_config(
     clear_password: bool,
     qbit_category: str,
     download_path: str,
+    qbit_auth_mode: str = "password",
+    qbit_api_key: str | None = None,
+    clear_api_key: bool = False,
 ) -> QBittorrentConfig:
-    url, username, category, path = validate_qbittorrent_values(
+    url, auth_mode, username, category, path = validate_qbittorrent_values(
         qbit_url=qbit_url,
+        qbit_auth_mode=qbit_auth_mode,
         qbit_username=qbit_username,
         qbit_category=qbit_category,
         download_path=download_path,
     )
     current = load_qbittorrent_config(db)
     password = "" if clear_password else (current.password if qbit_password is None else qbit_password)
+    api_key = "" if clear_api_key else (current.api_key if qbit_api_key is None else qbit_api_key.strip())
     if len(password) > 500:
         raise ValueError("qBittorrent 密码过长")
+    if len(api_key) > 500:
+        raise ValueError("qBittorrent API 密钥过长")
+    if auth_mode == "api_key" and api_key and (len(api_key) != 32 or not api_key.startswith("qbt_")):
+        raise ValueError("qBittorrent API 密钥格式无效，应为 qbt_ 开头的 32 位密钥")
 
     values = {
         "qbit_url": url,
+        "qbit_auth_mode": auth_mode,
         "qbit_username": username,
         "qbit_password": password,
+        "qbit_api_key": api_key,
         "qbit_category": category,
         "download_path": path,
     }

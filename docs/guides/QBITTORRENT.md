@@ -5,8 +5,27 @@
 ## 安全边界
 
 - FeedDock 通过 qBittorrent Web API 创建和查询任务。
+- 支持账号密码 Cookie 登录，以及 qBittorrent 5.2.0 / WebAPI 2.14.1 以上的 API 密钥认证。
+- API 密钥通过 `Authorization: Bearer qbt_...` 发送，不会调用 `/api/v2/auth/login`。
 - 延迟清理固定使用 `deleteFiles=false`，只移除 qBittorrent 任务记录，不删除下载文件。
 - 日志不会输出完整 Torrent URL、magnet 或私有 RSS passkey。
+
+## 认证方式
+
+### 账号密码
+
+适用于现有 qBittorrent 版本。填写 WebUI 用户名和密码，FeedDock 登录后复用 SID Cookie。
+
+### API 密钥
+
+仅适用于 qBittorrent 5.2.0 或 WebAPI 2.14.1 以上。在 qBittorrent 的“设置 → WebUI → API Key”生成 `qbt_` 开头的 32 位密钥，然后在 FeedDock 下载设置中选择“API 密钥”。API 密钥模式不需要填写用户名和密码。
+
+Compose 环境变量可使用：
+
+```env
+QBIT_AUTH_MODE=api_key
+QBIT_API_KEY=qbt_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
 
 ## 下载推送、任务确认与日志
 

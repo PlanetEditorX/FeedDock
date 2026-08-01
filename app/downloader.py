@@ -59,8 +59,10 @@ class QBittorrentClient:
         self,
         *,
         base_url: str | None = None,
+        auth_mode: str | None = None,
         username: str | None = None,
         password: str | None = None,
+        api_key: str | None = None,
         timeout: int | None = None,
         category: str | None = None,
     ) -> None:
@@ -68,6 +70,11 @@ class QBittorrentClient:
         self.base_url = (
             (runtime.url if runtime else settings.qbit_url) if base_url is None else base_url
         ).strip().rstrip("/")
+        self.auth_mode = (
+            (runtime.auth_mode if runtime else settings.qbit_auth_mode)
+            if auth_mode is None
+            else auth_mode
+        ).strip().lower()
         self.username = (
             (runtime.username if runtime else settings.qbit_username)
             if username is None
@@ -78,6 +85,11 @@ class QBittorrentClient:
             if password is None
             else password
         )
+        self.api_key = (
+            (runtime.api_key if runtime else settings.qbit_api_key)
+            if api_key is None
+            else api_key
+        ).strip()
         self.timeout = settings.request_timeout_seconds if timeout is None else timeout
         self.category = (
             (runtime.category if runtime else settings.qbit_category)
@@ -91,6 +103,14 @@ class QBittorrentClient:
         parsed = urlparse(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return "QBIT_URL 必须是有效的 HTTP 或 HTTPS 地址"
+        if self.auth_mode not in {"password", "api_key"}:
+            return "QBIT_AUTH_MODE 必须是 password 或 api_key"
+        if self.auth_mode == "api_key":
+            if not self.api_key:
+                return "QBIT_API_KEY 尚未配置"
+            if len(self.api_key) != 32 or not self.api_key.startswith("qbt_"):
+                return "QBIT_API_KEY 格式无效，应为 qbt_ 开头的 32 位密钥"
+            return ""
         if not self.username:
             return "QBIT_USERNAME 尚未配置"
         if not self.password:
@@ -98,21 +118,39 @@ class QBittorrentClient:
         return ""
 
     def _client(self) -> httpx.Client:
+        headers = {"Referer": f"{self.base_url}/", "Origin": self.base_url}
+        if self.auth_mode == "api_key" and self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         return httpx.Client(
             base_url=f"{self.base_url}/",
             timeout=self.timeout,
             follow_redirects=True,
-            headers={"Referer": f"{self.base_url}/", "Origin": self.base_url},
+            headers=headers,
         )
 
     def _login(self, client: httpx.Client) -> DownloaderResult:
+        if self.auth_mode == "api_key":
+            # API-key authentication is stateless and qBittorrent explicitly
+            # rejects API keys on the login/logout endpoints. The Bearer header
+            # is attached to every request by ``_client`` instead.
+            return DownloaderResult(True, "API 密钥认证已启用")
         login = client.post(
             "api/v2/auth/login",
             data={"username": self.username, "password": self.password},
         )
-        if login.status_code != 200 or login.text.strip() != "Ok.":
-            return DownloaderResult(False, f"qBittorrent 登录失败：HTTP {login.status_code}")
-        return DownloaderResult(True, "登录成功")
+        body = login.text.strip()
+        # Older qBittorrent versions return ``200 Ok.`` while newer WebAPI
+        # versions may return ``204 No Content`` (or ``200`` with an empty
+        # body).  Invalid credentials on legacy versions can still be a
+        # ``200 Fails.`` response, so do not accept every 2xx blindly here.
+        if login.status_code == 204 or (
+            login.status_code == 200 and body in {"", "Ok."}
+        ):
+            return DownloaderResult(True, "登录成功")
+        detail = f"：{body}" if body else ""
+        return DownloaderResult(
+            False, f"qBittorrent 登录失败：HTTP {login.status_code}{detail}"
+        )
 
     def test(self) -> DownloaderResult:
         error = self._configuration_error()
@@ -124,10 +162,17 @@ class QBittorrentClient:
                 if not login.ok:
                     return login
                 version = client.get("api/v2/app/version")
+                if self.auth_mode == "api_key" and version.status_code in {401, 403}:
+                    return DownloaderResult(
+                        False,
+                        "qBittorrent API 密钥认证失败，请确认密钥有效且版本不低于 5.2.0",
+                    )
                 version.raise_for_status()
                 host = urlparse(self.base_url).netloc
+                auth_label = "API 密钥" if self.auth_mode == "api_key" else "账号密码"
                 return DownloaderResult(
-                    True, f"连接 qBittorrent 成功：{host}，版本 {version.text.strip()}"
+                    True,
+                    f"连接 qBittorrent 成功：{host}，版本 {version.text.strip()}，认证方式：{auth_label}",
                 )
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"连接失败：{exc}")
@@ -156,7 +201,7 @@ class QBittorrentClient:
 
     @staticmethod
     def _response_error(response: httpx.Response) -> str:
-        if response.status_code != 200:
+        if not 200 <= response.status_code < 300:
             return f"添加任务失败：HTTP {response.status_code}"
         body = response.text.strip()
         if body not in {"Ok.", ""}:
@@ -237,7 +282,7 @@ class QBittorrentClient:
             "api/v2/torrents/removeTags",
             data={"hashes": torrent_hash, "tags": tag},
         )
-        if remove_response.status_code != 200:
+        if not 200 <= remove_response.status_code < 300:
             return DownloaderResult(
                 False, f"移除临时标签失败：HTTP {remove_response.status_code}"
             )
@@ -246,7 +291,7 @@ class QBittorrentClient:
             "api/v2/torrents/deleteTags",
             data={"tags": tag},
         )
-        if delete_response.status_code != 200:
+        if not 200 <= delete_response.status_code < 300:
             return DownloaderResult(
                 False, f"删除临时标签失败：HTTP {delete_response.status_code}"
             )
@@ -449,7 +494,7 @@ class QBittorrentClient:
                         "api/v2/torrents/removeTags",
                         data={"hashes": "all", "tags": joined},
                     )
-                    if remove_response.status_code != 200:
+                    if not 200 <= remove_response.status_code < 300:
                         failures.append(
                             f"移除 {len(batch)} 个标签失败：HTTP {remove_response.status_code}"
                         )
@@ -458,7 +503,7 @@ class QBittorrentClient:
                         "api/v2/torrents/deleteTags",
                         data={"tags": joined},
                     )
-                    if delete_response.status_code != 200:
+                    if not 200 <= delete_response.status_code < 300:
                         failures.append(
                             f"删除 {len(batch)} 个标签失败：HTTP {delete_response.status_code}"
                         )
@@ -525,7 +570,7 @@ class QBittorrentClient:
                     "api/v2/torrents/delete",
                     data={"hashes": normalized_hash, "deleteFiles": "false"},
                 )
-                if response.status_code != 200:
+                if not 200 <= response.status_code < 300:
                     return DownloaderResult(
                         False,
                         f"删除 qBittorrent 任务记录失败：HTTP {response.status_code}",
@@ -552,7 +597,7 @@ class QBittorrentClient:
                     "api/v2/torrents/addTrackers",
                     data={"hash": torrent_hash, "urls": "\n".join(values)},
                 )
-                if response.status_code != 200:
+                if not 200 <= response.status_code < 300:
                     return DownloaderResult(False, f"添加 Tracker 失败：HTTP {response.status_code}")
                 return DownloaderResult(True, f"已添加 {len(values)} 个 Tracker")
         except httpx.HTTPError as exc:
@@ -623,7 +668,7 @@ class QBittorrentClient:
                             "newPath": new_video_path,
                         },
                     )
-                    if response.status_code != 200:
+                    if not 200 <= response.status_code < 300:
                         return TorrentRelocateResult(
                             False,
                             True,
@@ -657,7 +702,7 @@ class QBittorrentClient:
                             "newPath": new_subtitle_path,
                         },
                     )
-                    if response.status_code == 200:
+                    if 200 <= response.status_code < 300:
                         subtitle_count += 1
 
                 relocated = current_location != target_location
@@ -666,7 +711,7 @@ class QBittorrentClient:
                         "api/v2/torrents/setLocation",
                         data={"hashes": resolved_hash, "location": target_location},
                     )
-                    if response.status_code != 200:
+                    if not 200 <= response.status_code < 300:
                         current_path = posixpath.join(current_location, new_video_path)
                         return TorrentRelocateResult(
                             False,
@@ -811,7 +856,7 @@ class QBittorrentClient:
                                     "newPath": new_video_path,
                                 },
                             )
-                            if rename_response.status_code != 200:
+                            if not 200 <= rename_response.status_code < 300:
                                 return TorrentNormalizeResult(
                                     False,
                                     "error",
@@ -846,7 +891,7 @@ class QBittorrentClient:
                                     "newPath": new_subtitle_path,
                                 },
                             )
-                            if response.status_code == 200:
+                            if 200 <= response.status_code < 300:
                                 subtitle_count += 1
 
                         media_filename = target_stem + extension

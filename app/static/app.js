@@ -351,15 +351,28 @@ async function loadConfig() {
   }
 }
 
+function updateDownloaderAuthFields() {
+  const form = document.getElementById('downloaderForm');
+  const mode = form.elements.qbit_auth_mode.value || 'password';
+  form.querySelectorAll('[data-qbit-auth]').forEach((element) => {
+    element.classList.toggle('hidden', element.dataset.qbitAuth !== mode);
+  });
+}
+
 async function loadDownloaderSettings() {
   const data = await api('/api/downloader/settings');
   const form = document.getElementById('downloaderForm');
   form.elements.qbit_url.value = data.qbit_url || '';
+  form.elements.qbit_auth_mode.value = data.qbit_auth_mode || 'password';
   form.elements.qbit_username.value = data.qbit_username || '';
   form.elements.qbit_password.value = '';
   form.elements.qbit_password.placeholder = data.qbit_password_configured
     ? '已保存密码；留空表示不修改'
     : '请输入 qBittorrent WebUI 密码';
+  form.elements.qbit_api_key.value = '';
+  form.elements.qbit_api_key.placeholder = data.qbit_api_key_configured
+    ? '已保存 API 密钥；留空表示不修改'
+    : '请输入 qbt_ 开头的 32 位 API 密钥';
   form.elements.qbit_category.value = data.qbit_category || 'rss';
   currentDownloadRoot = data.download_path || '/media';
   form.elements.download_path.value = currentDownloadRoot;
@@ -367,10 +380,13 @@ async function loadDownloaderSettings() {
   const metadataForm = document.getElementById('metadataSettingsForm');
   if (metadataForm && !metadataForm.elements.media_local_root.value) metadataForm.elements.media_local_root.value = currentDownloadRoot;
   form.elements.clear_password.checked = false;
+  form.elements.clear_api_key.checked = false;
+  updateDownloaderAuthFields();
 
   const source = data.source === 'web' ? '网页保存' : 'Compose 环境变量';
   const status = data.configured ? '配置完整' : '尚未配置完整';
-  document.getElementById('qbitConfigState').textContent = `${status} · 当前来源：${source}`;
+  const authLabel = data.qbit_auth_mode === 'api_key' ? 'API 密钥' : '账号密码';
+  document.getElementById('qbitConfigState').textContent = `${status} · ${authLabel} · 当前来源：${source}`;
   const openQbit = document.getElementById('openQbit');
   if (openQbit) {
     if (data.qbit_url) {
@@ -388,11 +404,15 @@ async function loadDownloaderSettings() {
 function downloaderPayload() {
   const form = document.getElementById('downloaderForm');
   const password = form.elements.qbit_password.value;
+  const apiKey = form.elements.qbit_api_key.value;
   return {
     qbit_url: form.elements.qbit_url.value.trim(),
+    qbit_auth_mode: form.elements.qbit_auth_mode.value || 'password',
     qbit_username: form.elements.qbit_username.value.trim(),
     qbit_password: password ? password : null,
     clear_password: form.elements.clear_password.checked,
+    qbit_api_key: apiKey ? apiKey : null,
+    clear_api_key: form.elements.clear_api_key.checked,
     qbit_category: form.elements.qbit_category.value.trim() || 'rss',
     download_path: form.elements.download_path.value.trim(),
   };
@@ -1729,7 +1749,7 @@ async function revealSavedSecret(input, secretName) {
 
 function initializePasswordToggles() {
   const mappings = {
-    qbit_password: 'qbit_password', tmdb_read_access_token: 'tmdb_read_access_token',
+    qbit_password: 'qbit_password', qbit_api_key: 'qbit_api_key', tmdb_read_access_token: 'tmdb_read_access_token',
     bangumi_access_token: 'bangumi_access_token', proxy_url: 'proxy_url',
     notification_telegram_bot_token: 'notification_telegram_bot_token',
     notification_bark_device_key: 'notification_bark_device_key',
@@ -2052,6 +2072,8 @@ function renderReviewResults(results) {
     body.append(choose); card.append(body); container.append(card);
   });
 }
+
+document.getElementById('downloaderForm').elements.qbit_auth_mode.addEventListener('change', updateDownloaderAuthFields);
 
 document.getElementById('downloaderForm').elements.download_path.addEventListener('input', (event) => {
   const value = event.currentTarget.value.trim();

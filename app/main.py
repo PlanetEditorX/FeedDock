@@ -835,9 +835,12 @@ def update_downloader_settings(
         config = save_qbittorrent_config(
             db,
             qbit_url=payload.qbit_url,
+            qbit_auth_mode=payload.qbit_auth_mode,
             qbit_username=payload.qbit_username,
             qbit_password=payload.qbit_password,
             clear_password=payload.clear_password,
+            qbit_api_key=payload.qbit_api_key,
+            clear_api_key=payload.clear_api_key,
             qbit_category=payload.qbit_category,
             download_path=payload.download_path,
         )
@@ -1126,6 +1129,7 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
     notifications = load_notification_config(db)
     values = {
         "qbit_password": qbit.password,
+        "qbit_api_key": qbit.api_key,
         "tmdb_read_access_token": metadata.tmdb_read_access_token,
         "bangumi_access_token": metadata.bangumi_access_token,
         "emby_api_key": metadata.emby_api_key,

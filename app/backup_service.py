@@ -25,6 +25,7 @@ BACKUP_VERSION = 1
 
 _SENSITIVE_SETTING_KEYS = {
     "qbit_password",
+    "qbit_api_key",
     "tmdb_read_access_token",
     "bangumi_access_token",
     "emby_api_key",
@@ -76,8 +77,10 @@ def effective_setting_values(db: Session) -> dict[str, str]:
     notifications = load_notification_config(db)
     return {
         "qbit_url": qbit.url,
+        "qbit_auth_mode": qbit.auth_mode,
         "qbit_username": qbit.username,
         "qbit_password": qbit.password,
+        "qbit_api_key": qbit.api_key,
         "qbit_category": qbit.category,
         "download_path": qbit.download_path,
         "page_theme_color": preferences.page.theme_color,

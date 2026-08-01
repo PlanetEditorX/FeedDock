@@ -78,8 +78,10 @@ class Settings:
     mikan_thumbnail_height: int
 
     qbit_url: str
+    qbit_auth_mode: str
     qbit_username: str
     qbit_password: str
+    qbit_api_key: str
     qbit_category: str
     download_path: str
 
@@ -145,8 +147,10 @@ def load_settings():
         mikan_thumbnail_width=_integer("MIKAN_THUMBNAIL_WIDTH", 240, minimum=32, maximum=4096),
         mikan_thumbnail_height=_integer("MIKAN_THUMBNAIL_HEIGHT", 320, minimum=32, maximum=4096),
         qbit_url=_text("QBIT_URL").rstrip("/"),
+        qbit_auth_mode=(_text("QBIT_AUTH_MODE", "password") or "password").lower(),
         qbit_username=_text("QBIT_USERNAME"),
         qbit_password=os.getenv("QBIT_PASSWORD", ""),
+        qbit_api_key=os.getenv("QBIT_API_KEY", "").strip(),
         qbit_category=_text("QBIT_CATEGORY", "rss") or "rss",
         download_path=_text("DOWNLOAD_PATH", "/media") or "/media",
         metadata_language=_text("METADATA_LANGUAGE", "zh-CN") or "zh-CN",

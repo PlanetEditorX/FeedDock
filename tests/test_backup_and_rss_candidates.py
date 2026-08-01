@@ -33,6 +33,7 @@ class BackupAndRssCandidateTests(unittest.TestCase):
         self.db.add_all([
             AppSetting(key="page_theme_color", value="green"),
             AppSetting(key="qbit_password", value="secret"),
+            AppSetting(key="qbit_api_key", value="qbt_" + ("x" * 28)),
             AppSetting(key="update_manifest_cache_json", value="{}"),
             Subscription(name="Demo", rss_url="https://example.test/demo.xml"),
             AnimePreference(canonical_key="bgm:123", bangumi_id=123, hidden=True),
@@ -43,8 +44,10 @@ class BackupAndRssCandidateTests(unittest.TestCase):
         self.assertEqual(payload["format"], "feeddock-system-backup")
         self.assertEqual(payload["settings"]["page_theme_color"], "green")
         self.assertNotIn("qbit_password", payload["settings"])
+        self.assertNotIn("qbit_api_key", payload["settings"])
         self.assertNotIn("update_manifest_cache_json", payload["settings"])
         self.assertIn("qbit_password", payload["omitted_secret_keys"])
+        self.assertIn("qbit_api_key", payload["omitted_secret_keys"])
         self.assertEqual(len(payload["subscriptions"]), 1)
         self.assertEqual(payload["anime_preferences"][0]["canonical_key"], "bgm:123")
 

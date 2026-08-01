@@ -107,10 +107,13 @@ class FakeServicesHandler(BaseHTTPRequestHandler):
         self.rfile.read(length)
         self.__class__.requests.append(("POST", self.path, dict(self.headers)))
         if self.path == "/api/v2/auth/login":
-            self._write(200, b"Ok.")
+            self._write(204)
             return
         if self.path == "/api/v2/torrents/add":
-            self._write(200, b"Ok.")
+            self._write(204)
+            return
+        if self.path in {"/api/v2/torrents/removeTags", "/api/v2/torrents/deleteTags"}:
+            self._write(204)
             return
         if self.path == "/v1/update":
             if self.headers.get("Authorization") != "Bearer updater-token":
@@ -152,6 +155,60 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(added.ok, added.message)
         self.assertTrue(added.verified)
         self.assertEqual(added.torrent_hash, "demo-hash")
+
+    def test_qbittorrent_api_key_auth_skips_login_and_sends_bearer_header(self):
+        api_key = "qbt_" + ("a" * 28)
+        FakeServicesHandler.requests.clear()
+        client = QBittorrentClient(
+            base_url=self.base_url,
+            auth_mode="api_key",
+            api_key=api_key,
+            timeout=3,
+        )
+
+        result = client.test()
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("API 密钥", result.message)
+        self.assertFalse(any(path == "/api/v2/auth/login" for _method, path, _headers in FakeServicesHandler.requests))
+        qbit_requests = [
+            headers
+            for _method, path, headers in FakeServicesHandler.requests
+            if path.startswith("/api/v2/")
+        ]
+        self.assertTrue(qbit_requests)
+        self.assertTrue(all(headers.get("Authorization") == f"Bearer {api_key}" for headers in qbit_requests))
+
+    def test_saved_api_key_settings_are_used_by_default_client(self):
+        api_key = "qbt_" + ("b" * 28)
+        Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            saved = save_qbittorrent_config(
+                db,
+                qbit_url=self.base_url,
+                qbit_auth_mode="api_key",
+                qbit_username="",
+                qbit_password=None,
+                clear_password=False,
+                qbit_api_key=api_key,
+                clear_api_key=False,
+                qbit_category="saved-category",
+                download_path="/saved/downloads",
+            )
+        self.assertTrue(saved.configured)
+        self.assertEqual(saved.auth_mode, "api_key")
+        self.assertTrue(saved.public_dict()["qbit_api_key_configured"])
+        self.assertNotIn("qbit_api_key", saved.public_dict())
+
+        FakeServicesHandler.requests.clear()
+        client = QBittorrentClient(timeout=3)
+        result = client.test()
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(client.auth_mode, "api_key")
+        self.assertEqual(client.category, "saved-category")
+        self.assertFalse(any(path == "/api/v2/auth/login" for _method, path, _headers in FakeServicesHandler.requests))
+
+        with SessionLocal() as db:
+            reset_qbittorrent_config(db)
 
     def test_saved_web_settings_are_used_by_default_client(self):
         Base.metadata.create_all(bind=engine)
