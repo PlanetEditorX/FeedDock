@@ -460,6 +460,70 @@ def _remove_empty_directory(path: Path) -> None:
         pass
 
 
+def _get_cleanup_items(db: Session, subscription: Subscription) -> list[FeedItem]:
+    return list(
+        db.scalars(
+            select(FeedItem)
+            .where(
+                FeedItem.subscription_id == subscription.id,
+                FeedItem.completed_at.is_not(None),
+                FeedItem.save_path != "",
+                FeedItem.scrape_status.in_(("completed", "error", "pending", "cleaned")),
+            )
+            .order_by(FeedItem.id)
+        )
+    )
+
+
+def _get_cleanup_candidates(subscription: Subscription, item_directory: Path) -> tuple[Path, Path, bool, set[Path]]:
+    media_root, season_directory = _series_directory(subscription, item_directory)
+    media_root = media_root.resolve(strict=False)
+    season_directory = season_directory.resolve(strict=False)
+    manifest = media_root / ".feeddock-scrape.json"
+    series_has_video = bool(_candidate_videos(media_root))
+    manifest_files = _manifest_files(manifest, media_root, subscription.id)
+    candidates: set[Path] = {
+        candidate
+        for candidate in manifest_files
+        if not series_has_video or _is_within_path(candidate, season_directory)
+    }
+
+    # The season/movie directory is known to have no video.  Remove only
+    # metadata-shaped files; subtitles and all other user content stay.
+    for pattern in ("*.nfo", "poster.jpg", "poster.jpeg", "poster.png", "poster.webp"):
+        candidates.update(season_directory.glob(pattern))
+
+    if not series_has_video:
+        for pattern in (
+            "*.nfo",
+            "poster.jpg", "poster.jpeg", "poster.png", "poster.webp",
+            "fanart.jpg", "fanart.jpeg", "fanart.png", "fanart.webp",
+            "season*-poster.jpg", "season*-poster.jpeg",
+            "season*-poster.png", "season*-poster.webp",
+            ".feeddock-scrape.json",
+        ):
+            candidates.update(media_root.glob(pattern))
+
+    return media_root, season_directory, series_has_video, candidates
+
+
+def _update_related_items(items: list[FeedItem], metadata: MetadataConfig, item_directory: Path) -> None:
+    for related in items:
+        try:
+            related_directory = map_downloader_path_to_local(
+                related.save_path,
+                getattr(metadata, "downloader_root", metadata.media_local_root),
+                metadata.media_local_root,
+                require_exists=False,
+            )
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if related_directory.resolve(strict=False) == item_directory.resolve(strict=False):
+            related.scrape_status = "cleaned"
+            related.scrape_message = "媒体文件不存在，已清理 FeedDock NFO 与图片"
+            related.scraped_at = None
+
+
 def cleanup_orphaned_metadata(
     db: Session,
     subscription: Subscription,
@@ -474,18 +538,7 @@ def cleanup_orphaned_metadata(
     """
 
     metadata = config or load_metadata_config(db)
-    items = list(
-        db.scalars(
-            select(FeedItem)
-            .where(
-                FeedItem.subscription_id == subscription.id,
-                FeedItem.completed_at.is_not(None),
-                FeedItem.save_path != "",
-                FeedItem.scrape_status.in_(("completed", "error", "pending", "cleaned")),
-            )
-            .order_by(FeedItem.id)
-        )
-    )
+    items = _get_cleanup_items(db, subscription)
     if not items:
         return CleanupResult(True, "没有需要检查的已完成媒体", [], 0)
 
@@ -510,33 +563,7 @@ def cleanup_orphaned_metadata(
         if _candidate_videos(item_directory):
             continue
 
-        media_root, season_directory = _series_directory(subscription, item_directory)
-        media_root = media_root.resolve(strict=False)
-        season_directory = season_directory.resolve(strict=False)
-        manifest = media_root / ".feeddock-scrape.json"
-        series_has_video = bool(_candidate_videos(media_root))
-        manifest_files = _manifest_files(manifest, media_root, subscription.id)
-        candidates: set[Path] = {
-            candidate
-            for candidate in manifest_files
-            if not series_has_video or _is_within_path(candidate, season_directory)
-        }
-
-        # The season/movie directory is known to have no video.  Remove only
-        # metadata-shaped files; subtitles and all other user content stay.
-        for pattern in ("*.nfo", "poster.jpg", "poster.jpeg", "poster.png", "poster.webp"):
-            candidates.update(season_directory.glob(pattern))
-
-        if not series_has_video:
-            for pattern in (
-                "*.nfo",
-                "poster.jpg", "poster.jpeg", "poster.png", "poster.webp",
-                "fanart.jpg", "fanart.jpeg", "fanart.png", "fanart.webp",
-                "season*-poster.jpg", "season*-poster.jpeg",
-                "season*-poster.png", "season*-poster.webp",
-                ".feeddock-scrape.json",
-            ):
-                candidates.update(media_root.glob(pattern))
+        media_root, season_directory, series_has_video, candidates = _get_cleanup_candidates(subscription, item_directory)
 
         before = len(removed)
         for candidate in sorted(candidates, key=lambda value: len(value.parts), reverse=True):
@@ -545,20 +572,7 @@ def cleanup_orphaned_metadata(
                 _remove_file(resolved, removed)
         if len(removed) > before:
             affected += 1
-            for related in items:
-                try:
-                    related_directory = map_downloader_path_to_local(
-                        related.save_path,
-                        getattr(metadata, "downloader_root", metadata.media_local_root),
-                        metadata.media_local_root,
-                        require_exists=False,
-                    )
-                except (OSError, RuntimeError, ValueError):
-                    continue
-                if related_directory.resolve(strict=False) == item_directory.resolve(strict=False):
-                    related.scrape_status = "cleaned"
-                    related.scrape_message = "媒体文件不存在，已清理 FeedDock NFO 与图片"
-                    related.scraped_at = None
+            _update_related_items(items, metadata, item_directory)
             _remove_empty_directory(season_directory)
             if not series_has_video:
                 _remove_empty_directory(media_root)
