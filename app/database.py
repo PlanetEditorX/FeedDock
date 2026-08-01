@@ -117,14 +117,7 @@ def _add_missing_columns(table: str, columns: dict[str, str]) -> None:
             connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {ddl}'))
 
 
-def ensure_schema() -> None:
-    """Apply dependency-free additive migrations for existing SQLite installs."""
-
-    if not settings.database_url.startswith("sqlite"):
-        return
-    _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
-    _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
-
+def _migrate_1_11_0_scrape_disabled() -> None:
     # Historical migration from the release that removed the original scraper.
     # Keep the marker so older databases upgrade deterministically; FeedDock
     # 1.17.5 introduces a new confined NFO/artwork writer below.
@@ -149,6 +142,8 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+
+def _migrate_1_11_1_media_folder_paths() -> None:
     # Upgrade the previous built-in directory template to ``media_folder``.
     # The folder-name policy can evolve centrally while custom user templates
     # remain intentionally preserved.
@@ -177,6 +172,8 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+
+def _migrate_1_17_5_local_scrape_backfill() -> None:
     # Releases through 1.17.4 used the word “scrape” for database-only metadata
     # synchronization. Mark completed downloads once so the new local scraper
     # can backfill NFO and artwork after upgrade.
@@ -201,6 +198,8 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+
+def _migrate_1_17_7_separate_media_paths() -> None:
     # Releases through 1.17.6 forced qBittorrent's save root and FeedDock's
     # local media mount to the same literal path.  On fnOS the qBittorrent
     # path may be a host-style path such as /vol2/1000/影视 while FeedDock sees
@@ -244,6 +243,8 @@ def ensure_schema() -> None:
                 {"key": marker},
             )
 
+
+def _migrate_1_17_10_default_media_local_root() -> None:
     # Some custom Compose files mount the media library at /media but omit the
     # MEDIA_LOCAL_ROOT environment variable.  Older releases then persisted
     # qBittorrent's host-visible path (for example /vol2/1000/影视) as the local
@@ -294,6 +295,21 @@ def ensure_schema() -> None:
                 ),
                 {"key": marker},
             )
+
+
+def ensure_schema() -> None:
+    """Apply dependency-free additive migrations for existing SQLite installs."""
+
+    if not settings.database_url.startswith("sqlite"):
+        return
+    _add_missing_columns("subscriptions", _SUBSCRIPTION_COLUMNS)
+    _add_missing_columns("feed_items", _FEED_ITEM_COLUMNS)
+
+    _migrate_1_11_0_scrape_disabled()
+    _migrate_1_11_1_media_folder_paths()
+    _migrate_1_17_5_local_scrape_backfill()
+    _migrate_1_17_7_separate_media_paths()
+    _migrate_1_17_10_default_media_local_root()
 
 
 def get_db() -> Generator[Session, None, None]:
