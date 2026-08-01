@@ -530,6 +530,57 @@ def _validate_optional_http_url(value: str, label: str) -> str:
     return cleaned
 
 
+def _resolve_token(new_val: str | None, current_val: str, clear: bool) -> str:
+    if clear:
+        return ""
+    if new_val is None:
+        return current_val
+    return new_val.strip()
+
+
+def _resolve_local_root(db: Session, media_local_root: str) -> str:
+    qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
+    local_root = media_local_root.strip().rstrip("/") or preferred_local_media_root(
+        qbit_root,
+        str(settings.media_local_root or "/media"),
+    )
+    if not local_root.startswith("/"):
+        raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
+    if len(local_root) > 2000:
+        raise ValueError("本地媒体挂载目录过长")
+    return local_root
+
+
+def _trigger_metadata_pending_actions(
+    db: Session,
+    auto_scrape_enabled: bool,
+    bangumi_ini_enabled: bool,
+    current_auto_scrape: bool,
+    current_bangumi_ini: bool,
+) -> None:
+    if (auto_scrape_enabled and not current_auto_scrape) or (
+        bangumi_ini_enabled and not current_bangumi_ini
+    ):
+        pending_actions: list[str] = []
+        if auto_scrape_enabled and not current_auto_scrape:
+            pending_actions.append("同步元数据")
+        if bangumi_ini_enabled and not current_bangumi_ini:
+            pending_actions.append("补写 bangumi.ini")
+        db.execute(
+            update(FeedItem)
+            .where(
+                FeedItem.status == "queued",
+                FeedItem.completed_at.is_not(None),
+                FeedItem.scrape_status == "skipped",
+                FeedItem.subscription.has(Subscription.trial_bulk.is_(False)),
+            )
+            .values(
+                scrape_status="pending",
+                scrape_message=f"等待{'并'.join(pending_actions)}",
+            )
+        )
+
+
 def save_metadata_config(
     db: Session,
     *,
@@ -560,30 +611,15 @@ def save_metadata_config(
         raise ValueError("追更天数必须在 1 到 3650 天之间")
     clean_tmdb_api = _validate_optional_http_url(tmdb_api_base, "TMDB API 地址") or settings.tmdb_api_base
     clean_tmdb_image = _validate_optional_http_url(tmdb_image_base, "TMDB 图片地址") or settings.tmdb_image_base
-
-    qbit_root = load_qbittorrent_config(db).download_path.rstrip("/") or "/media"
-    local_root = media_local_root.strip().rstrip("/") or preferred_local_media_root(
-        qbit_root,
-        str(settings.media_local_root or "/media"),
-    )
-    if not local_root.startswith("/"):
-        raise ValueError("本地媒体挂载目录必须是以 / 开头的绝对路径")
-    if len(local_root) > 2000:
-        raise ValueError("本地媒体挂载目录过长")
+    local_root = _resolve_local_root(db, media_local_root)
     clean_emby_url = _validate_optional_http_url(emby_url, "Emby 地址")
     clean_tmm_url = _validate_optional_http_url(tmm_url, "tinyMediaManager 地址")
-    tmdb_token = "" if clear_tmdb_token else (
-        current.tmdb_read_access_token if tmdb_read_access_token is None else tmdb_read_access_token.strip()
-    )
-    bangumi_token = "" if clear_bangumi_token else (
-        current.bangumi_access_token if bangumi_access_token is None else bangumi_access_token.strip()
-    )
-    emby_key = "" if clear_emby_api_key else (
-        current.emby_api_key if emby_api_key is None else emby_api_key.strip()
-    )
-    tmm_key = "" if clear_tmm_api_key else (
-        current.tmm_api_key if tmm_api_key is None else tmm_api_key.strip()
-    )
+
+    tmdb_token = _resolve_token(tmdb_read_access_token, current.tmdb_read_access_token, clear_tmdb_token)
+    bangumi_token = _resolve_token(bangumi_access_token, current.bangumi_access_token, clear_bangumi_token)
+    emby_key = _resolve_token(emby_api_key, current.emby_api_key, clear_emby_api_key)
+    tmm_key = _resolve_token(tmm_api_key, current.tmm_api_key, clear_tmm_api_key)
+
     for value, label, limit in (
         (tmdb_token, "TMDB Token", 2000),
         (bangumi_token, "Bangumi Token", 2000),
@@ -621,27 +657,12 @@ def save_metadata_config(
             row.value = value
         else:
             db.add(AppSetting(key=key, value=value))
-    if (auto_scrape_enabled and not current.auto_scrape_enabled) or (
-        bangumi_ini_enabled and not current.bangumi_ini_enabled
-    ):
-        pending_actions: list[str] = []
-        if auto_scrape_enabled and not current.auto_scrape_enabled:
-            pending_actions.append("同步元数据")
-        if bangumi_ini_enabled and not current.bangumi_ini_enabled:
-            pending_actions.append("补写 bangumi.ini")
-        db.execute(
-            update(FeedItem)
-            .where(
-                FeedItem.status == "queued",
-                FeedItem.completed_at.is_not(None),
-                FeedItem.scrape_status == "skipped",
-                FeedItem.subscription.has(Subscription.trial_bulk.is_(False)),
-            )
-            .values(
-                scrape_status="pending",
-                scrape_message=f"等待{'并'.join(pending_actions)}",
-            )
-        )
+
+    _trigger_metadata_pending_actions(
+        db, auto_scrape_enabled, bangumi_ini_enabled,
+        current.auto_scrape_enabled, current.bangumi_ini_enabled
+    )
+
     db.commit()
     return load_metadata_config(db)
 
