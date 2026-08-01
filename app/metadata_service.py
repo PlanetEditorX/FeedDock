@@ -27,6 +27,14 @@ class MetadataFetchArgs:
 
 
 @dataclass(slots=True)
+class MetadataSearchArgs:
+    query: str
+    media_type: str = "tv"
+    year: int = 0
+    limit: int = 10
+
+
+@dataclass(slots=True)
 class MetadataCandidate:
     provider: str
     id: int
@@ -212,12 +220,18 @@ class MetadataService:
         for level, search_query in enumerate(queries):
             attempted.append(search_query)
             effective_year = 0 if query_had_year and level > 0 else year
+            args = MetadataSearchArgs(
+                query=search_query,
+                media_type=media_type,
+                year=effective_year,
+                limit=limit,
+            )
             if provider == "tmdb":
-                candidates = self._search_tmdb(db, config, search_query, media_type, effective_year, limit)
+                candidates = self._search_tmdb(db, config, args)
             elif provider == "bangumi":
-                candidates = self._search_bangumi(db, config, search_query, effective_year, limit)
+                candidates = self._search_bangumi(db, config, args)
             else:
-                candidates = self._search_anilist(db, search_query, effective_year, limit)
+                candidates = self._search_anilist(db, args)
             for candidate in candidates:
                 candidate.score = self._score(
                     search_query,
@@ -382,25 +396,25 @@ class MetadataService:
         raise ValueError("自动匹配失败；请手动搜索并选择条目。" + ("；".join(errors) if errors else ""))
 
     def _search_tmdb(
-        self, db: Session, config: MetadataConfig, query: str, media_type: str, year: int, limit: int
+        self, db: Session, config: MetadataConfig, args: MetadataSearchArgs
     ) -> list[MetadataCandidate]:
         if not config.tmdb_read_access_token:
             raise ValueError("尚未配置 TMDB API Key 或 Read Access Token")
-        kind = "movie" if media_type == "movie" else "tv"
+        kind = "movie" if args.media_type == "movie" else "tv"
         headers, auth_params = self._tmdb_auth(config.tmdb_read_access_token)
         params: dict[str, Any] = {
-            "query": query, "language": config.language, "include_adult": "false", "page": 1,
+            "query": args.query, "language": config.language, "include_adult": "false", "page": 1,
             **auth_params,
         }
-        if year:
-            params["primary_release_year" if kind == "movie" else "year"] = year
+        if args.year:
+            params["primary_release_year" if kind == "movie" else "year"] = args.year
         url = f"{_tmdb_api_root(config)}/search/{kind}"
         with external_client(url, db=db, timeout=self.timeout) as client:
             response = client.get(url, params=params, headers=headers)
             response.raise_for_status()
             payload = response.json()
         candidates: list[MetadataCandidate] = []
-        for item in (payload.get("results") or [])[:limit]:
+        for item in (payload.get("results") or [])[:args.limit]:
             title = str(item.get("title") or item.get("name") or "").strip()
             original = str(item.get("original_title") or item.get("original_name") or "").strip()
             date_value = str(item.get("release_date") or item.get("first_air_date") or "")
@@ -516,21 +530,21 @@ class MetadataService:
         )
 
     def _search_bangumi(
-        self, db: Session, config: MetadataConfig, query: str, year: int, limit: int
+        self, db: Session, config: MetadataConfig, args: MetadataSearchArgs
     ) -> list[MetadataCandidate]:
-        body = {"keyword": query, "sort": "match", "filter": {"type": [2], "nsfw": False}}
+        body = {"keyword": args.query, "sort": "match", "filter": {"type": [2], "nsfw": False}}
         headers = self._headers(config.bangumi_access_token)
         headers["Content-Type"] = "application/json"
         url = f"{settings.bangumi_api_base}/v0/search/subjects"
         with external_client(url, db=db, timeout=self.timeout) as client:
-            response = client.post(url, params={"limit": min(limit, 20), "offset": 0}, json=body, headers=headers)
+            response = client.post(url, params={"limit": min(args.limit, 20), "offset": 0}, json=body, headers=headers)
             response.raise_for_status()
             payload = response.json()
         candidates: list[MetadataCandidate] = []
-        for item in (payload.get("data") or [])[:limit]:
+        for item in (payload.get("data") or [])[:args.limit]:
             date_value = str(item.get("date") or "")
             item_year = int(date_value[:4]) if len(date_value) >= 4 and date_value[:4].isdigit() else 0
-            if year and item_year and abs(item_year - year) > 2:
+            if args.year and item_year and abs(item_year - args.year) > 2:
                 continue
             images = item.get("images") or {}
             title = str(item.get("name_cn") or item.get("name") or "").strip()
@@ -591,7 +605,7 @@ class MetadataService:
             raise ValueError(str(payload["errors"][0].get("message") or "AniList 查询失败"))
         return payload.get("data") or {}
 
-    def _search_anilist(self, db: Session, query_text: str, year: int, limit: int) -> list[MetadataCandidate]:
+    def _search_anilist(self, db: Session, args: MetadataSearchArgs) -> list[MetadataCandidate]:
         query = """
         query ($search: String!, $perPage: Int!) {
           Page(page: 1, perPage: $perPage) {
@@ -603,12 +617,12 @@ class MetadataService:
           }
         }
         """
-        data = self._anilist_request(db, query, {"search": query_text, "perPage": min(limit, 20)})
+        data = self._anilist_request(db, query, {"search": args.query, "perPage": min(args.limit, 20)})
         candidates: list[MetadataCandidate] = []
         for item in ((data.get("Page") or {}).get("media") or []):
             start = item.get("startDate") or {}
             item_year = int(start.get("year") or 0)
-            if year and item_year and abs(item_year - year) > 2:
+            if args.year and item_year and abs(item_year - args.year) > 2:
                 continue
             titles = item.get("title") or {}
             title = str(titles.get("english") or titles.get("romaji") or titles.get("native") or "").strip()
