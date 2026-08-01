@@ -704,16 +704,7 @@ def dispatch_scheduled_downloads(db: Session | None = None, *, limit: int = 500,
             session.close()
 
 
-def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
-    stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
-    add_log(
-        db,
-        "INFO",
-        f"开始检查订阅：{subscription.name}",
-        f"订阅 ID：{subscription.id}\nRSS 来源：{subscription.primary_rss_name or '主 RSS'}",
-    )
-    db.commit()
-    preferences = load_application_preferences(db)
+def _cleanup_subscription_orphaned_metadata(db: Session, subscription: Subscription) -> None:
     try:
         cleanup = cleanup_orphaned_metadata(db, subscription)
         if cleanup.removed_files:
@@ -742,48 +733,9 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             ),
         )
         db.commit()
-    if not preferences.rss.enabled:
-        add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭；媒体目录清理已执行")
-        db.commit()
-        return stats
-    if subscription.subscription_mode == "trial":
-        # The first successful trial item remains in history. Later refreshes
-        # preserve the subscription for promotion but never enqueue episode two.
-        if _trial_download_exists(db, subscription):
-            subscription.enabled = False
-            subscription.last_checked_at = datetime.now(timezone.utc)
-            subscription.last_error = ""
-            add_log(db, "INFO", f"试看已完成，停止后续下载：{subscription.name}")
-            db.commit()
-            return stats
-    _refresh_total_episodes_if_due(db, subscription)
-    _sync_metadata_if_due(db, subscription)
-    try:
-        entries, source_name = _load_subscription_entries(subscription, db)
-    except Exception as exc:
-        subscription.last_checked_at = datetime.now(timezone.utc)
-        error_message = str(exc).strip() or "RSS 获取失败"
-        if "没有条目" in error_message:
-            error_message = f"{error_message}；请点击“更新 RSS”重新搜索字幕组"
-        subscription.last_error = error_message[:1000]
-        add_log(
-            db,
-            "ERROR",
-            f"订阅检查失败：{subscription.name}",
-            _rss_load_error_details(subscription, exc),
-        )
-        send_notification(
-            db,
-            "rss_error",
-            f"RSS 检查失败：{subscription.name}",
-            str(exc),
-            subscription=subscription,
-        )
-        db.commit()
-        stats["errors"] += 1
-        return stats
 
-    global_excludes = get_app_setting("global_exclude_rules", "", db)
+
+def _build_candidates(db: Session, subscription: Subscription, entries: list[dict[str, Any]], global_excludes: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for order, entry in enumerate(reversed(entries)):
         title = str(_entry_value(entry, "title", "未命名条目") or "未命名条目").strip()
@@ -832,7 +784,10 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                 "reason": reason,
             }
         )
+    return candidates
 
+
+def _select_priority_candidates(subscription: Subscription, candidates: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     latest_candidate: dict[str, Any] | None = None
     if subscription.only_latest:
         eligible = [candidate for candidate in candidates if candidate["matched"]]
@@ -851,7 +806,10 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
                 numbered or eligible,
                 key=lambda candidate: (candidate["episode_number"] is None, candidate["episode_number"] or 0, candidate["order"]),
             )
+    return latest_candidate, trial_candidate
 
+
+def _process_candidates(db: Session, subscription: Subscription, candidates: list[dict[str, Any]], latest_candidate: dict[str, Any] | None, trial_candidate: dict[str, Any] | None, stats: dict[str, int]) -> None:
     for candidate in candidates:
         item = FeedItem(
             subscription_id=subscription.id,
@@ -919,6 +877,66 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             else:
                 stats["errors"] += 1
 
+
+def process_subscription(db: Session, subscription: Subscription) -> dict[str, int]:
+    stats = {"new": 0, "queued": 0, "skipped": 0, "errors": 0}
+    add_log(
+        db,
+        "INFO",
+        f"开始检查订阅：{subscription.name}",
+        f"订阅 ID：{subscription.id}\nRSS 来源：{subscription.primary_rss_name or '主 RSS'}",
+    )
+    db.commit()
+    preferences = load_application_preferences(db)
+
+    _cleanup_subscription_orphaned_metadata(db, subscription)
+
+    if not preferences.rss.enabled:
+        add_log(db, "WARNING", f"跳过订阅检查：{subscription.name}", "RSS 开关已关闭；媒体目录清理已执行")
+        db.commit()
+        return stats
+    if subscription.subscription_mode == "trial":
+        # The first successful trial item remains in history. Later refreshes
+        # preserve the subscription for promotion but never enqueue episode two.
+        if _trial_download_exists(db, subscription):
+            subscription.enabled = False
+            subscription.last_checked_at = datetime.now(timezone.utc)
+            subscription.last_error = ""
+            add_log(db, "INFO", f"试看已完成，停止后续下载：{subscription.name}")
+            db.commit()
+            return stats
+    _refresh_total_episodes_if_due(db, subscription)
+    _sync_metadata_if_due(db, subscription)
+    try:
+        entries, source_name = _load_subscription_entries(subscription, db)
+    except Exception as exc:
+        subscription.last_checked_at = datetime.now(timezone.utc)
+        error_message = str(exc).strip() or "RSS 获取失败"
+        if "没有条目" in error_message:
+            error_message = f"{error_message}；请点击“更新 RSS”重新搜索字幕组"
+        subscription.last_error = error_message[:1000]
+        add_log(
+            db,
+            "ERROR",
+            f"订阅检查失败：{subscription.name}",
+            _rss_load_error_details(subscription, exc),
+        )
+        send_notification(
+            db,
+            "rss_error",
+            f"RSS 检查失败：{subscription.name}",
+            str(exc),
+            subscription=subscription,
+        )
+        db.commit()
+        stats["errors"] += 1
+        return stats
+
+    global_excludes = get_app_setting("global_exclude_rules", "", db)
+    candidates = _build_candidates(db, subscription, entries, global_excludes)
+    latest_candidate, trial_candidate = _select_priority_candidates(subscription, candidates)
+    _process_candidates(db, subscription, candidates, latest_candidate, trial_candidate, stats)
+
     now = datetime.now(timezone.utc)
     if any(candidate["matched"] for candidate in candidates):
         record_new_feed_activity(subscription, now=now)
@@ -937,7 +955,6 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     )
     db.commit()
     return stats
-
 
 def refresh_subscription(
     subscription_id: int,
