@@ -1169,29 +1169,42 @@ def search_metadata(
         raise HTTPException(status_code=502, detail=f"元数据搜索失败：{exc}") from exc
 
 
+class MetadataDetailQuery:
+    def __init__(
+        self,
+        provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
+        metadata_id: int = Query(gt=0),
+        media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
+        season: int = Query(default=1, ge=0, le=999),
+        season_mode: str = Query(default="title", pattern="^(manual|latest|title)$"),
+        query_title: str = Query(default="", max_length=300),
+    ):
+        self.provider = provider
+        self.metadata_id = metadata_id
+        self.media_type = media_type
+        self.season = season
+        self.season_mode = season_mode
+        self.query_title = query_title
+
+
 @app.get(
     "/api/metadata/detail",
     response_model=MetadataRecordOut,
     dependencies=[Depends(require_admin)],
 )
 def metadata_detail(
-    provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
-    metadata_id: int = Query(gt=0),
-    media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
-    season: int = Query(default=1, ge=0, le=999),
-    season_mode: str = Query(default="title", pattern="^(manual|latest|title)$"),
-    query_title: str = Query(default="", max_length=300),
+    query: MetadataDetailQuery = Depends(),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     try:
         return MetadataService().get(
             db,
-            provider=provider,
-            metadata_id=metadata_id,
-            media_type=media_type,
-            season=season,
-            season_mode=season_mode,
-            query_title=query_title,
+            provider=query.provider,
+            metadata_id=query.metadata_id,
+            media_type=query.media_type,
+            season=query.season,
+            season_mode=query.season_mode,
+            query_title=query.query_title,
         ).as_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
