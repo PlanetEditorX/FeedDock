@@ -104,6 +104,185 @@ def cleanup_internal_qbittorrent_tags(
         _tag_cleanup_lock.release()
 
 
+
+def _handle_missing_task_expiration(session: Session, item: FeedItem, result_state: str, result_message: str, stats: dict[str, Any]) -> bool:
+    created_at = item.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    missing_task_expired = (
+        result_state == "pending"
+        and result_message == "等待 qBittorrent 建立任务"
+        and (datetime.now(timezone.utc) - created_at).total_seconds() >= 120
+    )
+    if missing_task_expired:
+        item.status = "error"
+        item.reason = "qBittorrent 中未找到已记录的任务，请点击重试下载"
+        item.rename_status = "error"
+        item.rename_message = item.reason
+        session.add(
+            SystemLog(
+                level="ERROR",
+                message="qBittorrent 中未找到已记录任务",
+                details=(
+                    f"条目 ID：{item.id}\n任务哈希：{item.torrent_hash or '无'}\n"
+                    f"临时标签：{item.qbit_tag or '已清理'}\n"
+                    f"标题：{item.title}\n处理：已标记为错误，可重新推送"
+                ),
+            )
+        )
+        stats["errors"] += 1
+        return True
+    return False
+
+
+def _handle_torrent_hash_and_trackers(session: Session, client: QBittorrentClient, item: FeedItem, result_torrent_hash: str, stats: dict[str, Any]) -> None:
+    if not result_torrent_hash:
+        return
+    item.torrent_hash = result_torrent_hash
+    if item.qbit_tag and hasattr(client, "remove_internal_tag"):
+        cleanup = client.remove_internal_tag(
+            tag=item.qbit_tag, torrent_hash=result_torrent_hash
+        )
+        if cleanup.ok:
+            item.qbit_tag = ""
+        else:
+            _add_log(
+                session,
+                "WARNING",
+                "qBittorrent 临时标签清理失败",
+                (
+                    f"条目 ID：{item.id}\n任务哈希：{result_torrent_hash}\n"
+                    f"临时标签：{item.qbit_tag}\n错误：{cleanup.message}"
+                ),
+            )
+    tracker_policy = load_application_preferences(session).trackers
+    if tracker_policy.enabled and tracker_policy.trackers and item.trackers_applied_at is None:
+        tracker_result = client.add_trackers(result_torrent_hash, tracker_policy.trackers)
+        item.trackers_status = "completed" if tracker_result.ok else "error"
+        item.trackers_message = tracker_result.message[:2000]
+        if tracker_result.ok:
+            item.trackers_applied_at = datetime.now(timezone.utc)
+            stats["trackers_applied"] += 1
+        else:
+            stats["errors"] += 1
+
+
+def _process_newly_completed_item(session: Session, item: FeedItem, result_completed_at: datetime | None, result_media_filename: str, completed_subscription_ids: set[int]) -> None:
+    newly_completed = item.completed_at is None
+    item.completed_at = (
+        item.completed_at
+        or result_completed_at
+        or datetime.now(timezone.utc)
+    )
+    if newly_completed:
+        completed_subscription_ids.add(item.subscription_id)
+        subscription = session.get(Subscription, item.subscription_id)
+        if subscription is not None:
+            completed_filename = (
+                result_media_filename
+                or item.desired_name
+                or item.title
+            )
+            send_notification(
+                session,
+                "download_completed",
+                f"下载完成：{subscription.name}",
+                f"第 {item.episode or '?'} 集下载完成。\n{completed_filename}",
+                subscription=subscription,
+                item=item,
+                details={
+                    "progress": 100,
+                    "filename": completed_filename,
+                    "cover_url": subscription.poster_url,
+                },
+            )
+
+
+def _process_item_scraping(session: Session, item: FeedItem, subscription: Subscription, stats: dict[str, Any]) -> None:
+    metadata_config = load_metadata_config(session)
+    completed_actions: list[str] = []
+    scrape_errors: list[str] = []
+    if metadata_config.auto_scrape_enabled:
+        if _metadata_sync_due(subscription):
+            try:
+                record = MetadataService(
+                    timeout=load_application_preferences(session).rss.timeout_seconds
+                ).sync(session, subscription, "auto")
+                completed_actions.append(f"元数据已同步（{record.provider}）")
+                _add_log(
+                    session,
+                    "INFO",
+                    f"下载完成后元数据已同步：{subscription.name}",
+                    (
+                        f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                        f"来源：{record.provider}\n元数据 ID：{record.id}"
+                    ),
+                )
+            except Exception as exc:
+                scrape_errors.append(f"元数据同步失败：{exc}")
+                _add_log(
+                    session,
+                    "WARNING",
+                    f"下载完成后元数据同步失败：{subscription.name}",
+                    format_exception_details(
+                        exc,
+                        stage="postprocess.metadata",
+                        context={
+                            "subscription_id": subscription.id,
+                            "item_id": item.id,
+                            "subscription_name": subscription.name,
+                        },
+                    ),
+                )
+        else:
+            completed_actions.append("元数据已是最新")
+
+        local_scrape = scrape_completed_item(
+            session, subscription, item, metadata_config
+        )
+        if local_scrape.ok:
+            completed_actions.append(local_scrape.message)
+            _add_log(
+                session,
+                "INFO",
+                f"媒体库元数据已写入：{subscription.name}",
+                (
+                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                    f"媒体目录：{local_scrape.local_path}\n"
+                    f"文件：{', '.join(local_scrape.files or [])}"
+                )[:50000],
+            )
+        else:
+            scrape_errors.append(local_scrape.message)
+            _add_log(
+                session,
+                "WARNING",
+                f"媒体库元数据写入失败：{subscription.name}",
+                (
+                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                    f"错误：{local_scrape.message}"
+                ),
+            )
+
+    if metadata_config.bangumi_ini_enabled:
+        sidecar = write_bangumi_ini(subscription, item, metadata_config)
+        if sidecar.state == "completed":
+            completed_actions.append("bangumi.ini 已生成")
+        elif sidecar.state == "error":
+            scrape_errors.append(sidecar.message)
+        elif sidecar.message:
+            completed_actions.append(sidecar.message)
+
+    if scrape_errors:
+        item.scrape_status = "error"
+        item.scrape_message = "；".join(scrape_errors)[:2000]
+        stats["errors"] += 1
+    else:
+        item.scrape_status = "completed"
+        item.scrape_message = "；".join(completed_actions)[:2000] or "下载完成后刮削已完成"
+        item.scraped_at = datetime.now(timezone.utc)
+        stats["scraped"] += 1
+
 def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow_scrape: bool = True) -> dict[str, Any]:
     """Normalize tagged torrents, detect completion, and run configured post-download metadata work."""
 
@@ -158,185 +337,26 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             ):
                 item.trial_download_path = result.download_path
 
-            created_at = item.created_at
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-            missing_task_expired = (
-                result.state == "pending"
-                and result.message == "等待 qBittorrent 建立任务"
-                and (datetime.now(timezone.utc) - created_at).total_seconds() >= 120
-            )
-            if missing_task_expired:
-                item.status = "error"
-                item.reason = "qBittorrent 中未找到已记录的任务，请点击重试下载"
-                item.rename_status = "error"
-                item.rename_message = item.reason
-                session.add(
-                    SystemLog(
-                        level="ERROR",
-                        message="qBittorrent 中未找到已记录任务",
-                        details=(
-                            f"条目 ID：{item.id}\n任务哈希：{item.torrent_hash or '无'}\n"
-                            f"临时标签：{item.qbit_tag or '已清理'}\n"
-                            f"标题：{item.title}\n处理：已标记为错误，可重新推送"
-                        ),
-                    )
-                )
-                stats["errors"] += 1
+            if _handle_missing_task_expiration(session, item, result.state, result.message, stats):
                 continue
-            if result.torrent_hash:
-                item.torrent_hash = result.torrent_hash
-                if item.qbit_tag and hasattr(client, "remove_internal_tag"):
-                    cleanup = client.remove_internal_tag(
-                        tag=item.qbit_tag, torrent_hash=result.torrent_hash
-                    )
-                    if cleanup.ok:
-                        item.qbit_tag = ""
-                    else:
-                        _add_log(
-                            session,
-                            "WARNING",
-                            "qBittorrent 临时标签清理失败",
-                            (
-                                f"条目 ID：{item.id}\n任务哈希：{result.torrent_hash}\n"
-                                f"临时标签：{item.qbit_tag}\n错误：{cleanup.message}"
-                            ),
-                        )
-                tracker_policy = load_application_preferences(session).trackers
-                if tracker_policy.enabled and tracker_policy.trackers and item.trackers_applied_at is None:
-                    tracker_result = client.add_trackers(result.torrent_hash, tracker_policy.trackers)
-                    item.trackers_status = "completed" if tracker_result.ok else "error"
-                    item.trackers_message = tracker_result.message[:2000]
-                    if tracker_result.ok:
-                        item.trackers_applied_at = datetime.now(timezone.utc)
-                        stats["trackers_applied"] += 1
-                    else:
-                        stats["errors"] += 1
+
+            _handle_torrent_hash_and_trackers(session, client, item, result.torrent_hash, stats)
 
             if "已规范化" in result.message and previous_state not in {"completed", "manual_required"}:
                 stats["renamed"] += 1
 
             if result.completed:
                 stats["completed"] += 1
-                newly_completed = item.completed_at is None
-                # Prefer qBittorrent's own completion timestamp so a one-minute
-                # cleanup delay is measured from the real finish time rather
-                # than from FeedDock's next polling cycle.
-                item.completed_at = (
-                    item.completed_at
-                    or result.completed_at
-                    or datetime.now(timezone.utc)
-                )
-                if newly_completed:
-                    completed_subscription_ids.add(item.subscription_id)
-                    subscription = session.get(Subscription, item.subscription_id)
-                    if subscription is not None:
-                        completed_filename = (
-                            result.media_filename
-                            or item.desired_name
-                            or item.title
-                        )
-                        send_notification(
-                            session,
-                            "download_completed",
-                            f"下载完成：{subscription.name}",
-                            f"第 {item.episode or '?'} 集下载完成。\n{completed_filename}",
-                            subscription=subscription,
-                            item=item,
-                            details={
-                                "progress": 100,
-                                "filename": completed_filename,
-                                "cover_url": subscription.poster_url,
-                            },
-                        )
+                _process_newly_completed_item(session, item, result.completed_at, result.media_filename, completed_subscription_ids)
+
                 subscription = session.get(Subscription, item.subscription_id)
                 metadata_config = load_metadata_config(session)
                 should_process_scrape = allow_scrape and item.scrape_status != "completed" and (
                     metadata_config.auto_scrape_enabled or metadata_config.bangumi_ini_enabled
                 )
+
                 if subscription is not None and should_process_scrape:
-                    completed_actions: list[str] = []
-                    scrape_errors: list[str] = []
-                    if metadata_config.auto_scrape_enabled:
-                        if _metadata_sync_due(subscription):
-                            try:
-                                record = MetadataService(
-                                    timeout=load_application_preferences(session).rss.timeout_seconds
-                                ).sync(session, subscription, "auto")
-                                completed_actions.append(f"元数据已同步（{record.provider}）")
-                                _add_log(
-                                    session,
-                                    "INFO",
-                                    f"下载完成后元数据已同步：{subscription.name}",
-                                    (
-                                        f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
-                                        f"来源：{record.provider}\n元数据 ID：{record.id}"
-                                    ),
-                                )
-                            except Exception as exc:
-                                scrape_errors.append(f"元数据同步失败：{exc}")
-                                _add_log(
-                                    session,
-                                    "WARNING",
-                                    f"下载完成后元数据同步失败：{subscription.name}",
-                                    format_exception_details(
-                                        exc,
-                                        stage="postprocess.metadata",
-                                        context={
-                                            "subscription_id": subscription.id,
-                                            "item_id": item.id,
-                                            "subscription_name": subscription.name,
-                                        },
-                                    ),
-                                )
-                        else:
-                            completed_actions.append("元数据已是最新")
-
-                        local_scrape = scrape_completed_item(
-                            session, subscription, item, metadata_config
-                        )
-                        if local_scrape.ok:
-                            completed_actions.append(local_scrape.message)
-                            _add_log(
-                                session,
-                                "INFO",
-                                f"媒体库元数据已写入：{subscription.name}",
-                                (
-                                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
-                                    f"媒体目录：{local_scrape.local_path}\n"
-                                    f"文件：{', '.join(local_scrape.files or [])}"
-                                )[:50000],
-                            )
-                        else:
-                            scrape_errors.append(local_scrape.message)
-                            _add_log(
-                                session,
-                                "WARNING",
-                                f"媒体库元数据写入失败：{subscription.name}",
-                                (
-                                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
-                                    f"错误：{local_scrape.message}"
-                                ),
-                            )
-
-                    if metadata_config.bangumi_ini_enabled:
-                        sidecar = write_bangumi_ini(subscription, item, metadata_config)
-                        if sidecar.state == "completed":
-                            completed_actions.append("bangumi.ini 已生成")
-                        elif sidecar.state == "error":
-                            scrape_errors.append(sidecar.message)
-                        elif sidecar.message:
-                            completed_actions.append(sidecar.message)
-
-                    if scrape_errors:
-                        item.scrape_status = "error"
-                        item.scrape_message = "；".join(scrape_errors)[:2000]
-                        stats["errors"] += 1
-                    else:
-                        item.scrape_status = "completed"
-                        item.scrape_message = "；".join(completed_actions)[:2000] or "下载完成后刮削已完成"
-                        item.scraped_at = datetime.now(timezone.utc)
-                        stats["scraped"] += 1
+                    _process_item_scraping(session, item, subscription, stats)
                 elif subscription is None:
                     item.scrape_status = "skipped"
                     item.scrape_message = "订阅不存在"
@@ -358,6 +378,7 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
                 stats["errors"] += 1
 
         for subscription_id in completed_subscription_ids:
+
             subscription = session.get(Subscription, subscription_id)
             if subscription is not None:
                 evaluate_subscription_completion(session, subscription)
