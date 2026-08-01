@@ -524,6 +524,33 @@ def parse_mikan_search_html(content: str, base_url: str, limit: int = 30) -> lis
     return list(by_id.values())[:limit]
 
 
+def _build_mikan_group_entry(
+    subgroup_id: int,
+    name: str,
+    base_url: str,
+    bangumi_id: int,
+    title: str,
+    href: str = "",
+) -> dict[str, Any]:
+    if not name or name.casefold() in _GENERIC_LINK_LABELS:
+        name = f"字幕组 #{subgroup_id}"
+    rss_url = f"{base_url}/RSS/Bangumi?{urlencode({'bangumiId': bangumi_id, 'subgroupid': subgroup_id})}"
+    return {
+        "subgroup_id": subgroup_id,
+        "name": name,
+        "rss_url": rss_url,
+        "detail_url": urljoin(base_url + "/", href) if href else "",
+        "preset": _subscription_preset(
+            name=title,
+            source_name=f"Mikan · {name}",
+            rss_url=rss_url,
+            sample_title=title,
+            source_type="mikan",
+            source_anime_id=str(bangumi_id),
+        ),
+    }
+
+
 def parse_mikan_detail_html(
     content: str,
     base_url: str,
@@ -553,24 +580,15 @@ def parse_mikan_detail_html(
             continue
         anchor_node = _first_descendant(node, tag="a")
         name = _clean_text(anchor_node.text() if anchor_node is not None else node.text())
-        if not name or name.casefold() in _GENERIC_LINK_LABELS:
-            name = f"字幕组 #{subgroup_id}"
-        rss_url = f"{base_url}/RSS/Bangumi?{urlencode({'bangumiId': bangumi_id, 'subgroupid': subgroup_id})}"
         href = anchor_node.attrs.get("href", "") if anchor_node is not None else ""
-        groups[subgroup_id] = {
-            "subgroup_id": subgroup_id,
-            "name": name,
-            "rss_url": rss_url,
-            "detail_url": urljoin(base_url + "/", href) if href else "",
-            "preset": _subscription_preset(
-                name=title,
-                source_name=f"Mikan · {name}",
-                rss_url=rss_url,
-                sample_title=title,
-                source_type="mikan",
-                source_anime_id=str(bangumi_id),
-            ),
-        }
+        groups[subgroup_id] = _build_mikan_group_entry(
+            subgroup_id=subgroup_id,
+            name=name,
+            base_url=base_url,
+            bangumi_id=bangumi_id,
+            title=title,
+            href=href,
+        )
 
     for anchor in parser.anchors:
         match = _MIKAN_GROUP_RE.search(anchor.href)
@@ -578,46 +596,29 @@ def parse_mikan_detail_html(
             continue
         subgroup_id = int(match.group(1))
         name = _clean_text(anchor.title)
-        if not name or name.casefold() in _GENERIC_LINK_LABELS:
-            name = f"字幕组 #{subgroup_id}"
-        rss_url = f"{base_url}/RSS/Bangumi?{urlencode({'bangumiId': bangumi_id, 'subgroupid': subgroup_id})}"
         current = groups.get(subgroup_id)
         if current and not current["name"].startswith("字幕组 #"):
             continue
-        groups[subgroup_id] = {
-            "subgroup_id": subgroup_id,
-            "name": name,
-            "rss_url": rss_url,
-            "detail_url": urljoin(base_url + "/", anchor.href),
-            "preset": _subscription_preset(
-                name=title,
-                source_name=f"Mikan · {name}",
-                rss_url=rss_url,
-                sample_title=title,
-                source_type="mikan",
-                source_anime_id=str(bangumi_id),
-            ),
-        }
+        groups[subgroup_id] = _build_mikan_group_entry(
+            subgroup_id=subgroup_id,
+            name=name,
+            base_url=base_url,
+            bangumi_id=bangumi_id,
+            title=title,
+            href=anchor.href,
+        )
 
     for subgroup_id in parser.subgroup_ids:
         if subgroup_id in groups:
             continue
-        name = f"字幕组 #{subgroup_id}"
-        rss_url = f"{base_url}/RSS/Bangumi?{urlencode({'bangumiId': bangumi_id, 'subgroupid': subgroup_id})}"
-        groups[subgroup_id] = {
-            "subgroup_id": subgroup_id,
-            "name": name,
-            "rss_url": rss_url,
-            "detail_url": "",
-            "preset": _subscription_preset(
-                name=title,
-                source_name=f"Mikan · {name}",
-                rss_url=rss_url,
-                sample_title=title,
-                source_type="mikan",
-                source_anime_id=str(bangumi_id),
-            ),
-        }
+        groups[subgroup_id] = _build_mikan_group_entry(
+            subgroup_id=subgroup_id,
+            name="",
+            base_url=base_url,
+            bangumi_id=bangumi_id,
+            title=title,
+            href="",
+        )
 
     return {
         "provider": "mikan",
