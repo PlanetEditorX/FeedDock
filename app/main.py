@@ -487,7 +487,6 @@ def _create_mikan_trials(
             existing_rss_urls.add(str(values["rss_url"]))
             subscription = Subscription(**values)
             db.add(subscription)
-            db.flush()
             created.append(subscription)
     if created or updated:
         add_log(
@@ -560,7 +559,6 @@ def _create_catalog_trials(db: Session, *, source_id: str, year: int, season: st
             existing_rss_urls.add(str(values["rss_url"]))
             subscription = Subscription(**values)
             db.add(subscription)
-            db.flush()
             created.append(subscription)
     if created or updated:
         db.commit()
@@ -1671,9 +1669,15 @@ def _import_subscription_definitions(
         db.execute(delete(Subscription))
         db.flush()
 
+    existing_subs_map = {}
+    if not replace:
+        rss_urls = [str(item.rss_url) for item in subscriptions]
+        subs = db.scalars(select(Subscription).where(Subscription.rss_url.in_(rss_urls))).all()
+        existing_subs_map = {sub.rss_url: sub for sub in subs}
+
     for item in subscriptions:
         rss_url = str(item.rss_url)
-        existing = None if replace else db.scalar(select(Subscription).where(Subscription.rss_url == rss_url))
+        existing = None if replace else existing_subs_map.get(rss_url)
         values = _subscription_values(item, db, existing=existing)
         _validate_auto_skip_rename_requirement(db, values, existing=existing)
         if existing is None:
