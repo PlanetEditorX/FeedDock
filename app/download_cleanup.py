@@ -25,6 +25,65 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _get_due_items(session: Session, cutoff: datetime, limit: int) -> list[FeedItem]:
+    return list(
+        session.scalars(
+            select(FeedItem)
+            .where(
+                FeedItem.completed_at.is_not(None),
+                FeedItem.completed_at <= cutoff,
+                FeedItem.torrent_hash != "",
+                FeedItem.qbit_record_removed_at.is_(None),
+            )
+            .order_by(FeedItem.completed_at, FeedItem.id)
+            .limit(max(1, limit))
+        )
+    )
+
+
+def _process_items(
+    items: list[FeedItem], downloader: QBittorrentClient, current: datetime, stats: dict[str, int]
+) -> None:
+    for item in items:
+        # Do not remove the qBittorrent task while naming, Tracker handling,
+        # or local metadata work still needs an operator retry.
+        if (
+            item.rename_status not in _READY_RENAME_STATES
+            or item.scrape_status in _BLOCKED_SCRAPE_STATES
+            or item.trackers_status == "error"
+        ):
+            stats["blocked"] += 1
+            continue
+
+        result = downloader.delete_torrent_record(item.torrent_hash)
+        item.qbit_record_remove_message = result.message[:2000]
+        if result.ok:
+            item.qbit_record_removed_at = current
+            stats["removed"] += 1
+        else:
+            stats["errors"] += 1
+
+
+def _log_cleanup_results(
+    session: Session, stats: dict[str, int], delay_minutes: int
+) -> None:
+    details = (
+        f"到期检查 {stats['checked']}，已删除记录 {stats['removed']}，"
+        f"等待后处理 {stats['blocked']}，错误 {stats['errors']}\n"
+        f"等待时间：{delay_minutes} 分钟\n"
+        "删除文件：否"
+    )
+    level = "INFO" if stats["errors"] == 0 else "WARNING"
+    log_event(level, "qBittorrent 完成任务记录清理完成", details, persist=False)
+    session.add(
+        SystemLog(
+            level=level,
+            message="qBittorrent 完成任务记录清理完成",
+            details=details,
+        )
+    )
+
+
 def cleanup_completed_torrent_records(
     db: Session | None = None,
     *,
@@ -68,57 +127,14 @@ def cleanup_completed_torrent_records(
 
         current = _utc(now or datetime.now(timezone.utc))
         cutoff = current - timedelta(minutes=policy.cleanup_completed_delay_minutes)
-        items = list(
-            session.scalars(
-                select(FeedItem)
-                .where(
-                    FeedItem.completed_at.is_not(None),
-                    FeedItem.completed_at <= cutoff,
-                    FeedItem.torrent_hash != "",
-                    FeedItem.qbit_record_removed_at.is_(None),
-                )
-                .order_by(FeedItem.completed_at, FeedItem.id)
-                .limit(max(1, limit))
-            )
-        )
+        items = _get_due_items(session, cutoff, limit)
 
         stats = {"checked": len(items), "removed": 0, "blocked": 0, "errors": 0}
         downloader = client or QBittorrentClient()
-        for item in items:
-            # Do not remove the qBittorrent task while naming, Tracker handling,
-            # or local metadata work still needs an operator retry.
-            if (
-                item.rename_status not in _READY_RENAME_STATES
-                or item.scrape_status in _BLOCKED_SCRAPE_STATES
-                or item.trackers_status == "error"
-            ):
-                stats["blocked"] += 1
-                continue
-
-            result = downloader.delete_torrent_record(item.torrent_hash)
-            item.qbit_record_remove_message = result.message[:2000]
-            if result.ok:
-                item.qbit_record_removed_at = current
-                stats["removed"] += 1
-            else:
-                stats["errors"] += 1
+        _process_items(items, downloader, current, stats)
 
         if items and (stats["removed"] or stats["errors"]):
-            details = (
-                f"到期检查 {stats['checked']}，已删除记录 {stats['removed']}，"
-                f"等待后处理 {stats['blocked']}，错误 {stats['errors']}\n"
-                f"等待时间：{policy.cleanup_completed_delay_minutes} 分钟\n"
-                "删除文件：否"
-            )
-            level = "INFO" if stats["errors"] == 0 else "WARNING"
-            log_event(level, "qBittorrent 完成任务记录清理完成", details, persist=False)
-            session.add(
-                SystemLog(
-                    level=level,
-                    message="qBittorrent 完成任务记录清理完成",
-                    details=details,
-                )
-            )
+            _log_cleanup_results(session, stats, policy.cleanup_completed_delay_minutes)
 
         session.commit()
         return {
