@@ -136,23 +136,15 @@ def _append_detail_candidates(
         )
 
 
-def search_subscription_rss_candidates(
+def _search_mikan_candidates(
     db: Session,
     subscription: Subscription,
-    *,
-    query: str = "",
-    per_source_anime_limit: int = 2,
-) -> dict[str, Any]:
-    titles = _identity_titles(subscription, query)
-    if not titles:
-        raise ValueError("当前订阅缺少可用于搜索的标题")
-    search_title = titles[0]
-    candidates: list[dict[str, Any]] = []
-    errors: list[str] = []
-    searched_sources: list[str] = []
-
-    # Mikan's bangumiId is a Mikan-local identifier, not Bangumi Subject ID.
-    searched_sources.append("mikan")
+    search_title: str,
+    titles: list[str],
+    per_source_anime_limit: int,
+    candidates: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
     mikan_service = MikanCacheService(DiscoveryService())
     mikan_items: list[tuple[dict[str, Any], str]] = []
     direct_mikan_id = 0
@@ -204,6 +196,17 @@ def search_subscription_rss_candidates(
         except Exception as exc:
             errors.append(f"Mikan 资源读取失败：{exc}")
 
+
+def _search_catalog_candidates(
+    db: Session,
+    subscription: Subscription,
+    search_title: str,
+    titles: list[str],
+    per_source_anime_limit: int,
+    candidates: list[dict[str, Any]],
+    errors: list[str],
+    searched_sources: list[str],
+) -> None:
     now = datetime.now()
     season = _SEASON_BY_MONTH[now.month]
     for source_id in ("anibt", "ag"):
@@ -254,6 +257,45 @@ def search_subscription_rss_candidates(
                 _append_detail_candidates(candidates, source_id=source_id, item=item, detail=detail, match_reason=reason)
             except Exception as exc:
                 errors.append(f"{get_subscription_source(source_id).label} 资源读取失败：{exc}")
+
+
+def search_subscription_rss_candidates(
+    db: Session,
+    subscription: Subscription,
+    *,
+    query: str = "",
+    per_source_anime_limit: int = 2,
+) -> dict[str, Any]:
+    titles = _identity_titles(subscription, query)
+    if not titles:
+        raise ValueError("当前订阅缺少可用于搜索的标题")
+    search_title = titles[0]
+    candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    searched_sources: list[str] = []
+
+    # Mikan's bangumiId is a Mikan-local identifier, not Bangumi Subject ID.
+    searched_sources.append("mikan")
+    _search_mikan_candidates(
+        db=db,
+        subscription=subscription,
+        search_title=search_title,
+        titles=titles,
+        per_source_anime_limit=per_source_anime_limit,
+        candidates=candidates,
+        errors=errors,
+    )
+
+    _search_catalog_candidates(
+        db=db,
+        subscription=subscription,
+        search_title=search_title,
+        titles=titles,
+        per_source_anime_limit=per_source_anime_limit,
+        candidates=candidates,
+        errors=errors,
+        searched_sources=searched_sources,
+    )
 
     deduplicated: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
