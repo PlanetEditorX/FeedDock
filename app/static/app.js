@@ -962,12 +962,18 @@ function setMikanWeekdayCollapsed(key, collapsed) {
   localStorage.setItem(MIKAN_WEEKDAY_STATE_KEY, JSON.stringify(states));
 }
 
-function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle = null } = {}) {
+function createMikanCard(item, {
+  editing = false,
+  hiddenDraft = false,
+  revealHiddenSearchResult = false,
+  onToggle = null,
+} = {}) {
   const card = document.createElement(editing ? 'article' : 'button');
   if (!editing) card.type = 'button';
   card.className = 'mikan-anime-card';
   if (item.subscribed) card.classList.add('is-subscribed');
   if (item.trialed) card.classList.add('is-trialed');
+  if (revealHiddenSearchResult && item.hidden) card.classList.add('is-search-hidden');
   if (editing) card.classList.add('is-filter-editing');
   if (hiddenDraft) card.classList.add('is-filter-hidden');
   if (!editing) {
@@ -1002,6 +1008,7 @@ function createMikanCard(item, { editing = false, hiddenDraft = false, onToggle 
   titleRow.className = 'mikan-anime-title-row';
   titleRow.append(text('strong', item.title));
   if (item.subscribed || item.trialed) titleRow.append(text('span', item.subscription_badge || (item.trialed ? '已试看' : '✓ 已订阅'), 'mikan-subscribed-badge'));
+  if (revealHiddenSearchResult && item.hidden) titleRow.append(text('span', '已隐藏 · 搜索可见', 'mikan-hidden-search-badge'));
   info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
@@ -1086,7 +1093,8 @@ function renderMikanCatalog(data) {
     (sum, row) => sum + row.items.filter((item) => item.hidden).length,
     0,
   );
-  const visibleCount = totalCount - hiddenCount;
+  const searchActive = Boolean(String(data.query || '').trim());
+  const visibleCount = searchActive ? totalCount : totalCount - hiddenCount;
   if (!totalCount) {
     const emptyMessage = data.query
       ? `${data.year} ${data.season}没有匹配“${data.query}”的番剧。`
@@ -1096,7 +1104,9 @@ function renderMikanCatalog(data) {
     return;
   }
 
-  const hiddenSummary = hiddenCount ? ` · 已隐藏 ${hiddenCount} 部` : '';
+  const hiddenSummary = hiddenCount
+    ? (searchActive ? ` · 搜索结果包含 ${hiddenCount} 部已隐藏番剧` : ` · 已隐藏 ${hiddenCount} 部`)
+    : '';
   const sourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
   const periodSummary = data.period_notice ? ` · ${data.period_notice}` : '';
   state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${periodSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
@@ -1107,7 +1117,7 @@ function renderMikanCatalog(data) {
     const editing = mikanWeekdayDrafts.has(key);
     const draft = mikanWeekdayDrafts.get(key) || new Set();
     const hiddenInRow = row.items.filter((item) => item.hidden).length;
-    const visibleItems = editing ? row.items : row.items.filter((item) => !item.hidden);
+    const visibleItems = (editing || searchActive) ? row.items : row.items.filter((item) => !item.hidden);
 
     const section = document.createElement('section');
     section.className = 'mikan-weekday-section';
@@ -1120,7 +1130,9 @@ function renderMikanCatalog(data) {
     titleBox.append(text('h3', row.weekday));
     const countText = editing
       ? `${row.items.length} 部 · 已选择隐藏 ${draft.size} 部`
-      : `${row.items.length - hiddenInRow} 部显示${hiddenInRow ? ` · ${hiddenInRow} 部已隐藏` : ''}`;
+      : searchActive
+        ? `${row.items.length} 部搜索结果${hiddenInRow ? ` · 包含 ${hiddenInRow} 部已隐藏` : ''}`
+        : `${row.items.length - hiddenInRow} 部显示${hiddenInRow ? ` · ${hiddenInRow} 部已隐藏` : ''}`;
     titleBox.append(text('span', countText, 'muted'));
 
     const actions = document.createElement('div');
@@ -1205,6 +1217,7 @@ function renderMikanCatalog(data) {
         grid.append(createMikanCard(item, {
           editing,
           hiddenDraft: draft.has(canonicalKey),
+          revealHiddenSearchResult: searchActive,
           onToggle: (hidden) => {
             if (hidden) draft.add(canonicalKey);
             else draft.delete(canonicalKey);

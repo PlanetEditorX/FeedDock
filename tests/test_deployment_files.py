@@ -331,6 +331,15 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("def update_mikan_weekday_filter", main)
         self.assertIn("save_mikan_weekday_hidden_filter", runtime)
 
+    def test_catalog_title_search_reveals_hidden_items_for_explicit_actions(self) -> None:
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn("const searchActive = Boolean(String(data.query || '').trim());", script)
+        self.assertIn("(editing || searchActive) ? row.items", script)
+        self.assertIn("revealHiddenSearchResult: searchActive", script)
+        self.assertIn("已隐藏 · 搜索可见", script)
+        self.assertIn("mikan-hidden-search-badge", styles)
+
     def test_metadata_naming_and_local_scraping_ui_are_wired(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
