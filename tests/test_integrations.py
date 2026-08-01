@@ -285,9 +285,27 @@ class IntegrationTests(unittest.TestCase):
         memory_engine.dispose()
 
     def test_version_comparison(self):
+        # Basic comparisons
         self.assertTrue(is_newer_version("v1.2.0", "1.1.9"))
         self.assertFalse(is_newer_version("1.1.0", "1.1.0"))
         self.assertFalse(is_newer_version("1.0.9", "1.1.0"))
+
+        # Different length version tuples
+        self.assertTrue(is_newer_version("1.2.1", "1.2"))
+        self.assertFalse(is_newer_version("1.2", "1.2.0"))
+
+        # Case insensitivity
+        self.assertFalse(is_newer_version("V1.2.2", "1.2.2"))
+
+        # Version suffixes
+        self.assertFalse(is_newer_version("1.2.3-alpha", "1.2.3"))
+        self.assertTrue(is_newer_version("1.2.4-beta", "1.2.3"))
+
+        # Invalid or non-semver strings
+        self.assertTrue(is_newer_version("1.0", "invalid"))
+        self.assertFalse(is_newer_version("invalid", "invalid"))
+        self.assertFalse(is_newer_version("", ""))
+        self.assertFalse(is_newer_version("  ", ""))
 
 
 if __name__ == "__main__":
