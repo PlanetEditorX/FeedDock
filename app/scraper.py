@@ -15,10 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import FeedItem, Subscription
-from .media_paths import map_downloader_path_to_local
+from .media_paths import map_downloader_path_to_local, preferred_local_media_root
 from .naming import canonical_title, canonical_year, is_video_file
+from .config import settings
 from .outbound import external_get
-from .runtime_config import MetadataConfig, load_metadata_config
+from .runtime_config import MetadataConfig, load_metadata_config, load_qbittorrent_config
 
 
 _MAX_IMAGE_BYTES = 25 * 1024 * 1024
@@ -571,6 +572,24 @@ def cleanup_orphaned_metadata(
     return CleanupResult(True, message, removed, affected)
 
 def scrape_local_metadata(db: Session, subscription: Subscription) -> ScrapeResult:
+    config = load_metadata_config(db)
+    if not config.auto_scrape_enabled:
+        return ScrapeResult(True, "本地元数据刮削已禁用", "", [])
+
+    from .media_sidecar import write_bangumi_ini
+
+    qbit_config = load_qbittorrent_config(db)
+    try:
+        save_path = getattr(subscription, "save_path", "")
+        map_downloader_path_to_local(
+            save_path,
+            qbit_config.download_path,
+            preferred_local_media_root(qbit_config.download_path, str(settings.media_local_root) if settings.media_local_root else "/media"),
+            require_directory=True,
+        )
+    except Exception as e:
+        return ScrapeResult(False, f"下载路径不存在：{e}")
+
     if getattr(subscription, "trial_bulk", False):
         return ScrapeResult(False, "批量试看不收集元数据或刮削")
     items = list(
@@ -589,6 +608,7 @@ def scrape_local_metadata(db: Session, subscription: Subscription) -> ScrapeResu
     failures: list[str] = []
     local_path = ""
     for item in items:
+        write_bangumi_ini(subscription, item, config)
         result = scrape_completed_item(db, subscription, item)
         if result.ok:
             generated.extend(result.files or [])
