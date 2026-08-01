@@ -96,6 +96,113 @@ def refresh_all_metadata() -> dict[str, Any]:
         _metadata_refresh_lock.release()
 
 
+def _log_scrape_start(db: Any, subscription_id: int | None, target_subscription: Subscription | None, items: list[Any]) -> None:
+    start_message = "开始刮削订阅媒体" if subscription_id is not None else "开始刮削已完成媒体"
+    start_details = f"待处理条目：{len(items)}"
+    if subscription_id is not None:
+        start_details = (
+            f"订阅 ID：{subscription_id}\n"
+            f"订阅：{target_subscription.name if target_subscription else '不存在'}\n"
+            f"待处理条目：{len(items)}"
+        )
+    _add_log(db, "INFO", start_message, start_details)
+    db.commit()
+
+
+def _log_scrape_finish(db: Any, subscription_id: int | None, totals: dict[str, int]) -> None:
+    finish_message = "刮削订阅媒体结束" if subscription_id is not None else "刮削已完成媒体结束"
+    finish_details = (
+        f"条目 {totals['items']}，成功 {totals['scraped']}，"
+        f"刮削前同步 {totals['metadata_updated']}，错误 {totals['errors']}"
+    )
+    if subscription_id is not None:
+        finish_details = f"订阅 ID：{subscription_id}\n{finish_details}"
+    _add_log(
+        db,
+        "INFO" if totals["errors"] == 0 else "WARNING",
+        finish_message,
+        finish_details,
+    )
+    db.commit()
+
+
+def _process_scrape_item(db: Any, item: Any, config: Any, service: MetadataService, totals: dict[str, int]) -> None:
+    from datetime import datetime, timezone
+
+    from .scraper import scrape_completed_item
+
+    totals["items"] += 1
+    subscription = db.get(Subscription, item.subscription_id)
+    if subscription is None:
+        totals["errors"] += 1
+        item.scrape_status = "error"
+        item.scrape_message = "订阅不存在"
+        db.commit()
+        return
+
+    try:
+        if subscription.metadata_last_synced_at is None:
+            try:
+                service.sync(db, subscription, "auto")
+                totals["metadata_updated"] += 1
+            except Exception as exc:
+                _add_log(
+                    db,
+                    "WARNING",
+                    f"刮削前元数据同步失败：{subscription.name}",
+                    format_exception_details(
+                        exc,
+                        stage="metadata.scrape-completed.sync",
+                        context={
+                            "subscription_id": subscription.id,
+                            "item_id": item.id,
+                        },
+                    ),
+                )
+        result = scrape_completed_item(db, subscription, item, config)
+        item.scrape_status = "completed" if result.ok else "error"
+        item.scrape_message = result.message[:2000]
+        if result.ok:
+            item.scraped_at = datetime.now(timezone.utc)
+            totals["scraped"] += 1
+            _add_log(
+                db,
+                "INFO",
+                f"媒体库刮削完成：{subscription.name}",
+                (
+                    f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
+                    f"媒体目录：{result.local_path}\n"
+                    f"文件：{', '.join(result.files or [])}"
+                )[:50000],
+            )
+        else:
+            totals["errors"] += 1
+            _add_log(
+                db,
+                "WARNING",
+                f"媒体库刮削失败：{subscription.name}",
+                f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n错误：{result.message}",
+            )
+    except Exception as exc:
+        totals["errors"] += 1
+        item.scrape_status = "error"
+        item.scrape_message = f"媒体库刮削失败：{exc}"[:2000]
+        _add_log(
+            db,
+            "WARNING",
+            f"媒体库刮削失败：{subscription.name}",
+            format_exception_details(
+                exc,
+                stage="metadata.scrape-completed",
+                context={
+                    "subscription_id": subscription.id,
+                    "item_id": item.id,
+                },
+            ),
+        )
+    db.commit()
+
+
 _media_scrape_lock = threading.Lock()
 
 
@@ -113,11 +220,8 @@ def scrape_completed_media(subscription_id: int | None = None) -> dict[str, Any]
             db.commit()
         return {"ok": False, "message": "已有媒体库刮削任务正在运行", "items": 0}
 
-    from datetime import datetime, timezone
-
     from .models import FeedItem
     from .runtime_config import load_metadata_config
-    from .scraper import scrape_completed_item
 
     totals = {"items": 0, "scraped": 0, "errors": 0, "metadata_updated": 0}
     try:
@@ -135,102 +239,15 @@ def scrape_completed_media(subscription_id: int | None = None) -> dict[str, Any]
                 query = query.where(FeedItem.subscription_id == subscription_id)
             items = list(db.scalars(query.order_by(FeedItem.id)))
             target_subscription = db.get(Subscription, subscription_id) if subscription_id is not None else None
-            start_message = "开始刮削订阅媒体" if subscription_id is not None else "开始刮削已完成媒体"
-            start_details = f"待处理条目：{len(items)}"
-            if subscription_id is not None:
-                start_details = (
-                    f"订阅 ID：{subscription_id}\n"
-                    f"订阅：{target_subscription.name if target_subscription else '不存在'}\n"
-                    f"待处理条目：{len(items)}"
-                )
-            _add_log(db, "INFO", start_message, start_details)
-            db.commit()
+
+            _log_scrape_start(db, subscription_id, target_subscription, items)
+
             service = MetadataService(timeout=load_application_preferences(db).rss.timeout_seconds)
             for item in items:
-                totals["items"] += 1
-                subscription = db.get(Subscription, item.subscription_id)
-                if subscription is None:
-                    totals["errors"] += 1
-                    item.scrape_status = "error"
-                    item.scrape_message = "订阅不存在"
-                    db.commit()
-                    continue
-                try:
-                    if subscription.metadata_last_synced_at is None:
-                        try:
-                            service.sync(db, subscription, "auto")
-                            totals["metadata_updated"] += 1
-                        except Exception as exc:
-                            _add_log(
-                                db,
-                                "WARNING",
-                                f"刮削前元数据同步失败：{subscription.name}",
-                                format_exception_details(
-                                    exc,
-                                    stage="metadata.scrape-completed.sync",
-                                    context={
-                                        "subscription_id": subscription.id,
-                                        "item_id": item.id,
-                                    },
-                                ),
-                            )
-                    result = scrape_completed_item(db, subscription, item, config)
-                    item.scrape_status = "completed" if result.ok else "error"
-                    item.scrape_message = result.message[:2000]
-                    if result.ok:
-                        item.scraped_at = datetime.now(timezone.utc)
-                        totals["scraped"] += 1
-                        _add_log(
-                            db,
-                            "INFO",
-                            f"媒体库刮削完成：{subscription.name}",
-                            (
-                                f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n"
-                                f"媒体目录：{result.local_path}\n"
-                                f"文件：{', '.join(result.files or [])}"
-                            )[:50000],
-                        )
-                    else:
-                        totals["errors"] += 1
-                        _add_log(
-                            db,
-                            "WARNING",
-                            f"媒体库刮削失败：{subscription.name}",
-                            f"订阅 ID：{subscription.id}\n条目 ID：{item.id}\n错误：{result.message}",
-                        )
-                except Exception as exc:
-                    totals["errors"] += 1
-                    item.scrape_status = "error"
-                    item.scrape_message = f"媒体库刮削失败：{exc}"[:2000]
-                    _add_log(
-                        db,
-                        "WARNING",
-                        f"媒体库刮削失败：{subscription.name}",
-                        format_exception_details(
-                            exc,
-                            stage="metadata.scrape-completed",
-                            context={
-                                "subscription_id": subscription.id,
-                                "item_id": item.id,
-                            },
-                        ),
-                    )
-                db.commit()
+                _process_scrape_item(db, item, config, service, totals)
 
-            finish_message = "刮削订阅媒体结束" if subscription_id is not None else "刮削已完成媒体结束"
-            finish_details = (
-                f"条目 {totals['items']}，成功 {totals['scraped']}，"
-                f"刮削前同步 {totals['metadata_updated']}，错误 {totals['errors']}"
-            )
-            if subscription_id is not None:
-                finish_details = f"订阅 ID：{subscription_id}\n{finish_details}"
-            _add_log(
-                db,
-                "INFO" if totals["errors"] == 0 else "WARNING",
-                finish_message,
-                finish_details,
-            )
-            db.commit()
+            _log_scrape_finish(db, subscription_id, totals)
+
         return {
             "ok": totals["errors"] == 0,
             "message": "订阅媒体刮削任务完成" if subscription_id is not None else "媒体库刮削任务完成",
