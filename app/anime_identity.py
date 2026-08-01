@@ -271,7 +271,7 @@ def backfill_subscription_identities(db) -> int:
     from sqlalchemy import select
 
     changed = 0
-    for subscription in db.scalars(select(Subscription)):
+    for subscription in db.scalars(select(Subscription)).all():
         values: dict[str, Any] = {
             "source_type": subscription.source_type,
             "source_anime_id": subscription.source_anime_id,
