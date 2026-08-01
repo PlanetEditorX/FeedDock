@@ -194,9 +194,9 @@ class MetadataNamingTests(unittest.TestCase):
         service = MetadataService()
         searched: list[tuple[str, int]] = []
 
-        def fake_search(_db, _config, query, _media_type, year, _limit):
-            searched.append((query, year))
-            if query != "文豪野犬":
+        def fake_search(_db, _config, req):
+            searched.append((req.query, req.year))
+            if req.query != "文豪野犬":
                 return []
             return [
                 MetadataCandidate(
