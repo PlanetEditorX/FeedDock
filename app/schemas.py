@@ -719,3 +719,13 @@ class MikanBangumiDetailOut(BaseModel):
     refresh_interval_hours: int = 6
     is_stale: bool = False
     refresh_error: str = ""
+
+class SourceCatalogDetailQuery(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    subject_id: int = Field(default=0, ge=0)
+    source_anime_id: str = Field(default="", max_length=120)
+    mikan_id: int = Field(default=0, ge=0)
+    original_title: str = Field(default="", max_length=300)
+    english_title: str = Field(default="", max_length=300)
+    aliases: str = Field(default="", max_length=2000)
+    force_refresh: bool = Field(default=False)
