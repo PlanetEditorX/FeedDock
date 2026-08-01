@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import FeedItem, Subscription, SystemLog
 from .channels import PostCallable, send_bark, send_telegram, send_webhook
-from .config import NOTIFICATION_EVENTS, load_notification_config
+from .config import NOTIFICATION_EVENTS, NotificationConfig, load_notification_config
 from .templates import render_notification, sample_payload
 from .types import NotificationResult
 
@@ -89,6 +89,83 @@ def preview_notification(*, event: str, title_template: str, body_template: str)
     }
 
 
+def _dispatch_telegram(
+    config: NotificationConfig,
+    db: Session,
+    post: PostCallable,
+    title: str,
+    body: str,
+) -> tuple[int, str | None]:
+    if not config.telegram_enabled:
+        return 0, None
+    if not config.telegram_bot_token or not config.telegram_chat_id:
+        return 0, "Telegram 配置不完整"
+    try:
+        send_telegram(
+            post=post,
+            db=db,
+            bot_token=config.telegram_bot_token,
+            chat_id=config.telegram_chat_id,
+            title=title,
+            body=body,
+        )
+        return 1, None
+    except Exception as exc:
+        return 0, f"Telegram：{safe_channel_error(exc, secrets=[config.telegram_bot_token])}"
+
+
+def _dispatch_bark(
+    config: NotificationConfig,
+    db: Session,
+    post: PostCallable,
+    title: str,
+    body: str,
+    cover_url: str,
+) -> tuple[int, str | None]:
+    if not config.bark_enabled:
+        return 0, None
+    if not config.bark_device_key:
+        return 0, "Bark 配置不完整"
+    try:
+        send_bark(
+            post=post,
+            db=db,
+            server_url=config.bark_server_url,
+            device_key=config.bark_device_key,
+            title=title,
+            body=body,
+            icon=cover_url,
+            image=cover_url,
+        )
+        return 1, None
+    except Exception as exc:
+        return 0, f"Bark：{safe_channel_error(exc, secrets=[config.bark_device_key])}"
+
+
+def _dispatch_webhook(
+    config: NotificationConfig,
+    db: Session,
+    post: PostCallable,
+    payload: dict[str, Any],
+) -> tuple[int, str | None]:
+    if not config.webhook_enabled:
+        return 0, None
+    if not config.webhook_url:
+        return 0, "Webhook 配置不完整"
+    try:
+        send_webhook(
+            post=post,
+            db=db,
+            url=config.webhook_url,
+            headers=config.webhook_headers,
+            payload=payload,
+        )
+        return 1, None
+    except Exception as exc:
+        secrets = [config.webhook_url, *config.webhook_headers.values()]
+        return 0, f"Webhook：{safe_channel_error(exc, secrets=secrets)}"
+
+
 def send_notification(
     db: Session,
     event: str,
@@ -133,67 +210,31 @@ def send_notification(
     errors: list[str] = []
     sent = 0
 
-    if config.telegram_enabled:
-        if not config.telegram_bot_token or not config.telegram_chat_id:
-            errors.append("Telegram 配置不完整")
-        else:
-            try:
-                send_telegram(
-                    post=post,
-                    db=db,
-                    bot_token=config.telegram_bot_token,
-                    chat_id=config.telegram_chat_id,
-                    title=rendered_title,
-                    body=rendered_body,
-                )
-                sent += 1
-            except Exception as exc:
-                errors.append(f"Telegram：{safe_channel_error(exc, secrets=[config.telegram_bot_token])}")
+    # Telegram
+    t_sent, t_err = _dispatch_telegram(
+        config, db, post, title=rendered_title, body=rendered_body
+    )
+    sent += t_sent
+    if t_err:
+        errors.append(t_err)
 
-    if config.bark_enabled:
-        if not config.bark_device_key:
-            errors.append("Bark 配置不完整")
-        else:
-            try:
-                cover_url = _public_image_url(
-                    (details or {}).get("cover_url")
-                    or (subscription.poster_url if subscription is not None else "")
-                )
-                send_bark(
-                    post=post,
-                    db=db,
-                    server_url=config.bark_server_url,
-                    device_key=config.bark_device_key,
-                    title=rendered_title,
-                    body=rendered_body,
-                    icon=cover_url,
-                    image=cover_url,
-                )
-                sent += 1
-            except Exception as exc:
-                errors.append(f"Bark：{safe_channel_error(exc, secrets=[config.bark_device_key])}")
+    # Bark
+    cover_url = _public_image_url(
+        (details or {}).get("cover_url")
+        or (subscription.poster_url if subscription is not None else "")
+    )
+    b_sent, b_err = _dispatch_bark(
+        config, db, post, title=rendered_title, body=rendered_body, cover_url=cover_url
+    )
+    sent += b_sent
+    if b_err:
+        errors.append(b_err)
 
-    if config.webhook_enabled:
-        if not config.webhook_url:
-            errors.append("Webhook 配置不完整")
-        else:
-            try:
-                send_webhook(
-                    post=post,
-                    db=db,
-                    url=config.webhook_url,
-                    headers=config.webhook_headers,
-                    payload=payload,
-                )
-                sent += 1
-            except Exception as exc:
-                errors.append(
-                    "Webhook："
-                    + safe_channel_error(
-                        exc,
-                        secrets=[config.webhook_url, *config.webhook_headers.values()],
-                    )
-                )
+    # Webhook
+    w_sent, w_err = _dispatch_webhook(config, db, post, payload=payload)
+    sent += w_sent
+    if w_err:
+        errors.append(w_err)
 
     if errors:
         db.add(SystemLog(
