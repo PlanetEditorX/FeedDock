@@ -501,43 +501,10 @@ def _pending_scrape_state(db: Session, subscription: Subscription) -> tuple[str,
         return "skipped", "未启用下载完成后自动刮削"
     return "pending", f"等待下载完成后{'并'.join(actions)}"
 
-def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> tuple[bool, str]:
-    preferences = load_application_preferences(db)
-    save_path = item.save_path or render_save_path(subscription, item.episode, db)
-    desired_name = (
-        render_desired_name(subscription, item.episode)
-        if subscription.rename_enabled and item.episode
-        else ""
-    )
-    item.save_path = save_path
-    item.desired_name = desired_name
-    item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
-    item.scrape_status, item.scrape_message = _pending_scrape_state(db, subscription)
-    add_log(
-        db,
-        "INFO",
-        f"准备推送到下载器：{subscription.name}",
-        _download_log_details(
-            item, subscription, save_path=save_path, desired_name=desired_name,
-            extra=f"下载器：qBittorrent；最多尝试 {preferences.download.retry_count + 1} 次",
-        ),
-    )
 
-    existing_video = _existing_video_matches(item, subscription, db)
-    if existing_video is not None:
-        item.status = "skipped"
-        item.reason = f"媒体目录已存在目标视频：{existing_video.name}"
-        item.rename_status = "skipped"
-        item.rename_message = item.reason
-        add_log(
-            db,
-            "INFO",
-            f"跳过下载器推送：{subscription.name}",
-            _download_log_details(item, subscription, extra=item.reason),
-        )
-        return True, item.reason
-
-    client = QBittorrentClient(timeout=preferences.rss.timeout_seconds)
+def _check_concurrent_limit(
+    db: Session, client: QBittorrentClient, item: FeedItem, subscription: Subscription, preferences: Any
+) -> bool:
     if preferences.download.concurrent_limit > 0 and hasattr(client, "active_download_count"):
         ok, active, message = client.active_download_count()
         if ok and active >= preferences.download.concurrent_limit:
@@ -551,15 +518,27 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
                 f"下载任务等待并发空位：{subscription.name}",
                 _download_log_details(item, subscription, extra=item.reason),
             )
-            return True, item.reason
+            return True
         if not ok:
             add_log(db, "WARNING", "读取下载并发数失败，继续尝试推送", message)
+    return False
 
+
+def _execute_download_push(
+    db: Session,
+    client: QBittorrentClient,
+    item: FeedItem,
+    subscription: Subscription,
+    save_path: str,
+    desired_name: str,
+    preferences: Any,
+) -> tuple[DownloaderResult, int]:
     attempts = preferences.download.retry_count + 1
     result = None
     parsed_download = urlparse(item.download_url)
     torrent_payload: bytes | None = None
     torrent_filename = ""
+    attempt = 0
     for attempt in range(attempts):
         try:
             if parsed_download.scheme in {"http", "https"} and hasattr(client, "add_torrent"):
@@ -610,55 +589,113 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
             )
             time.sleep(min(1.0, 0.2 * (attempt + 1)))
     assert result is not None
-    if result.ok:
-        item.status = "queued"
-        item.reason = result.message
-        item.torrent_hash = result.torrent_hash or item.torrent_hash
-        item.rename_status = "pending"
-        item.rename_message = "等待 qBittorrent 获取文件列表并完成下载"
-        add_log(
-            db,
-            "INFO",
-            f"qBittorrent 已确认任务：{subscription.name}",
-            _download_log_details(
-                item, subscription,
-                extra=(
-                    f"结果：{result.message}；实际尝试 {attempt + 1} 次"
-                    + (f"；任务哈希：{result.torrent_hash}" if result.torrent_hash else "")
-                ),
+    return result, attempt + 1
+
+
+def _handle_successful_push(
+    db: Session, item: FeedItem, subscription: Subscription, result: DownloaderResult, attempts_used: int
+) -> None:
+    item.status = "queued"
+    item.reason = result.message
+    item.torrent_hash = result.torrent_hash or item.torrent_hash
+    item.rename_status = "pending"
+    item.rename_message = "等待 qBittorrent 获取文件列表并完成下载"
+    add_log(
+        db,
+        "INFO",
+        f"qBittorrent 已确认任务：{subscription.name}",
+        _download_log_details(
+            item, subscription,
+            extra=(
+                f"结果：{result.message}；实际尝试 {attempts_used} 次"
+                + (f"；任务哈希：{result.torrent_hash}" if result.torrent_hash else "")
             ),
-        )
-        send_notification(
-            db,
-            "download_started",
-            f"开始下载：{subscription.name}",
-            f"第 {item.episode or '?'} 集已在 qBittorrent 中确认。\n{item.title}",
-            subscription=subscription,
-            item=item,
-        )
-        if getattr(result, "tag_removed", False):
-            # qBittorrent tags are used only as a short-lived correlation key.
-            # Once the real torrent hash is stored, later checks use the hash.
-            item.qbit_tag = ""
-    else:
-        item.status = "error"
-        item.reason = f"{result.message}（已尝试 {attempt + 1} 次）"
-        item.rename_status = "error"
+        ),
+    )
+    send_notification(
+        db,
+        "download_started",
+        f"开始下载：{subscription.name}",
+        f"第 {item.episode or '?'} 集已在 qBittorrent 中确认。\n{item.title}",
+        subscription=subscription,
+        item=item,
+    )
+    if getattr(result, "tag_removed", False):
+        # qBittorrent tags are used only as a short-lived correlation key.
+        # Once the real torrent hash is stored, later checks use the hash.
+        item.qbit_tag = ""
+
+
+def _handle_failed_push(
+    db: Session, item: FeedItem, subscription: Subscription, result: DownloaderResult, attempts_used: int
+) -> None:
+    item.status = "error"
+    item.reason = f"{result.message}（已尝试 {attempts_used} 次）"
+    item.rename_status = "error"
+    item.rename_message = item.reason
+    add_log(
+        db,
+        "ERROR",
+        f"最终未能推送到下载器：{subscription.name}",
+        _download_log_details(item, subscription, extra=item.reason),
+    )
+    send_notification(
+        db,
+        "rss_error",
+        f"下载任务推送失败：{subscription.name}",
+        f"{item.title}\n{item.reason}",
+        subscription=subscription,
+        item=item,
+    )
+
+
+def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> tuple[bool, str]:
+    preferences = load_application_preferences(db)
+    save_path = item.save_path or render_save_path(subscription, item.episode, db)
+    desired_name = (
+        render_desired_name(subscription, item.episode)
+        if subscription.rename_enabled and item.episode
+        else ""
+    )
+    item.save_path = save_path
+    item.desired_name = desired_name
+    item.qbit_tag = item.qbit_tag or f"feeddock-item-{item.id}"
+    item.scrape_status, item.scrape_message = _pending_scrape_state(db, subscription)
+    add_log(
+        db,
+        "INFO",
+        f"准备推送到下载器：{subscription.name}",
+        _download_log_details(
+            item, subscription, save_path=save_path, desired_name=desired_name,
+            extra=f"下载器：qBittorrent；最多尝试 {preferences.download.retry_count + 1} 次",
+        ),
+    )
+
+    existing_video = _existing_video_matches(item, subscription, db)
+    if existing_video is not None:
+        item.status = "skipped"
+        item.reason = f"媒体目录已存在目标视频：{existing_video.name}"
+        item.rename_status = "skipped"
         item.rename_message = item.reason
         add_log(
             db,
-            "ERROR",
-            f"最终未能推送到下载器：{subscription.name}",
+            "INFO",
+            f"跳过下载器推送：{subscription.name}",
             _download_log_details(item, subscription, extra=item.reason),
         )
-        send_notification(
-            db,
-            "rss_error",
-            f"下载任务推送失败：{subscription.name}",
-            f"{item.title}\n{item.reason}",
-            subscription=subscription,
-            item=item,
-        )
+        return True, item.reason
+
+    client = QBittorrentClient(timeout=preferences.rss.timeout_seconds)
+    if _check_concurrent_limit(db, client, item, subscription, preferences):
+        return True, item.reason
+
+    result, attempts_used = _execute_download_push(
+        db, client, item, subscription, save_path, desired_name, preferences
+    )
+    if result.ok:
+        _handle_successful_push(db, item, subscription, result, attempts_used)
+    else:
+        _handle_failed_push(db, item, subscription, result, attempts_used)
     return result.ok, item.reason
 
 
