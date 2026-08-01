@@ -18,6 +18,15 @@ from .runtime_config import MetadataConfig, load_metadata_config
 
 
 @dataclass(slots=True)
+class MetadataFetchArgs:
+    metadata_id: int
+    media_type: str = "tv"
+    season: int = 1
+    season_mode: str = "title"
+    query_title: str = ""
+
+
+@dataclass(slots=True)
 class MetadataCandidate:
     provider: str
     id: int
@@ -244,7 +253,14 @@ class MetadataService:
         config = load_metadata_config(db)
         provider = provider.strip().lower()
         if provider == "tmdb":
-            return self._get_tmdb(db, config, metadata_id, media_type, season, season_mode, query_title)
+            args = MetadataFetchArgs(
+                metadata_id=metadata_id,
+                media_type=media_type,
+                season=season,
+                season_mode=season_mode,
+                query_title=query_title,
+            )
+            return self._get_tmdb(db, config, args)
         if provider == "bangumi":
             return self._get_bangumi(db, config, metadata_id, season)
         if provider == "anilist":
@@ -442,14 +458,13 @@ class MetadataService:
         return self._latest_tmdb_season(rows)
 
     def _get_tmdb(
-        self, db: Session, config: MetadataConfig, metadata_id: int, media_type: str,
-        season: int, season_mode: str, query_title: str,
+        self, db: Session, config: MetadataConfig, args: MetadataFetchArgs
     ) -> MetadataRecord:
         if not config.tmdb_read_access_token:
             raise ValueError("尚未配置 TMDB API Key 或 Read Access Token")
-        kind = "movie" if media_type == "movie" else "tv"
+        kind = "movie" if args.media_type == "movie" else "tv"
         headers, auth_params = self._tmdb_auth(config.tmdb_read_access_token)
-        detail_url = f"{_tmdb_api_root(config)}/{kind}/{metadata_id}"
+        detail_url = f"{_tmdb_api_root(config)}/{kind}/{args.metadata_id}"
         with external_client(detail_url, db=db, timeout=self.timeout) as client:
             detail_response = client.get(
                 detail_url, params={"language": config.language, **auth_params}, headers=headers
@@ -457,10 +472,12 @@ class MetadataService:
             detail_response.raise_for_status()
             detail = detail_response.json()
             rows = self._available_tmdb_seasons(detail) if kind == "tv" else []
-            resolved_season = self._resolve_tmdb_season(rows, season, season_mode, query_title) if kind == "tv" else 1
+            resolved_season = self._resolve_tmdb_season(
+                rows, args.season, args.season_mode, args.query_title
+            ) if kind == "tv" else 1
             season_detail: dict[str, Any] = {}
             if kind == "tv":
-                season_url = f"{_tmdb_api_root(config)}/tv/{metadata_id}/season/{resolved_season}"
+                season_url = f"{_tmdb_api_root(config)}/tv/{args.metadata_id}/season/{resolved_season}"
                 response = client.get(season_url, params={"language": config.language, **auth_params}, headers=headers)
                 if response.status_code == 200:
                     season_detail = response.json()
@@ -489,11 +506,11 @@ class MetadataService:
             or date_value
         )
         return MetadataRecord(
-            provider="tmdb", id=metadata_id, media_type=kind, title=title or original,
+            provider="tmdb", id=args.metadata_id, media_type=kind, title=title or original,
             original_title=original, year=year, overview=str(detail.get("overview") or "").strip(),
             poster_url=(f"{_tmdb_image_root(config)}/original{poster_path}" if poster_path else ""),
             backdrop_url=(f"{_tmdb_image_root(config)}/original{backdrop_path}" if backdrop_path else ""),
-            detail_url=f"https://www.themoviedb.org/{kind}/{metadata_id}", total_episodes=total,
+            detail_url=f"https://www.themoviedb.org/{kind}/{args.metadata_id}", total_episodes=total,
             season=resolved_season, air_date=selected_air_date[:10], available_seasons=rows,
             recommended_season=resolved_season, rating=round(float(detail.get("vote_average") or 0.0), 2),
         )
