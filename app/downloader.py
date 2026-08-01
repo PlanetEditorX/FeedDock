@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import posixpath
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -22,6 +24,15 @@ class DownloaderResult:
     torrent_name: str = ""
     verified: bool = False
     tag_removed: bool = False
+    retryable: bool = True
+
+
+@dataclass(slots=True)
+class _AddResponseOutcome:
+    accepted: bool
+    message: str
+    torrent_ids: tuple[str, ...] = ()
+    retryable: bool = True
 
 
 @dataclass(slots=True)
@@ -200,67 +211,317 @@ class QBittorrentClient:
         return fields
 
     @staticmethod
-    def _response_error(response: httpx.Response) -> str:
-        if not 200 <= response.status_code < 300:
-            return f"添加任务失败：HTTP {response.status_code}"
+    def _add_response_outcome(response: httpx.Response) -> _AddResponseOutcome:
+        """Normalize legacy and WebAPI 2.14+ torrent-add responses."""
+
+        status = response.status_code
         body = response.text.strip()
-        if body not in {"Ok.", ""}:
-            return f"添加任务失败：{body}"
-        return ""
+        payload: Any = None
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            payload = None
+
+        if isinstance(payload, dict) and any(
+            key in payload
+            for key in ("success_count", "pending_count", "failure_count", "added_torrent_ids")
+        ):
+            def _count(key: str) -> int:
+                try:
+                    return max(0, int(payload.get(key, 0) or 0))
+                except (TypeError, ValueError):
+                    return 0
+
+            success_count = _count("success_count")
+            pending_count = _count("pending_count")
+            failure_count = _count("failure_count")
+            raw_ids = payload.get("added_torrent_ids") or []
+            if not isinstance(raw_ids, list):
+                raw_ids = []
+            torrent_ids = tuple(
+                str(value).strip().lower() for value in raw_ids if str(value).strip()
+            )
+            counts = (
+                f"成功 {success_count}，等待 {pending_count}，失败 {failure_count}"
+            )
+            if 200 <= status < 300 and (success_count > 0 or pending_count > 0):
+                return _AddResponseOutcome(
+                    True,
+                    f"qBittorrent 已接受添加请求（{counts}）",
+                    torrent_ids=torrent_ids,
+                )
+            if status == 409 or failure_count > 0:
+                return _AddResponseOutcome(
+                    False,
+                    f"添加任务失败：qBittorrent 拒绝了全部任务（HTTP {status}；{counts}）",
+                    torrent_ids=torrent_ids,
+                    retryable=False,
+                )
+
+        if 200 <= status < 300:
+            if body in {"", "Ok."}:
+                return _AddResponseOutcome(True, "qBittorrent 已接受添加请求")
+            return _AddResponseOutcome(
+                False,
+                f"添加任务失败：{body[:500]}",
+                retryable=False,
+            )
+
+        detail = f"；响应：{body[:500]}" if body else ""
+        retryable = status >= 500 or status in {408, 425, 429}
+        return _AddResponseOutcome(
+            False,
+            f"添加任务失败：HTTP {status}{detail}",
+            retryable=retryable,
+        )
+
+    @staticmethod
+    def _bencode_value_end(data: bytes, start: int, *, depth: int = 0) -> int:
+        if depth > 100 or start >= len(data):
+            raise ValueError("无效的种子元数据")
+        marker = data[start : start + 1]
+        if marker == b"i":
+            end = data.find(b"e", start + 1)
+            if end < 0:
+                raise ValueError("无效的整数编码")
+            return end + 1
+        if marker in {b"l", b"d"}:
+            position = start + 1
+            while position < len(data) and data[position : position + 1] != b"e":
+                position = QBittorrentClient._bencode_value_end(
+                    data, position, depth=depth + 1
+                )
+                if marker == b"d":
+                    position = QBittorrentClient._bencode_value_end(
+                        data, position, depth=depth + 1
+                    )
+            if position >= len(data):
+                raise ValueError("无效的列表或字典编码")
+            return position + 1
+        if marker.isdigit():
+            colon = data.find(b":", start)
+            if colon < 0:
+                raise ValueError("无效的字符串编码")
+            try:
+                length = int(data[start:colon])
+            except ValueError as exc:
+                raise ValueError("无效的字符串长度") from exc
+            end = colon + 1 + length
+            if length < 0 or end > len(data):
+                raise ValueError("种子字符串超出数据范围")
+            return end
+        raise ValueError("未知的 bencode 类型")
+
+    @staticmethod
+    def _read_bencoded_string(data: bytes, start: int) -> tuple[bytes, int]:
+        colon = data.find(b":", start)
+        if colon < 0:
+            raise ValueError("无效的字典键")
+        try:
+            length = int(data[start:colon])
+        except ValueError as exc:
+            raise ValueError("无效的字典键长度") from exc
+        value_start = colon + 1
+        value_end = value_start + length
+        if length < 0 or value_end > len(data):
+            raise ValueError("字典键超出数据范围")
+        return data[value_start:value_end], value_end
+
+    @classmethod
+    def _torrent_hash_candidates(cls, content: bytes) -> tuple[str, ...]:
+        """Return possible v1/v2 info hashes without adding a bencode dependency."""
+
+        try:
+            if not content.startswith(b"d"):
+                return ()
+            position = 1
+            info_bytes = b""
+            while position < len(content) and content[position : position + 1] != b"e":
+                key, position = cls._read_bencoded_string(content, position)
+                value_start = position
+                position = cls._bencode_value_end(content, position)
+                if key == b"info":
+                    info_bytes = content[value_start:position]
+                    break
+            if not info_bytes:
+                return ()
+            return (
+                hashlib.sha1(info_bytes).hexdigest(),
+                hashlib.sha256(info_bytes).hexdigest(),
+            )
+        except (ValueError, IndexError):
+            return ()
+
+    @staticmethod
+    def _magnet_hash_candidates(url: str) -> tuple[str, ...]:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() != "magnet":
+            return ()
+        candidates: list[str] = []
+        for xt in parse_qs(parsed.query).get("xt", []):
+            lowered = xt.strip().lower()
+            if lowered.startswith("urn:btih:"):
+                value = xt.rsplit(":", 1)[-1].strip()
+                if len(value) == 40:
+                    try:
+                        bytes.fromhex(value)
+                    except ValueError:
+                        continue
+                    candidates.append(value.lower())
+                elif len(value) == 32:
+                    try:
+                        decoded = base64.b32decode(value.upper())
+                    except (ValueError, base64.binascii.Error):
+                        continue
+                    candidates.append(decoded.hex())
+            elif lowered.startswith("urn:btmh:1220"):
+                value = lowered.removeprefix("urn:btmh:1220")
+                if len(value) == 64:
+                    try:
+                        bytes.fromhex(value)
+                    except ValueError:
+                        continue
+                    candidates.append(value)
+        return tuple(dict.fromkeys(candidates))
+
+    @staticmethod
+    def _result_from_torrent(
+        torrent: dict[str, Any], *, prefix: str = "qBittorrent 已确认任务"
+    ) -> DownloaderResult:
+        torrent_hash = str(torrent.get("hash") or "").strip()
+        torrent_name = str(torrent.get("name") or "").strip()
+        state = str(torrent.get("state") or "").strip()
+        message = prefix
+        if torrent_name:
+            message += f"：{torrent_name}"
+        if state:
+            message += f"；状态：{state}"
+        return DownloaderResult(
+            True,
+            message,
+            torrent_hash=torrent_hash,
+            torrent_name=torrent_name,
+            verified=True,
+        )
+
+    def _find_existing_torrent(
+        self,
+        client: httpx.Client,
+        *,
+        torrent_hashes: Iterable[str] = (),
+        expected_name: str = "",
+    ) -> DownloaderResult | None:
+        hashes = tuple(
+            dict.fromkeys(
+                value.strip().lower() for value in torrent_hashes if value.strip()
+            )
+        )
+        try:
+            if hashes:
+                response = client.get(
+                    "api/v2/torrents/info", params={"hashes": "|".join(hashes)}
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, list) and payload:
+                    by_hash = {
+                        str(item.get("hash") or "").strip().lower(): item
+                        for item in payload
+                        if isinstance(item, dict)
+                    }
+                    for value in hashes:
+                        if value in by_hash:
+                            return self._result_from_torrent(
+                                by_hash[value],
+                                prefix="qBittorrent 中已存在相同任务，已复用",
+                            )
+                    first = next((item for item in payload if isinstance(item, dict)), None)
+                    if first is not None:
+                        return self._result_from_torrent(
+                            first, prefix="qBittorrent 中已存在相同任务，已复用"
+                        )
+
+            normalized_name = safe_segment(expected_name).strip().casefold()
+            if normalized_name:
+                response = client.get("api/v2/torrents/info", params={"filter": "all"})
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, list):
+                    for torrent in payload:
+                        if not isinstance(torrent, dict):
+                            continue
+                        name = str(torrent.get("name") or "").strip()
+                        if name.casefold() == normalized_name:
+                            return self._result_from_torrent(
+                                torrent,
+                                prefix="qBittorrent 中已存在同名任务，已复用",
+                            )
+        except (httpx.HTTPError, ValueError, TypeError):
+            return None
+        return None
 
     def _verify_added_torrent(
         self,
         client: httpx.Client,
         *,
         tag: str,
+        torrent_hashes: Iterable[str] = (),
         attempts: int = 10,
         interval: float = 0.3,
     ) -> DownloaderResult:
-        if not tag:
+        hashes = tuple(
+            dict.fromkeys(
+                value.strip().lower() for value in torrent_hashes if value.strip()
+            )
+        )
+        if not tag and not hashes:
             return DownloaderResult(
                 True,
-                "qBittorrent 已接受添加请求，但缺少任务标签，无法确认任务是否建立",
+                "qBittorrent 已接受添加请求，但缺少任务标识，无法确认任务是否建立",
                 verified=False,
             )
 
         last_error = ""
         for attempt in range(max(1, attempts)):
             try:
-                response = client.get(
-                    "api/v2/torrents/info",
-                    params={"tag": tag, "sort": "added_on", "reverse": "true"},
+                params = (
+                    {"hashes": "|".join(hashes)}
+                    if hashes
+                    else {"tag": tag, "sort": "added_on", "reverse": "true"}
                 )
+                response = client.get("api/v2/torrents/info", params=params)
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, list):
                     last_error = "qBittorrent 返回了无效的任务列表"
                 elif payload:
-                    torrent = payload[0]
-                    torrent_hash = str(torrent.get("hash") or "").strip()
-                    torrent_name = str(torrent.get("name") or "").strip()
-                    state = str(torrent.get("state") or "").strip()
-                    message = "qBittorrent 已确认任务"
-                    if torrent_name:
-                        message += f"：{torrent_name}"
-                    if state:
-                        message += f"；状态：{state}"
-                    return DownloaderResult(
-                        True,
-                        message,
-                        torrent_hash=torrent_hash,
-                        torrent_name=torrent_name,
-                        verified=True,
+                    torrent = next(
+                        (
+                            item
+                            for wanted in hashes
+                            for item in payload
+                            if isinstance(item, dict)
+                            and str(item.get("hash") or "").strip().lower() == wanted
+                        ),
+                        None,
                     )
+                    if torrent is None:
+                        torrent = next(
+                            (item for item in payload if isinstance(item, dict)), None
+                        )
+                    if torrent is not None:
+                        return self._result_from_torrent(torrent)
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 last_error = str(exc)
             if attempt + 1 < attempts:
                 time.sleep(interval)
 
         detail = f"；回查错误：{last_error}" if last_error else ""
+        identifier = f"哈希：{'|'.join(hashes)}" if hashes else f"标签：{tag}"
         return DownloaderResult(
             False,
             "qBittorrent 添加接口返回成功，但未在任务列表中找到新任务"
-            f"（标签：{tag}）{detail}",
+            f"（{identifier}）{detail}",
             verified=False,
         )
 
@@ -304,11 +565,28 @@ class QBittorrentClient:
         *,
         tag: str,
         rename: str,
+        expected_hashes: Iterable[str] = (),
     ) -> DownloaderResult:
-        error = self._response_error(response)
-        if error:
-            return DownloaderResult(False, error)
-        verified = self._verify_added_torrent(client, tag=tag)
+        outcome = self._add_response_outcome(response)
+        hash_candidates = tuple(
+            dict.fromkeys((*outcome.torrent_ids, *tuple(expected_hashes)))
+        )
+        if not outcome.accepted:
+            if response.status_code == 409:
+                existing = self._find_existing_torrent(
+                    client, torrent_hashes=hash_candidates, expected_name=rename
+                )
+                if existing is not None:
+                    existing.retryable = False
+                    existing.tag_removed = True
+                    return existing
+            return DownloaderResult(
+                False, outcome.message, retryable=outcome.retryable
+            )
+
+        verified = self._verify_added_torrent(
+            client, tag=tag, torrent_hashes=hash_candidates
+        )
         if verified.ok and rename and not verified.torrent_name:
             verified.message += f"；请求名称：{safe_segment(rename)}"
         if verified.ok and tag:
@@ -355,7 +633,11 @@ class QBittorrentClient:
                 files["urls"] = (None, url)
                 response = client.post("api/v2/torrents/add", files=files)
                 return self._finish_add(
-                    client, response, tag=tags_value.split(",", 1)[0].strip(), rename=rename
+                    client,
+                    response,
+                    tag=tags_value.split(",", 1)[0].strip(),
+                    rename=rename,
+                    expected_hashes=self._magnet_hash_candidates(url),
                 )
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")
@@ -404,7 +686,11 @@ class QBittorrentClient:
                     },
                 )
                 return self._finish_add(
-                    client, response, tag=tags_value.split(",", 1)[0].strip(), rename=rename
+                    client,
+                    response,
+                    tag=tags_value.split(",", 1)[0].strip(),
+                    rename=rename,
+                    expected_hashes=self._torrent_hash_candidates(content),
                 )
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"请求 qBittorrent 失败：{exc}")

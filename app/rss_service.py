@@ -596,6 +596,8 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
             result = DownloaderResult(False, "qBittorrent 未返回可验证的任务记录")
         if result.ok:
             break
+        if not getattr(result, "retryable", True):
+            break
         if attempt + 1 < attempts:
             add_log(
                 db,
@@ -640,7 +642,7 @@ def _push_feed_item(db: Session, item: FeedItem, subscription: Subscription) -> 
             item.qbit_tag = ""
     else:
         item.status = "error"
-        item.reason = f"{result.message}（已尝试 {attempts} 次）"
+        item.reason = f"{result.message}（已尝试 {attempt + 1} 次）"
         item.rename_status = "error"
         item.rename_message = item.reason
         add_log(
@@ -945,7 +947,14 @@ def refresh_subscription(
     """Refresh one subscription, used after creation and by future targeted actions."""
 
     created_trigger = trigger == "subscription-created"
-    operation_label = "新订阅自动刷新" if created_trigger else "订阅刷新"
+    trial_started_trigger = trigger == "trial-started"
+    operation_label = (
+        "新订阅自动刷新"
+        if created_trigger
+        else "试看启动刷新"
+        if trial_started_trigger
+        else "订阅刷新"
+    )
     acquired = _refresh_lock.acquire(timeout=300)
     if not acquired:
         with SessionLocal() as db:

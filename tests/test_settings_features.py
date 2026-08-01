@@ -372,6 +372,120 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("未在任务列表中找到", result.message)
 
+    def test_qbittorrent_accepts_webapi_214_add_json(self):
+        class JsonResponse(_FakeHttpResponse):
+            def __init__(self, status_code, payload):
+                super().__init__(payload)
+                self.status_code = status_code
+                self.text = (
+                    '{"success_count":1,"pending_count":0,"failure_count":0,'
+                    '"added_torrent_ids":["modern-hash"]}'
+                )
+
+        class JsonClient(_FakeQbitHttpClient):
+            def post(self, path, data=None, files=None):
+                self.posts.append((path, data, files))
+                if path.endswith("torrents/add"):
+                    return JsonResponse(200, {
+                        "success_count": 1,
+                        "pending_count": 0,
+                        "failure_count": 0,
+                        "added_torrent_ids": ["modern-hash"],
+                    })
+                return _FakeHttpResponse()
+
+        fake = JsonClient([{"hash": "modern-hash", "name": "Episode 04", "state": "downloading"}])
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with patch.object(client, "_client", return_value=fake), patch.object(client, "_login", return_value=DownloaderResult(True, "ok")):
+            result = client.add_torrent(
+                b"d4:infod4:name4:demoee",
+                "episode-04.torrent",
+                "/media/Demo",
+                tags="feeddock-item-modern",
+            )
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.torrent_hash, "modern-hash")
+
+    def test_qbittorrent_409_reuses_existing_torrent_by_info_hash(self):
+        content = b"d4:infod4:name4:demoee"
+        expected_hash = QBittorrentClient._torrent_hash_candidates(content)[0]
+
+        class ConflictResponse(_FakeHttpResponse):
+            status_code = 409
+            text = '{"success_count":0,"pending_count":0,"failure_count":1,"added_torrent_ids":[]}'
+
+            def __init__(self):
+                super().__init__({
+                    "success_count": 0,
+                    "pending_count": 0,
+                    "failure_count": 1,
+                    "added_torrent_ids": [],
+                })
+
+        class ConflictClient(_FakeQbitHttpClient):
+            def post(self, path, data=None, files=None):
+                self.posts.append((path, data, files))
+                if path.endswith("torrents/add"):
+                    return ConflictResponse()
+                return _FakeHttpResponse()
+
+            def get(self, path, params=None):
+                if path.endswith("torrents/info") and expected_hash in str((params or {}).get("hashes", "")):
+                    return _FakeHttpResponse([{
+                        "hash": expected_hash,
+                        "name": "Demo - S01E04",
+                        "state": "downloading",
+                    }])
+                return _FakeHttpResponse([])
+
+        fake = ConflictClient()
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with patch.object(client, "_client", return_value=fake), patch.object(client, "_login", return_value=DownloaderResult(True, "ok")):
+            result = client.add_torrent(
+                content,
+                "episode-04.torrent",
+                "/media/Demo",
+                rename="Demo - S01E04",
+                tags="feeddock-item-conflict",
+            )
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.torrent_hash, expected_hash)
+        self.assertIn("已存在相同任务", result.message)
+        self.assertTrue(result.tag_removed)
+
+    def test_qbittorrent_409_reports_counts_and_is_not_retryable(self):
+        class ConflictResponse(_FakeHttpResponse):
+            status_code = 409
+            text = '{"success_count":0,"pending_count":0,"failure_count":1,"added_torrent_ids":[]}'
+
+            def __init__(self):
+                super().__init__({
+                    "success_count": 0,
+                    "pending_count": 0,
+                    "failure_count": 1,
+                    "added_torrent_ids": [],
+                })
+
+        class ConflictClient(_FakeQbitHttpClient):
+            def post(self, path, data=None, files=None):
+                if path.endswith("torrents/add"):
+                    return ConflictResponse()
+                return _FakeHttpResponse()
+
+        fake = ConflictClient([])
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with patch.object(client, "_client", return_value=fake), patch.object(client, "_login", return_value=DownloaderResult(True, "ok")):
+            result = client.add_torrent(
+                b"d4:infod4:name4:demoee",
+                "episode-04.torrent",
+                "/media/Demo",
+                rename="Different name",
+                tags="feeddock-item-conflict",
+            )
+        self.assertFalse(result.ok)
+        self.assertFalse(result.retryable)
+        self.assertIn("成功 0，等待 0，失败 1", result.message)
+
     def test_existing_video_auto_skip_uses_normalized_target_name(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root) / "Demo" / "Season 01"
@@ -528,6 +642,33 @@ class ApplicationSettingsTests(unittest.TestCase):
         details = "\n".join(row.details for row in self.db.query(SystemLog))
         self.assertIn("任务标签：feeddock-item-", details)
         self.assertNotIn("magnet:?", details)
+
+    def test_non_retryable_downloader_failure_is_attempted_once(self):
+        sub = Subscription(name="Conflict", rss_url="https://example.test/rss", rename_enabled=False)
+        self.db.add(sub)
+        self.db.flush()
+        item = FeedItem(
+            subscription_id=sub.id,
+            fingerprint="non-retryable",
+            title="Conflict - 01",
+            download_url="magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+            episode="1",
+        )
+        self.db.add(item)
+        self.db.flush()
+        self.save_preferences(concurrent_limit=0, retry_count=2)
+        calls = []
+        fake = SimpleNamespace(
+            add_url=lambda *_args, **_kwargs: (
+                calls.append(1)
+                or DownloaderResult(False, "添加任务失败：HTTP 409", retryable=False)
+            )
+        )
+        with patch("app.rss_service.QBittorrentClient", return_value=fake):
+            ok, message = _push_feed_item(self.db, item, sub)
+        self.assertFalse(ok)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("已尝试 1 次", message)
 
     def test_http_torrent_is_downloaded_by_feeddock_and_uploaded_to_qbittorrent(self):
         sub = Subscription(name="HTTP torrent", rss_url="https://example.test/rss", rename_enabled=False)

@@ -1891,7 +1891,7 @@ function renderManualTrialMetadataForm() {
         total_episodes: payload.total_episodes,
         air_date: payload.air_date || '',
       }, payload.season, null);
-      showNotice('手动元数据已保存并启动订阅');
+      showNotice('手动元数据已保存，订阅已启动并开始刷新');
     } catch (error) {
       button.disabled = false; button.textContent = '确认手动信息并启动';
       showNotice(error.message, false);
@@ -2019,7 +2019,7 @@ function renderTrialMetadataConfirmation(candidate, detail, inferredSeason) {
       await api(`/api/subscriptions/${subscription.id}/trial/start`, { method: 'POST', body: JSON.stringify(payload) });
       await reloadAll();
       renderTrialStartSuccess(detail, resolvedSeason, resolvedRow);
-      showNotice(`已确认第 ${resolvedSeason} 季并启动订阅`);
+      showNotice(`已确认第 ${resolvedSeason} 季，订阅已启动并开始刷新`);
     } catch (error) {
       confirm.disabled = false; back.disabled = false; confirm.textContent = confirmLabel;
       showNotice(error.message, false);

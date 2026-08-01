@@ -26,7 +26,7 @@ from app.main import (
     update_hidden_anime_preferences,
 )
 from app.settings_config import load_application_preferences, save_application_preferences, save_subscription_sort_preference
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from app.models import AnimePreference, FeedItem, Subscription
 from app.schemas import (
     AnimePreferenceBatchUpdate,
@@ -215,6 +215,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         ))
         self.db.commit()
 
+        background_tasks = BackgroundTasks()
         started = start_trial_subscription(
             subscription.id,
             MetadataApplyRequest(
@@ -224,10 +225,15 @@ class SubscriptionManagementTests(unittest.TestCase):
                 season=1,
                 season_mode="title",
             ),
+            background_tasks,
             self.db,
         )
 
         metadata_service.return_value.apply.assert_called_once()
+        self.assertEqual(len(background_tasks.tasks), 1)
+        refresh_task = background_tasks.tasks[0]
+        self.assertEqual(refresh_task.args, (subscription.id,))
+        self.assertEqual(refresh_task.kwargs, {"trigger": "trial-started"})
         self.assertTrue(started.enabled)
         self.assertEqual(started.subscription_mode, "subscribed")
         self.assertFalse(started.trial_bulk)
@@ -249,6 +255,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.db.add(subscription)
         self.db.commit()
 
+        background_tasks = BackgroundTasks()
         started = start_trial_subscription_manual(
             subscription.id,
             ManualTrialStartRequest(
@@ -261,9 +268,14 @@ class SubscriptionManagementTests(unittest.TestCase):
                 poster_url="",
                 overview="手动简介",
             ),
+            background_tasks,
             self.db,
         )
 
+        self.assertEqual(len(background_tasks.tasks), 1)
+        refresh_task = background_tasks.tasks[0]
+        self.assertEqual(refresh_task.args, (subscription.id,))
+        self.assertEqual(refresh_task.kwargs, {"trigger": "trial-started"})
         self.assertTrue(started.enabled)
         self.assertEqual(started.subscription_mode, "subscribed")
         self.assertEqual(started.name, "手动番剧 (2026)")

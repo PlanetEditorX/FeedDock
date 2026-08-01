@@ -1979,6 +1979,7 @@ def apply_subscription_metadata(
 def start_trial_subscription(
     subscription_id: int,
     payload: MetadataApplyRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
     """Refresh selected metadata, then promote and enable a trial subscription."""
@@ -2012,6 +2013,11 @@ def start_trial_subscription(
         _migrate_started_trial_download(db, subscription)
         db.commit()
         db.refresh(subscription)
+        background_tasks.add_task(
+            refresh_subscription,
+            subscription.id,
+            trigger="trial-started",
+        )
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -2032,6 +2038,7 @@ def start_trial_subscription(
 def start_trial_subscription_manual(
     subscription_id: int,
     payload: ManualTrialStartRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
     """Store user-confirmed metadata, then promote and enable a trial."""
@@ -2084,6 +2091,11 @@ def start_trial_subscription_manual(
         _migrate_started_trial_download(db, subscription)
         db.commit()
         db.refresh(subscription)
+        background_tasks.add_task(
+            refresh_subscription,
+            subscription.id,
+            trigger="trial-started",
+        )
     except HTTPException:
         db.rollback()
         raise
