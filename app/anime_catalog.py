@@ -120,28 +120,9 @@ class AnimeCatalogCacheService:
     def _store(
         self,
         db: Session,
-        key: str,
-        kind: str,
-        params: dict[str, Any],
-        payload: dict[str, Any],
+        entry: MikanCacheEntry,
     ) -> MikanCacheEntry:
-        row = db.get(MikanCacheEntry, key)
-        if row is None:
-            row = MikanCacheEntry(
-                cache_key=key,
-                kind=kind,
-                params_json=_dumps(params),
-                payload_json=_dumps(payload),
-                fetched_at=utcnow(),
-                last_error="",
-            )
-            db.add(row)
-        else:
-            row.kind = kind
-            row.params_json = _dumps(params)
-            row.payload_json = _dumps(payload)
-            row.fetched_at = utcnow()
-            row.last_error = ""
+        row = db.merge(entry)
         db.commit()
         db.refresh(row)
         return row
@@ -187,15 +168,19 @@ class AnimeCatalogCacheService:
             else:
                 entry = self._store(
                     db,
-                    key,
-                    _CATALOG_KIND,
-                    {
-                        "source_id": source_id,
-                        "year": year,
-                        "season": season,
-                        "schema_version": _SCHEMA_VERSION,
-                    },
-                    payload,
+                    MikanCacheEntry(
+                        cache_key=key,
+                        kind=_CATALOG_KIND,
+                        params_json=_dumps({
+                            "source_id": source_id,
+                            "year": year,
+                            "season": season,
+                            "schema_version": _SCHEMA_VERSION,
+                        }),
+                        payload_json=_dumps(payload),
+                        fetched_at=utcnow(),
+                        last_error="",
+                    )
                 )
                 status = "force_refreshed" if force_refresh else "cache_miss_fetched"
         else:
@@ -231,16 +216,20 @@ class AnimeCatalogCacheService:
             else:
                 entry = self._store(
                     db,
-                    key,
-                    _DETAIL_KIND,
-                    {
-                        "source_id": source_id,
-                        "source_anime_id": str(item.get("source_anime_id") or ""),
-                        "subject_id": int(item.get("subject_id") or 0),
-                        "title": str(item.get("title") or ""),
-                        "schema_version": _SCHEMA_VERSION,
-                    },
-                    payload,
+                    MikanCacheEntry(
+                        cache_key=key,
+                        kind=_DETAIL_KIND,
+                        params_json=_dumps({
+                            "source_id": source_id,
+                            "source_anime_id": str(item.get("source_anime_id") or ""),
+                            "subject_id": int(item.get("subject_id") or 0),
+                            "title": str(item.get("title") or ""),
+                            "schema_version": _SCHEMA_VERSION,
+                        }),
+                        payload_json=_dumps(payload),
+                        fetched_at=utcnow(),
+                        last_error="",
+                    )
                 )
                 status = "force_refreshed" if force_refresh else "cache_miss_fetched"
         else:
