@@ -1146,22 +1146,34 @@ def reveal_secret(secret_name: str, db: Session = Depends(get_db)) -> dict[str, 
     return {"value": values[secret_name]}
 
 
+class MetadataSearchQuery:
+    def __init__(
+        self,
+        provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
+        q: str = Query(min_length=1, max_length=300),
+        media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
+        year: int = Query(default=0, ge=0, le=9999),
+        limit: int = Query(default=10, ge=1, le=20),
+    ):
+        self.provider = provider
+        self.q = q
+        self.media_type = media_type
+        self.year = year
+        self.limit = limit
+
+
 @app.get(
     "/api/metadata/search",
     response_model=list[MetadataCandidateOut],
     dependencies=[Depends(require_admin)],
 )
 def search_metadata(
-    provider: str = Query(pattern="^(tmdb|bangumi|anilist)$"),
-    q: str = Query(min_length=1, max_length=300),
-    media_type: str = Query(default="tv", pattern="^(tv|movie)$"),
-    year: int = Query(default=0, ge=0, le=9999),
-    limit: int = Query(default=10, ge=1, le=20),
+    query: MetadataSearchQuery = Depends(),
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     try:
         return MetadataService().search(
-            db, provider=provider, query=q, media_type=media_type, year=year, limit=limit
+            db, provider=query.provider, query=query.q, media_type=query.media_type, year=query.year, limit=query.limit
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
