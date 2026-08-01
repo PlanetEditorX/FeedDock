@@ -140,6 +140,7 @@ from .schemas import (
     MikanCatalogOut,
     MikanTrialRequest,
     MikanWeekdayFilterOut,
+    SourceCatalogDetailQuery,
     MikanWeekdayFilterUpdate,
     ProxySettingsUpdate,
     QBittorrentSettingsUpdate,
@@ -1272,27 +1273,20 @@ def refresh_source_catalog(
 @app.get("/api/discovery/catalog/{source_id}/detail", dependencies=[Depends(require_admin)])
 def source_catalog_detail(
     source_id: str,
-    title: str = Query(min_length=1, max_length=300),
-    subject_id: int = Query(default=0, ge=0),
-    source_anime_id: str = Query(default="", max_length=120),
-    mikan_id: int = Query(default=0, ge=0),
-    original_title: str = Query(default="", max_length=300),
-    english_title: str = Query(default="", max_length=300),
-    aliases: str = Query(default="", max_length=2000),
-    force_refresh: bool = Query(default=False),
+    query: SourceCatalogDetailQuery = Depends(),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     item = {
-        "title": title,
-        "title_original": original_title or title,
-        "title_english": english_title or original_title or title,
-        "subject_id": subject_id,
-        "source_anime_id": source_anime_id,
-        "mikan_id": mikan_id,
-        "aliases": [value.strip() for value in aliases.split("\n") if value.strip()] or [title],
+        "title": query.title,
+        "title_original": query.original_title or query.title,
+        "title_english": query.english_title or query.original_title or query.title,
+        "subject_id": query.subject_id,
+        "source_anime_id": query.source_anime_id,
+        "mikan_id": query.mikan_id,
+        "aliases": [value.strip() for value in query.aliases.split("\n") if value.strip()] or [query.title],
     }
     try:
-        return AnimeCatalogCacheService().detail(db, source_id, item, force_refresh=force_refresh)
+        return AnimeCatalogCacheService().detail(db, source_id, item, force_refresh=query.force_refresh)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
