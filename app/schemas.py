@@ -324,6 +324,7 @@ class FeedItemOut(BaseModel):
     status: str
     reason: str
     save_path: str
+    trial_download_path: str
     desired_name: str
     qbit_tag: str
     torrent_hash: str

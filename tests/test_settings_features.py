@@ -43,10 +43,11 @@ class _FakeHttpResponse:
 
 
 class _FakeQbitHttpClient:
-    def __init__(self, torrents=None) -> None:
+    def __init__(self, torrents=None, torrent_files=None) -> None:
         self.add_files = None
         self.posts = []
         self.torrents = torrents if torrents is not None else []
+        self.torrent_files = torrent_files if torrent_files is not None else []
 
     def __enter__(self): return self
     def __exit__(self, *_args): return False
@@ -60,6 +61,8 @@ class _FakeQbitHttpClient:
     def get(self, path, params=None):
         if path.endswith("torrents/info"):
             return _FakeHttpResponse(self.torrents)
+        if path.endswith("torrents/files"):
+            return _FakeHttpResponse(self.torrent_files)
         return _FakeHttpResponse([])
 
 
@@ -200,6 +203,42 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertTrue(result.verified)
         self.assertEqual(result.torrent_hash, "demo-hash")
         self.assertEqual(fake.add_files["seedingTimeLimit"][1], "120")
+
+    def test_qbittorrent_relocates_trial_video_and_matching_subtitle(self):
+        fake = _FakeQbitHttpClient(
+            torrents=[{"hash": "demo-hash", "save_path": "/media/试看"}],
+            torrent_files=[
+                {"name": "Trial - S01E01.mkv"},
+                {"name": "Trial - S01E01.zh-CN.ass"},
+            ],
+        )
+        client = QBittorrentClient(base_url="http://qbit.test", username="u", password="p")
+        with (
+            patch.object(client, "_client", return_value=fake),
+            patch.object(client, "_login", return_value=DownloaderResult(True, "ok")),
+        ):
+            result = client.relocate_single_video(
+                torrent_hash="demo-hash",
+                target_save_path="/media/Formal/Season 01",
+                desired_name="Formal - S01E01",
+            )
+
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.moved)
+        self.assertEqual(result.download_path, "/media/Formal/Season 01/Formal - S01E01.mkv")
+        posted = [(path, data) for path, data, _files in fake.posts]
+        self.assertIn((
+            "api/v2/torrents/renameFile",
+            {"hash": "demo-hash", "oldPath": "Trial - S01E01.mkv", "newPath": "Formal - S01E01.mkv"},
+        ), posted)
+        self.assertIn((
+            "api/v2/torrents/renameFile",
+            {"hash": "demo-hash", "oldPath": "Trial - S01E01.zh-CN.ass", "newPath": "Formal - S01E01.zh-CN.ass"},
+        ), posted)
+        self.assertIn((
+            "api/v2/torrents/setLocation",
+            {"hashes": "demo-hash", "location": "/media/Formal/Season 01"},
+        ), posted)
 
     def test_qbittorrent_record_cleanup_never_deletes_downloaded_files(self):
         fake = _FakeQbitHttpClient()

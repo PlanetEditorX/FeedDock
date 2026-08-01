@@ -42,6 +42,16 @@ class TorrentNormalizeResult:
     progress: int = 0
     completed_at: datetime | None = None
     media_filename: str = ""
+    download_path: str = ""
+
+
+@dataclass(slots=True)
+class TorrentRelocateResult:
+    ok: bool
+    found: bool
+    moved: bool
+    message: str
+    download_path: str = ""
 
 
 class QBittorrentClient:
@@ -548,6 +558,139 @@ class QBittorrentClient:
         except httpx.HTTPError as exc:
             return DownloaderResult(False, f"添加 Tracker 请求失败：{exc}")
 
+    def relocate_single_video(
+        self,
+        *,
+        torrent_hash: str,
+        target_save_path: str,
+        desired_name: str,
+    ) -> TorrentRelocateResult:
+        """Rename one video torrent and move it to a new qBittorrent location."""
+
+        error = self._configuration_error()
+        if error:
+            return TorrentRelocateResult(False, False, False, error)
+        normalized_hash = str(torrent_hash or "").strip()
+        if not normalized_hash:
+            return TorrentRelocateResult(False, False, False, "任务哈希为空")
+        target_location = posixpath.normpath("/" + str(target_save_path or "").lstrip("/"))
+        try:
+            with self._client() as client:
+                login = self._login(client)
+                if not login.ok:
+                    return TorrentRelocateResult(False, False, False, login.message)
+                torrents_response = client.get(
+                    "api/v2/torrents/info", params={"hashes": normalized_hash}
+                )
+                torrents_response.raise_for_status()
+                torrents = torrents_response.json()
+                if not isinstance(torrents, list) or not torrents:
+                    return TorrentRelocateResult(False, False, False, "qBittorrent 中已找不到试看任务")
+                torrent = torrents[0]
+                resolved_hash = str(torrent.get("hash") or normalized_hash).strip()
+                current_location = posixpath.normpath(
+                    "/" + str(torrent.get("save_path") or "").lstrip("/")
+                )
+
+                files_response = client.get(
+                    "api/v2/torrents/files", params={"hash": resolved_hash}
+                )
+                files_response.raise_for_status()
+                files = files_response.json()
+                if not isinstance(files, list) or not files:
+                    return TorrentRelocateResult(False, True, False, "试看任务尚未取得文件列表")
+                videos = [file for file in files if is_video_file(str(file.get("name") or ""))]
+                if len(videos) != 1:
+                    return TorrentRelocateResult(
+                        False,
+                        True,
+                        False,
+                        f"试看任务包含 {len(videos)} 个视频文件，无法自动迁移",
+                    )
+
+                video_path = str(videos[0].get("name") or "")
+                directory, filename = posixpath.split(video_path)
+                old_stem, extension = posixpath.splitext(filename)
+                target_stem = safe_segment(desired_name)
+                new_video_path = posixpath.join(directory, target_stem + extension)
+                renamed = False
+                if video_path != new_video_path:
+                    response = client.post(
+                        "api/v2/torrents/renameFile",
+                        data={
+                            "hash": resolved_hash,
+                            "oldPath": video_path,
+                            "newPath": new_video_path,
+                        },
+                    )
+                    if response.status_code != 200:
+                        return TorrentRelocateResult(
+                            False,
+                            True,
+                            False,
+                            f"试看视频重命名失败：HTTP {response.status_code}",
+                        )
+                    renamed = True
+
+                subtitle_count = 0
+                for file in files:
+                    subtitle_path = str(file.get("name") or "")
+                    if not is_subtitle_file(subtitle_path):
+                        continue
+                    subtitle_dir, subtitle_filename = posixpath.split(subtitle_path)
+                    if subtitle_dir != directory:
+                        continue
+                    subtitle_stem, subtitle_ext = posixpath.splitext(subtitle_filename)
+                    if not subtitle_stem.startswith(old_stem):
+                        continue
+                    suffix = subtitle_stem[len(old_stem) :]
+                    new_subtitle_path = posixpath.join(
+                        subtitle_dir, target_stem + suffix + subtitle_ext
+                    )
+                    if subtitle_path == new_subtitle_path:
+                        continue
+                    response = client.post(
+                        "api/v2/torrents/renameFile",
+                        data={
+                            "hash": resolved_hash,
+                            "oldPath": subtitle_path,
+                            "newPath": new_subtitle_path,
+                        },
+                    )
+                    if response.status_code == 200:
+                        subtitle_count += 1
+
+                relocated = current_location != target_location
+                if relocated:
+                    response = client.post(
+                        "api/v2/torrents/setLocation",
+                        data={"hashes": resolved_hash, "location": target_location},
+                    )
+                    if response.status_code != 200:
+                        current_path = posixpath.join(current_location, new_video_path)
+                        return TorrentRelocateResult(
+                            False,
+                            True,
+                            renamed,
+                            f"试看文件移动失败：HTTP {response.status_code}",
+                            current_path,
+                        )
+
+                final_path = posixpath.join(target_location, new_video_path)
+                actions = []
+                if renamed:
+                    actions.append(f"重命名为 {posixpath.basename(new_video_path)}")
+                if subtitle_count:
+                    actions.append(f"同步重命名 {subtitle_count} 个字幕")
+                if relocated:
+                    actions.append(f"移动到 {target_location}")
+                message = "试看文件已" + "，".join(actions) if actions else "试看文件已在目标位置"
+                return TorrentRelocateResult(
+                    True, True, renamed or relocated, message, final_path
+                )
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            return TorrentRelocateResult(False, False, False, f"试看文件迁移请求失败：{exc}")
+
     def normalize_single_video(
         self,
         *,
@@ -586,6 +729,9 @@ class QBittorrentClient:
                     reverse=True,
                 )[0]
                 resolved_hash = str(torrent.get("hash") or "")
+                torrent_save_path = posixpath.normpath(
+                    "/" + str(torrent.get("save_path") or "").lstrip("/")
+                )
                 if not resolved_hash:
                     return TorrentNormalizeResult(False, "pending", "等待 qBittorrent 返回任务哈希")
 
@@ -643,7 +789,9 @@ class QBittorrentClient:
 
                 rename_message = ""
                 manual_required = False
-                media_filename = posixpath.basename(str(videos[0].get("name") or ""))
+                initial_video_path = str(videos[0].get("name") or "")
+                media_filename = posixpath.basename(initial_video_path)
+                media_download_path = posixpath.join(torrent_save_path, initial_video_path)
                 if desired_name:
                     if len(videos) > 1:
                         manual_required = True
@@ -702,6 +850,7 @@ class QBittorrentClient:
                                 subtitle_count += 1
 
                         media_filename = target_stem + extension
+                        media_download_path = posixpath.join(torrent_save_path, new_video_path)
                         rename_message = f"已规范化为 {media_filename}"
                         if subtitle_count:
                             rename_message += f"，并同步重命名 {subtitle_count} 个字幕"
@@ -720,13 +869,22 @@ class QBittorrentClient:
                         100,
                         completed_at,
                         media_filename,
+                        media_download_path,
                     )
 
                 state = "manual_required_waiting" if manual_required else "waiting_completion"
                 message = rename_message or "任务已建立"
                 message += f"；等待下载完成（{progress}%）"
                 return TorrentNormalizeResult(
-                    True, state, message, resolved_hash, False, progress, None, media_filename
+                    True,
+                    state,
+                    message,
+                    resolved_hash,
+                    False,
+                    progress,
+                    None,
+                    media_filename,
+                    media_download_path,
                 )
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             return TorrentNormalizeResult(False, "error", f"重命名或完成状态检查失败：{exc}")

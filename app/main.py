@@ -67,6 +67,7 @@ from .trial import (
     TRIAL_SKIP_REASON,
     select_trial_preset,
 )
+from .trial_migration import promote_trial_download
 from .subscription_sources import (
     classify_subscription_source,
     get_subscription_source,
@@ -298,6 +299,21 @@ def _clear_trial_only_skips(db: Session, subscription: Subscription, values: dic
     )
     return int(result.rowcount or 0)
 
+
+
+def _migrate_started_trial_download(db: Session, subscription: Subscription) -> None:
+    """Best-effort migration of the watched episode after trial promotion."""
+
+    result = promote_trial_download(db, subscription)
+    if not result.found:
+        return
+    level = "INFO" if result.moved or "目标位置" in result.message else "WARNING"
+    details = (
+        f"订阅 ID：{subscription.id}\n条目 ID：{result.item_id}\n"
+        f"原试看路径：{result.source_path or '未记录'}\n"
+        f"目标路径：{result.target_path or '未迁移'}\n结果：{result.message}"
+    )
+    add_log(db, level, f"试看文件迁移：{subscription.name}", details)
 
 
 def _apply_mikan_hidden_filters(
@@ -1798,8 +1814,7 @@ def batch_subscriptions(
     hidden = 0
     if payload.action == "delete":
         for subscription in subscriptions:
-            if subscription.subscription_mode != "trial":
-                hidden += int(_hide_deleted_subscription(db, subscription))
+            hidden += int(_hide_deleted_subscription(db, subscription))
             db.delete(subscription)
     else:
         enabled = payload.action == "enable"
@@ -1990,6 +2005,7 @@ def start_trial_subscription(
         reset_monitor_state_for_changes(subscription, values)
         for key, value in values.items():
             setattr(subscription, key, value)
+        _migrate_started_trial_download(db, subscription)
         db.commit()
         db.refresh(subscription)
     except ValueError as exc:
@@ -2061,6 +2077,7 @@ def start_trial_subscription_manual(
         reset_monitor_state_for_changes(subscription, values)
         for key, value in values.items():
             setattr(subscription, key, value)
+        _migrate_started_trial_download(db, subscription)
         db.commit()
         db.refresh(subscription)
     except HTTPException:
@@ -2102,11 +2119,7 @@ def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> 
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    hidden = (
-        False
-        if subscription.subscription_mode == "trial"
-        else _hide_deleted_subscription(db, subscription)
-    )
+    hidden = _hide_deleted_subscription(db, subscription)
     db.delete(subscription)
     db.commit()
     return {"ok": True, "hidden": hidden}

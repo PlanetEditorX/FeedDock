@@ -156,6 +156,7 @@ class FeedItem(Base):
     status: Mapped[str] = mapped_column(String(32), default="discovered", nullable=False)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     save_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    trial_download_path: Mapped[str] = mapped_column(Text, default="", nullable=False)
     desired_name: Mapped[str] = mapped_column(Text, default="", nullable=False)
     qbit_tag: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     torrent_hash: Mapped[str] = mapped_column(String(80), default="", nullable=False)

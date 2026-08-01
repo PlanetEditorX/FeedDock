@@ -888,6 +888,8 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
             continue
 
         item.save_path = render_save_path(subscription, candidate["episode"], db)
+        if subscription.subscription_mode == "trial":
+            item.trial_download_path = item.save_path
         desired_name = (render_desired_name(subscription, candidate["episode"])
                         if subscription.rename_enabled and candidate["episode"] else "")
         item.desired_name = desired_name

@@ -242,7 +242,9 @@ class RSSServiceTests(unittest.TestCase):
             subscription = db.get(Subscription, subscription_id)
             self.assertFalse(subscription.enabled)
             self.assertEqual(subscription.subscription_mode, "trial")
-            self.assertEqual(db.query(FeedItem).one().status, "queued")
+            item = db.query(FeedItem).one()
+            self.assertEqual(item.status, "queued")
+            self.assertEqual(item.trial_download_path, item.save_path)
         engine.dispose()
 
 

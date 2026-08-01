@@ -176,7 +176,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.db.get(Subscription, subscription.id).subscription_mode, "trial")
 
-    def test_deleted_trial_is_not_hidden_from_catalog(self) -> None:
+    def test_deleted_trial_is_hidden_from_catalog(self) -> None:
         subscription = Subscription(
             name="试看动画",
             reference_title="试看动画",
@@ -189,8 +189,10 @@ class SubscriptionManagementTests(unittest.TestCase):
 
         result = delete_subscription(subscription.id, self.db)
 
-        self.assertEqual(result, {"ok": True, "hidden": False})
-        self.assertEqual(list(self.db.scalars(select(AnimePreference))), [])
+        self.assertEqual(result, {"ok": True, "hidden": True})
+        preferences = list(self.db.scalars(select(AnimePreference)))
+        self.assertEqual(len(preferences), 1)
+        self.assertTrue(hidden_for_item({"title": "试看动画"}, preferences))
 
     @patch("app.main.MetadataService")
     def test_starting_trial_requires_selected_metadata_and_refreshes_it(self, metadata_service) -> None:

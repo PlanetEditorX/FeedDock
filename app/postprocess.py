@@ -151,6 +151,12 @@ def normalize_pending_items(db: Session | None = None, *, limit: int = 50, allow
             item.rename_status = result.state
             item.rename_message = result.message[:2000]
             item.download_progress = max(0, min(100, int(result.progress or 0)))
+            if (
+                result.download_path
+                and item.trial_download_path
+                and item.trial_download_path == item.save_path
+            ):
+                item.trial_download_path = result.download_path
 
             created_at = item.created_at
             if created_at.tzinfo is None:

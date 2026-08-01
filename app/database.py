@@ -84,6 +84,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
 }
 
 _FEED_ITEM_COLUMNS: dict[str, str] = {
+    "trial_download_path": "TEXT NOT NULL DEFAULT ''",
     "desired_name": "TEXT NOT NULL DEFAULT ''",
     "qbit_tag": "VARCHAR(120) NOT NULL DEFAULT ''",
     "torrent_hash": "VARCHAR(80) NOT NULL DEFAULT ''",
