@@ -154,8 +154,11 @@ class MetadataService:
     def _normalized(value: str) -> str:
         return re.sub(r"[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+", "", (value or "").casefold())
 
-    def _score(self, query: str, title: str, original_title: str, year: int, wanted_year: int) -> float:
+    def _score(self, query: str, candidate_obj: MetadataCandidate, wanted_year: int) -> float:
         normalized_query = self._normalized(query)
+        title = _METADATA_YEAR_SUFFIX.sub("", candidate_obj.title)
+        original_title = candidate_obj.original_title
+        year = candidate_obj.year
         candidates = [self._normalized(title), self._normalized(original_title)]
         similarity = max(
             (SequenceMatcher(None, normalized_query, candidate).ratio() for candidate in candidates if candidate),
@@ -221,9 +224,7 @@ class MetadataService:
             for candidate in candidates:
                 candidate.score = self._score(
                     search_query,
-                    _METADATA_YEAR_SUFFIX.sub("", candidate.title),
-                    candidate.original_title,
-                    candidate.year,
+                    candidate,
                     year,
                 )
             candidates.sort(key=lambda item: item.score, reverse=True)
