@@ -1022,6 +1022,93 @@ class QBittorrentClient:
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             return TorrentRelocateResult(False, False, False, f"试看文件迁移请求失败：{exc}")
 
+    @staticmethod
+    def _rename_single_video_and_subtitles(
+        client: httpx.Client,
+        *,
+        resolved_hash: str,
+        files: list,
+        videos: list,
+        torrent_save_path: str,
+        desired_name: str,
+        initial_video_path: str,
+        completed: bool,
+        progress: int,
+    ) -> tuple[TorrentNormalizeResult | None, bool, str, str, str]:
+        media_filename = posixpath.basename(initial_video_path)
+        media_download_path = posixpath.join(torrent_save_path, initial_video_path)
+        manual_required = False
+        rename_message = ""
+
+        if not desired_name:
+            return None, manual_required, rename_message, media_filename, media_download_path
+
+        if len(videos) > 1:
+            manual_required = True
+            rename_message = f"检测到 {len(videos)} 个视频文件，已保留原文件名"
+            return None, manual_required, rename_message, media_filename, media_download_path
+
+        video_path = str(videos[0].get("name") or "")
+        directory, filename = posixpath.split(video_path)
+        old_stem, extension = posixpath.splitext(filename)
+        target_stem = safe_segment(desired_name)
+        new_video_path = posixpath.join(directory, target_stem + extension)
+        if video_path != new_video_path:
+            rename_response = client.post(
+                "api/v2/torrents/renameFile",
+                data={
+                    "hash": resolved_hash,
+                    "oldPath": video_path,
+                    "newPath": new_video_path,
+                },
+            )
+            if not 200 <= rename_response.status_code < 300:
+                error_result = TorrentNormalizeResult(
+                    False,
+                    "error",
+                    f"视频文件重命名失败：HTTP {rename_response.status_code}",
+                    resolved_hash,
+                    completed,
+                    progress,
+                )
+                return error_result, manual_required, rename_message, media_filename, media_download_path
+
+        subtitle_count = 0
+        for file in files:
+            subtitle_path = str(file.get("name") or "")
+            if not is_subtitle_file(subtitle_path):
+                continue
+            subtitle_dir, subtitle_filename = posixpath.split(subtitle_path)
+            if subtitle_dir != directory:
+                continue
+            subtitle_stem, subtitle_ext = posixpath.splitext(subtitle_filename)
+            if not subtitle_stem.startswith(old_stem):
+                continue
+            suffix = subtitle_stem[len(old_stem) :]
+            new_subtitle_path = posixpath.join(
+                subtitle_dir, target_stem + suffix + subtitle_ext
+            )
+            if subtitle_path == new_subtitle_path:
+                continue
+            response = client.post(
+                "api/v2/torrents/renameFile",
+                data={
+                    "hash": resolved_hash,
+                    "oldPath": subtitle_path,
+                    "newPath": new_subtitle_path,
+                },
+            )
+            if 200 <= response.status_code < 300:
+                subtitle_count += 1
+
+        media_filename = target_stem + extension
+        media_download_path = posixpath.join(torrent_save_path, new_video_path)
+        rename_message = f"已规范化为 {media_filename}"
+        if subtitle_count:
+            rename_message += f"，并同步重命名 {subtitle_count} 个字幕"
+
+        return None, manual_required, rename_message, media_filename, media_download_path
+
     def normalize_single_video(
         self,
         *,
@@ -1118,73 +1205,20 @@ class QBittorrentClient:
                         completed_at,
                     )
 
-                rename_message = ""
-                manual_required = False
                 initial_video_path = str(videos[0].get("name") or "")
-                media_filename = posixpath.basename(initial_video_path)
-                media_download_path = posixpath.join(torrent_save_path, initial_video_path)
-                if desired_name:
-                    if len(videos) > 1:
-                        manual_required = True
-                        rename_message = f"检测到 {len(videos)} 个视频文件，已保留原文件名"
-                    else:
-                        video_path = str(videos[0].get("name") or "")
-                        directory, filename = posixpath.split(video_path)
-                        old_stem, extension = posixpath.splitext(filename)
-                        target_stem = safe_segment(desired_name)
-                        new_video_path = posixpath.join(directory, target_stem + extension)
-                        if video_path != new_video_path:
-                            rename_response = client.post(
-                                "api/v2/torrents/renameFile",
-                                data={
-                                    "hash": resolved_hash,
-                                    "oldPath": video_path,
-                                    "newPath": new_video_path,
-                                },
-                            )
-                            if not 200 <= rename_response.status_code < 300:
-                                return TorrentNormalizeResult(
-                                    False,
-                                    "error",
-                                    f"视频文件重命名失败：HTTP {rename_response.status_code}",
-                                    resolved_hash,
-                                    completed,
-                                    progress,
-                                )
-
-                        subtitle_count = 0
-                        for file in files:
-                            subtitle_path = str(file.get("name") or "")
-                            if not is_subtitle_file(subtitle_path):
-                                continue
-                            subtitle_dir, subtitle_filename = posixpath.split(subtitle_path)
-                            if subtitle_dir != directory:
-                                continue
-                            subtitle_stem, subtitle_ext = posixpath.splitext(subtitle_filename)
-                            if not subtitle_stem.startswith(old_stem):
-                                continue
-                            suffix = subtitle_stem[len(old_stem) :]
-                            new_subtitle_path = posixpath.join(
-                                subtitle_dir, target_stem + suffix + subtitle_ext
-                            )
-                            if subtitle_path == new_subtitle_path:
-                                continue
-                            response = client.post(
-                                "api/v2/torrents/renameFile",
-                                data={
-                                    "hash": resolved_hash,
-                                    "oldPath": subtitle_path,
-                                    "newPath": new_subtitle_path,
-                                },
-                            )
-                            if 200 <= response.status_code < 300:
-                                subtitle_count += 1
-
-                        media_filename = target_stem + extension
-                        media_download_path = posixpath.join(torrent_save_path, new_video_path)
-                        rename_message = f"已规范化为 {media_filename}"
-                        if subtitle_count:
-                            rename_message += f"，并同步重命名 {subtitle_count} 个字幕"
+                error_result, manual_required, rename_message, media_filename, media_download_path = self._rename_single_video_and_subtitles(
+                    client,
+                    resolved_hash=resolved_hash,
+                    files=files,
+                    videos=videos,
+                    torrent_save_path=torrent_save_path,
+                    desired_name=desired_name,
+                    initial_video_path=initial_video_path,
+                    completed=completed,
+                    progress=progress,
+                )
+                if error_result:
+                    return error_result
 
                 if completed:
                     state = "manual_required" if manual_required else "completed"
