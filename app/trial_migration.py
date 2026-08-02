@@ -94,7 +94,8 @@ def _move_related_subtitles(source: Path, target: Path) -> int:
     return moved
 
 
-def _remove_empty_trial_directories(start: Path, stop: Path) -> None:
+def _remove_empty_trial_directories(start: Path, stop: Path) -> int:
+    removed = 0
     current = start
     stop = stop.resolve(strict=False)
     while current.resolve(strict=False) != stop and stop in current.resolve(strict=False).parents:
@@ -102,7 +103,25 @@ def _remove_empty_trial_directories(start: Path, stop: Path) -> None:
             current.rmdir()
         except OSError:
             break
+        removed += 1
         current = current.parent
+    return removed
+
+
+def _remove_recorded_trial_directories(
+    recorded_directory: str,
+    *,
+    downloader_root: str,
+    local_root: str,
+) -> int:
+    """Remove an emptied trial save directory without crossing the media root."""
+
+    value = str(recorded_directory or "").strip()
+    if not value:
+        return 0
+    mapped = map_downloader_path_to_local(value, downloader_root, local_root)
+    local_root_path = Path(local_root).expanduser().resolve(strict=False)
+    return _remove_empty_trial_directories(mapped, local_root_path)
 
 
 def promote_trial_download(
@@ -123,6 +142,7 @@ def promote_trial_download(
         return TrialMigrationResult(False, False, "没有找到已推送的试看下载记录")
 
     source_record = str(item.trial_download_path or item.save_path or "").strip()
+    original_save_path = str(item.save_path or "").strip()
     if not item.trial_download_path:
         item.trial_download_path = source_record
 
@@ -138,14 +158,38 @@ def promote_trial_download(
             desired_name=target_name,
         )
         if relocation.ok and relocation.found:
+            cleanup_count = 0
+            if (
+                original_save_path
+                and posixpath.normpath(original_save_path) != posixpath.normpath(target_directory)
+            ):
+                try:
+                    metadata = load_metadata_config(db)
+                    downloader_root = (
+                        getattr(metadata, "downloader_root", "")
+                        or load_qbittorrent_config(db).download_path
+                    )
+                    cleanup_count = _remove_recorded_trial_directories(
+                        original_save_path,
+                        downloader_root=downloader_root,
+                        local_root=metadata.media_local_root,
+                    )
+                except (ValueError, OSError):
+                    # qBittorrent already completed the migration. Empty-folder
+                    # cleanup is best effort and must not roll back promotion.
+                    cleanup_count = 0
+
+            message = relocation.message
+            if cleanup_count:
+                message += f"，并清理 {cleanup_count} 个原位置空目录"
             item.save_path = target_directory
             item.desired_name = target_name
             item.rename_status = "completed" if item.completed_at is not None else "waiting_completion"
-            item.rename_message = relocation.message[:2000]
+            item.rename_message = message[:2000]
             return TrialMigrationResult(
                 True,
                 relocation.moved,
-                relocation.message,
+                item.rename_message,
                 item.id,
                 source_record,
                 relocation.download_path,
@@ -205,11 +249,12 @@ def promote_trial_download(
         original_parent = source.parent
         same_path = source.resolve(strict=False) == target.resolve(strict=False)
         subtitle_count = 0
+        cleanup_count = 0
         if not same_path:
             subtitle_count = _move_related_subtitles(source, target)
             shutil.move(str(source), str(target))
             local_root_path = Path(local_root).expanduser().resolve(strict=False)
-            _remove_empty_trial_directories(original_parent, local_root_path)
+            cleanup_count = _remove_empty_trial_directories(original_parent, local_root_path)
 
         item.save_path = target_directory
         item.desired_name = target_name
@@ -217,6 +262,7 @@ def promote_trial_download(
         item.rename_message = (
             f"试看文件已迁移为 {target.name}"
             + (f"，并同步迁移 {subtitle_count} 个字幕" if subtitle_count else "")
+            + (f"，并清理 {cleanup_count} 个原位置空目录" if cleanup_count else "")
         )[:2000]
         return TrialMigrationResult(
             True,
