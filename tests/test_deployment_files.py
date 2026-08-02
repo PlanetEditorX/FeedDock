@@ -337,7 +337,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("const searchActive = Boolean(String(data.query || '').trim());", script)
         self.assertIn("(editing || searchActive) ? row.items", script)
         self.assertIn("revealHiddenSearchResult: searchActive", script)
-        self.assertIn("已隐藏 · 搜索可见", script)
+        self.assertIn("已隐藏", script)
         self.assertIn("mikan-hidden-search-badge", styles)
 
     def test_subscription_delete_refreshes_catalog_hidden_state(self) -> None:

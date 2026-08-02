@@ -1008,7 +1008,7 @@ function createMikanCard(item, {
   titleRow.className = 'mikan-anime-title-row';
   titleRow.append(text('strong', item.title));
   if (item.subscribed || item.trialed) titleRow.append(text('span', item.subscription_badge || (item.trialed ? '已试看' : '✓ 已订阅'), 'mikan-subscribed-badge'));
-  if (revealHiddenSearchResult && item.hidden) titleRow.append(text('span', '已隐藏 · 搜索可见', 'mikan-hidden-search-badge'));
+  if (revealHiddenSearchResult && item.hidden) titleRow.append(text('span', '已隐藏', 'mikan-hidden-search-badge'));
   info.append(titleRow);
   if (item.update_at) info.append(text('span', item.update_at, 'muted'));
   info.append(text(
