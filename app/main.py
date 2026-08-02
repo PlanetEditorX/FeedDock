@@ -30,7 +30,9 @@ from .anime_identity import (
     decorate_item,
     normalize_title,
     prepare_subscription_identity,
+    subscription_aliases,
     subscription_identity,
+    subscriptions_related,
 )
 from .database import Base, SessionLocal, engine, ensure_schema, get_db
 from .debug_logging import (
@@ -1369,30 +1371,97 @@ def _subscription_preference_title(subscription: Subscription) -> str:
     )
 
 
-def _hide_deleted_subscription(db: Session, subscription: Subscription) -> bool:
-    """Persist a catalog hide preference before deleting a subscription."""
+def _related_subscription_group(
+    db: Session,
+    subscription: Subscription,
+    *,
+    candidates: list[Subscription] | None = None,
+) -> list[Subscription]:
+    """Find the transitive set of subscription rows belonging to one anime."""
 
-    key = subscription_identity(subscription)
+    rows = candidates if candidates is not None else list(db.scalars(select(Subscription)))
+    related: dict[int, Subscription] = {}
+    pending = [subscription]
+    while pending:
+        current = pending.pop()
+        if current.id is None or current.id in related:
+            continue
+        related[current.id] = current
+        for candidate in rows:
+            if candidate.id is None or candidate.id in related:
+                continue
+            if subscriptions_related(current, candidate):
+                pending.append(candidate)
+    return list(related.values())
+
+
+def _hide_deleted_subscriptions(
+    db: Session,
+    subscriptions: list[Subscription],
+    *,
+    preferred: Subscription | None = None,
+) -> bool:
+    """Consolidate one anime into a single hidden preference before deletion."""
+
+    rows = [row for row in subscriptions if row is not None]
+    if not rows:
+        return False
+    preferred = preferred or rows[0]
+
+    identities = {key for row in rows if (key := subscription_identity(row))}
+    aliases = set().union(*(subscription_aliases(row) for row in rows))
+    bangumi_keys = sorted(key for key in identities if key.startswith("bgm:"))
+    key = bangumi_keys[0] if bangumi_keys else subscription_identity(preferred)
+    if not key:
+        key = next(iter(sorted(identities)), "")
     if not key:
         return False
-    title = _subscription_preference_title(subscription)
-    bangumi_id = 0
-    if key.startswith("bgm:"):
+
+    title = _subscription_preference_title(preferred)
+    if not title:
+        title = next((_subscription_preference_title(row) for row in rows if _subscription_preference_title(row)), "")
+    title_normalized = normalize_title(title)
+
+    bangumi_ids: set[int] = set()
+    for identity in identities:
+        if not identity.startswith("bgm:"):
+            continue
         try:
-            bangumi_id = int(key.split(":", 1)[1])
+            bangumi_ids.add(int(identity.split(":", 1)[1]))
         except ValueError:
-            bangumi_id = 0
+            continue
+    bangumi_id = min(bangumi_ids) if bangumi_ids else 0
+
+    matching_preferences = []
+    for preference in db.scalars(select(AnimePreference)).all():
+        if preference.canonical_key in identities:
+            matching_preferences.append(preference)
+        elif preference.bangumi_id > 0 and preference.bangumi_id in bangumi_ids:
+            matching_preferences.append(preference)
+        elif preference.title_normalized and preference.title_normalized in aliases:
+            matching_preferences.append(preference)
+
     row = db.get(AnimePreference, key)
     if row is None:
         row = AnimePreference(canonical_key=key)
         db.add(row)
+    for duplicate in matching_preferences:
+        if duplicate is not row:
+            db.delete(duplicate)
+
     row.hidden = True
     row.bangumi_id = bangumi_id
-    row.title_normalized = normalize_title(title)
+    row.title_normalized = title_normalized
     current_reason = str(row.reason or "").strip()
     if not current_reason or current_reason.startswith(_DELETED_SUBSCRIPTION_REASON_PREFIX):
         row.reason = f"{_DELETED_SUBSCRIPTION_REASON_PREFIX}{title}"
     return True
+
+
+def _hide_deleted_subscription(db: Session, subscription: Subscription) -> bool:
+    """Compatibility wrapper for callers that already resolved one row."""
+
+    return _hide_deleted_subscriptions(db, [subscription], preferred=subscription)
 
 
 def _hidden_preference_title(preference: AnimePreference) -> str:
@@ -1835,10 +1904,21 @@ def batch_subscriptions(
             detail="试看订阅必须逐个选择匹配的元数据后启动",
         )
     hidden = 0
+    affected = len(subscriptions)
     if payload.action == "delete":
+        all_subscriptions = list(db.scalars(select(Subscription)))
+        processed_ids: set[int] = set()
+        delete_rows: dict[int, Subscription] = {}
         for subscription in subscriptions:
-            hidden += int(_hide_deleted_subscription(db, subscription))
+            if subscription.id in processed_ids:
+                continue
+            group = _related_subscription_group(db, subscription, candidates=all_subscriptions)
+            processed_ids.update(row.id for row in group if row.id is not None)
+            delete_rows.update({row.id: row for row in group if row.id is not None})
+            hidden += int(_hide_deleted_subscriptions(db, group, preferred=subscription))
+        for subscription in delete_rows.values():
             db.delete(subscription)
+        affected = len(delete_rows)
     else:
         enabled = payload.action == "enable"
         for subscription in subscriptions:
@@ -1850,7 +1930,7 @@ def batch_subscriptions(
                 )
             subscription.enabled = enabled
     db.commit()
-    return {"action": payload.action, "affected": len(subscriptions), "hidden": hidden}
+    return {"action": payload.action, "affected": affected, "hidden": hidden}
 
 
 @app.post("/api/subscriptions/{subscription_id}/metadata/skip", response_model=SubscriptionOut, dependencies=[Depends(require_admin)])
@@ -2150,14 +2230,16 @@ def sync_subscription_metadata(
 
 
 @app.delete("/api/subscriptions/{subscription_id}", dependencies=[Depends(require_admin)])
-def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+def delete_subscription(subscription_id: int, db: Session = Depends(get_db)) -> dict[str, bool | int]:
     subscription = db.get(Subscription, subscription_id)
     if not subscription:
         raise HTTPException(status_code=404, detail="订阅不存在")
-    hidden = _hide_deleted_subscription(db, subscription)
-    db.delete(subscription)
+    group = _related_subscription_group(db, subscription)
+    hidden = _hide_deleted_subscriptions(db, group, preferred=subscription)
+    for related in group:
+        db.delete(related)
     db.commit()
-    return {"ok": True, "hidden": hidden}
+    return {"ok": True, "hidden": hidden, "deleted": len(group)}
 
 
 @app.get("/api/items", response_model=list[FeedItemOut], dependencies=[Depends(require_admin)])

@@ -83,6 +83,38 @@ def subscription_identity(subscription: Subscription) -> str:
     return ""
 
 
+def subscriptions_related(left: Subscription, right: Subscription) -> bool:
+    """Return whether two subscription rows represent the same anime.
+
+    Deletion uses this broader relation so duplicate RSS groups and cross-source
+    records do not survive after the user removes an anime.
+    """
+
+    if left.id is not None and right.id is not None and left.id == right.id:
+        return True
+
+    left_key = subscription_identity(left)
+    right_key = subscription_identity(right)
+    if left_key and right_key and left_key == right_key:
+        return True
+
+    left_bangumi_id = _subscription_real_bangumi_id(left)
+    right_bangumi_id = _subscription_real_bangumi_id(right)
+    if left_bangumi_id > 0 and left_bangumi_id == right_bangumi_id:
+        return True
+
+    left_source = (left.source_type or classify_subscription_source(left.rss_url)).strip().lower()
+    right_source = (right.source_type or classify_subscription_source(right.rss_url)).strip().lower()
+    left_source_id = str(left.source_anime_id or source_anime_id_from_url(left_source, left.rss_url)).strip()
+    right_source_id = str(right.source_anime_id or source_anime_id_from_url(right_source, right.rss_url)).strip()
+    if left_source and left_source == right_source and left_source_id and left_source_id == right_source_id:
+        return True
+
+    left_aliases = subscription_aliases(left)
+    right_aliases = subscription_aliases(right)
+    return bool(left_aliases and right_aliases and not left_aliases.isdisjoint(right_aliases))
+
+
 def item_aliases(item: dict[str, Any]) -> set[str]:
     values: list[str] = []
     for key in ("title", "title_original", "title_english", "name"):

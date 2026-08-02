@@ -145,7 +145,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.db.commit()
 
         result = delete_subscription(subscription.id, self.db)
-        self.assertEqual(result, {"ok": True, "hidden": True})
+        self.assertEqual(result, {"ok": True, "hidden": True, "deleted": 1})
         preferences = list(self.db.scalars(select(AnimePreference)))
         self.assertEqual(len(preferences), 1)
         self.assertTrue(hidden_for_item({"title": "示例动画"}, preferences))
@@ -165,6 +165,50 @@ class SubscriptionManagementTests(unittest.TestCase):
         )
         self.assertEqual(restored, {"updated": 1, "hidden": 0})
         self.assertEqual(list(self.db.scalars(select(AnimePreference))), [])
+
+    def test_deleting_subscription_removes_all_related_records_and_hides_once(self) -> None:
+        primary = Subscription(
+            name="示例动画",
+            reference_title="示例动画",
+            source_type="mikan",
+            source_anime_id="9001",
+            canonical_key=title_key("示例动画"),
+            rss_url="https://mikanani.me/RSS/Bangumi?bangumiId=9001&subgroupid=1",
+        )
+        related = Subscription(
+            name="Example Anime",
+            reference_title="Example Anime",
+            source_type="anibt",
+            source_anime_id="example-anime",
+            canonical_key="bgm:3822",
+            bgm_url="https://bgm.tv/subject/3822",
+            bangumi_id=3822,
+            rss_url="https://anibt.net/rss/anime.xml?bgmId=3822&groupSlug=demo",
+        )
+        self.db.add_all([primary, related])
+        self.db.flush()
+        self.db.add_all([
+            FeedItem(subscription_id=primary.id, fingerprint="a" * 64, title="示例动画 01"),
+            FeedItem(subscription_id=related.id, fingerprint="b" * 64, title="Example Anime 01"),
+        ])
+        self.db.commit()
+
+        # Shared aliases can come from metadata even when the source-specific
+        # canonical keys differ. This models duplicate/cross-source records.
+        related.tmdb_title = "示例动画"
+        self.db.commit()
+
+        result = delete_subscription(primary.id, self.db)
+
+        self.assertEqual(result, {"ok": True, "hidden": True, "deleted": 2})
+        self.assertEqual(list(self.db.scalars(select(Subscription))), [])
+        self.assertEqual(list(self.db.scalars(select(FeedItem))), [])
+        preferences = list(self.db.scalars(select(AnimePreference)))
+        self.assertEqual(len(preferences), 1)
+        self.assertEqual(preferences[0].canonical_key, "bgm:3822")
+        self.assertEqual(preferences[0].bangumi_id, 3822)
+        self.assertTrue(hidden_for_item({"subject_id": 3822, "title": "Example Anime"}, preferences))
+        self.assertTrue(hidden_for_item({"title": "示例动画"}, preferences))
 
     def test_trial_subscription_mode_is_persisted(self) -> None:
         subscription = Subscription(
@@ -189,7 +233,7 @@ class SubscriptionManagementTests(unittest.TestCase):
 
         result = delete_subscription(subscription.id, self.db)
 
-        self.assertEqual(result, {"ok": True, "hidden": True})
+        self.assertEqual(result, {"ok": True, "hidden": True, "deleted": 1})
         preferences = list(self.db.scalars(select(AnimePreference)))
         self.assertEqual(len(preferences), 1)
         self.assertTrue(hidden_for_item({"title": "试看动画"}, preferences))

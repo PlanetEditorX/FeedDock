@@ -340,6 +340,12 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn("已隐藏 · 搜索可见", script)
         self.assertIn("mikan-hidden-search-badge", styles)
 
+    def test_subscription_delete_refreshes_catalog_hidden_state(self) -> None:
+        script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("async function refreshCatalogAfterSubscriptionDeletion()", script)
+        self.assertIn("await refreshCatalogAfterSubscriptionDeletion();", script)
+        self.assertIn("并清理 ${result.deleted} 条同番剧记录", script)
+
     def test_metadata_naming_and_local_scraping_ui_are_wired(self) -> None:
         index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
         script = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

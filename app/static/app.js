@@ -1247,6 +1247,11 @@ function initializeCatalogSelectors() {
   document.getElementById('catalogSeason').value = season;
 }
 
+async function refreshCatalogAfterSubscriptionDeletion() {
+  if (!currentMikanCatalogData) return;
+  await loadMikanCatalog(document.getElementById('mikanCatalogForm'), false);
+}
+
 async function loadMikanCatalog(form, forceRefresh = false) {
   mikanWeekdayDrafts.clear();
   const loadButton = document.getElementById('loadMikanCatalog');
@@ -1430,8 +1435,10 @@ function createSubscriptionCard(sub) {
     const result = await api(`/api/subscriptions/${sub.id}`, { method: 'DELETE' });
     selectedSubscriptionIds.delete(sub.id);
     if (subscriptionForm.elements.subscription_id.value === String(sub.id)) resetSubscriptionForm();
-    showNotice(result.hidden ? '订阅已删除，并已从添加番剧中隐藏' : '订阅已删除');
+    const related = Number(result.deleted || 1) > 1 ? `，并清理 ${result.deleted} 条同番剧记录` : '';
+    showNotice(result.hidden ? `订阅已删除${related}，并已从添加番剧中隐藏` : `订阅已删除${related}`);
     await reloadAll();
+    await refreshCatalogAfterSubscriptionDeletion();
   });
   if (isTrial) controls.append(start, remove);
   else controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, remove);
@@ -1746,6 +1753,7 @@ async function runSubscriptionBatch(action) {
   const result = await api('/api/subscriptions/batch', { method: 'POST', body: JSON.stringify({ ids, action }) });
   selectedSubscriptionIds.clear();
   await reloadAll();
+  if (action === 'delete') await refreshCatalogAfterSubscriptionDeletion();
   const hidden = action === 'delete' && result.hidden ? `，隐藏 ${result.hidden} 部番剧` : '';
   showNotice(`批量操作完成：处理 ${result.affected} 条订阅${hidden}`);
 }
