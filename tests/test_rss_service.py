@@ -22,11 +22,18 @@ from app.rss_service import (
 
 
 class RSSServiceTests(unittest.TestCase):
-    def test_bulk_trial_does_not_scan_shared_trial_directory_for_existing_video(self):
-        item = SimpleNamespace(desired_name="Demo - S01E01", save_path="/media/试看", episode="1")
-        subscription = SimpleNamespace(trial_bulk=True, rename_enabled=True, season=1)
+    def test_bulk_trial_path_is_separated_by_media_folder(self):
+        subscription = Subscription(
+            name="Demo",
+            reference_title="Demo",
+            metadata_year=2026,
+            rss_url="https://example.test/trial.xml",
+            subscription_mode="trial",
+            trial_bulk=True,
+            save_path_template="{base}/试看/{media_folder}",
+        )
 
-        self.assertIsNone(_existing_video_matches(item, subscription, SimpleNamespace()))
+        self.assertEqual(render_save_path(subscription, "1"), "/media/试看/Demo (2026)")
 
     def test_keyword_matching(self):
         self.assertTrue(match_title("Example 1080p 简体", "1080p,简体", "合集")[0])

@@ -572,7 +572,7 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertEqual(subscription.subscription_mode, "trial")
         self.assertTrue(subscription.trial_bulk)
         self.assertFalse(subscription.enabled)
-        self.assertEqual(subscription.save_path_template, "{base}/试看")
+        self.assertEqual(subscription.save_path_template, "{base}/试看/{media_folder}")
         self.assertEqual(subscription.source_type, "mikan")
         self.assertEqual(subscription.poster_url, "/api/discovery/mikan/image?cover=100")
         self.assertEqual(subscription.catalog_weekday, "星期一")

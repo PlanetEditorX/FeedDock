@@ -4,7 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
+from app.models import Subscription
 from app.main import _subscription_values
+from app.rss_service import render_save_path
 from app.schemas import SubscriptionCreate
 from app.trial import (
     BULK_TRIAL_SAVE_PATH_TEMPLATE,
@@ -54,6 +56,23 @@ class TrialPolicyTests(unittest.TestCase):
         self.assertEqual(bulk["save_path_template"], BULK_TRIAL_SAVE_PATH_TEMPLATE)
         self.assertFalse(single["enabled"])
         self.assertFalse(bulk["enabled"])
+
+    def test_bulk_trial_downloads_into_an_anime_named_folder(self) -> None:
+        subscription = Subscription(
+            name="RSS 试看动画",
+            reference_title="试看动画",
+            metadata_year=2026,
+            rss_url="https://example.test/bulk.xml",
+            subscription_mode="trial",
+            trial_bulk=True,
+            save_path_template=BULK_TRIAL_SAVE_PATH_TEMPLATE,
+        )
+
+        self.assertEqual(
+            render_save_path(subscription, "1"),
+            "/media/试看/试看动画 (2026)",
+        )
+
 
 
 if __name__ == "__main__":

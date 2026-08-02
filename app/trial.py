@@ -6,7 +6,8 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
-BULK_TRIAL_SAVE_PATH_TEMPLATE = "{base}/试看"
+LEGACY_BULK_TRIAL_SAVE_PATH_TEMPLATE = "{base}/试看"
+BULK_TRIAL_SAVE_PATH_TEMPLATE = "{base}/试看/{media_folder}"
 SINGLE_TRIAL_SAVE_PATH_TEMPLATE = "{base}/试看/{media_folder}/Season {season:02}"
 SUBSCRIBED_SAVE_PATH_TEMPLATE = "{base}/{media_folder}/Season {season:02}"
 TRIAL_SKIP_REASON = "试看模式只下载首个可用剧集"

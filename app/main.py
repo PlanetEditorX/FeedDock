@@ -64,6 +64,7 @@ from .download_cleanup import cleanup_completed_torrent_records
 from .subscription_monitor import reset_monitor_state_for_changes
 from .trial import (
     BULK_TRIAL_SAVE_PATH_TEMPLATE,
+    LEGACY_BULK_TRIAL_SAVE_PATH_TEMPLATE,
     SINGLE_TRIAL_SAVE_PATH_TEMPLATE,
     SUBSCRIBED_SAVE_PATH_TEMPLATE,
     TRIAL_SKIP_REASON,
@@ -275,7 +276,11 @@ def _subscription_values(
         values["trial_bulk"] = False
         if (
             "save_path_template" not in values
-            and existing.save_path_template in {BULK_TRIAL_SAVE_PATH_TEMPLATE, SINGLE_TRIAL_SAVE_PATH_TEMPLATE}
+            and existing.save_path_template in {
+                LEGACY_BULK_TRIAL_SAVE_PATH_TEMPLATE,
+                BULK_TRIAL_SAVE_PATH_TEMPLATE,
+                SINGLE_TRIAL_SAVE_PATH_TEMPLATE,
+            }
         ):
             values["save_path_template"] = SUBSCRIBED_SAVE_PATH_TEMPLATE
     prepare_subscription_identity(values, existing=existing)
@@ -1271,7 +1276,7 @@ def create_catalog_trials(
     return {
         "created": len(created),
         "message": (
-            f"已加入 {len(created)} 部{source_id}试看，首个可用剧集将自动下载"
+            f"已加入 {len(created)} 部{source_id}试看，首个可用剧集将保存到 试看/番剧名/"
             if created
             else "没有新增试看；已有试看订阅的目录数据已同步。"
         ),
@@ -1575,7 +1580,12 @@ def create_mikan_trials(
             "created": 0,
             "message": "没有新增试看；已有试看订阅的目录数据已同步。若仍有未加入作品，请查看系统日志。",
         }
-    return {"created": len(created), "message": f"已加入 {len(created)} 部 Mikan 试看，首个可用剧集将自动下载"}
+    return {
+        "created": len(created),
+        "message": (
+            f"已加入 {len(created)} 部 Mikan 试看，首个可用剧集将保存到 试看/番剧名/"
+        ),
+    }
 
 
 @app.put(

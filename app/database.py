@@ -297,6 +297,37 @@ def _migrate_1_17_10_default_media_local_root() -> None:
             )
 
 
+def _migrate_1_17_14_bulk_trial_media_folders() -> None:
+    # Older bulk trials placed every first episode directly in one shared
+    # ``试看`` directory. Give each anime its own safe media folder so files
+    # and future retries cannot collide across titles. Custom templates remain
+    # untouched.
+    marker = "migration:1.17.14:bulk-trial-media-folders"
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"), {"key": marker}
+        ).scalar_one_or_none()
+        if existing is None:
+            connection.execute(
+                text(
+                    "UPDATE subscriptions SET save_path_template = :new_template "
+                    "WHERE subscription_mode = 'trial' AND trial_bulk = 1 "
+                    "AND save_path_template = :legacy_template"
+                ),
+                {
+                    "new_template": "{base}/试看/{media_folder}",
+                    "legacy_template": "{base}/试看",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO app_settings (key, value, updated_at) "
+                    "VALUES (:key, '1', CURRENT_TIMESTAMP)"
+                ),
+                {"key": marker},
+            )
+
+
 def ensure_schema() -> None:
     """Apply dependency-free additive migrations for existing SQLite installs."""
 
@@ -310,6 +341,7 @@ def ensure_schema() -> None:
     _migrate_1_17_5_local_scrape_backfill()
     _migrate_1_17_7_separate_media_paths()
     _migrate_1_17_10_default_media_local_root()
+    _migrate_1_17_14_bulk_trial_media_folders()
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -399,6 +399,8 @@ class DeploymentFileTests(unittest.TestCase):
         rss_service = (ROOT / "app/rss_service.py").read_text(encoding="utf-8")
         self.assertIn("migration:1.11.1:media-folder-paths", database)
         self.assertIn("migration:1.17.5:local-scrape-backfill", database)
+        self.assertIn("migration:1.17.14:bulk-trial-media-folders", database)
+        self.assertIn("{base}/试看/{media_folder}", database)
         self.assertIn("{base}/{media_folder}/Season {season:02}", database)
         self.assertIn("_LEGACY_DEFAULT_SAVE_PATH_TEMPLATES", rss_service)
 
