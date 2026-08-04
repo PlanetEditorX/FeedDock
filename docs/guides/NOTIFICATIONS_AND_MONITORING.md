@@ -34,7 +34,20 @@ http://主机:端口
 http://主机:端口/push
 ```
 
-发送前会统一归一化为一个 `/push` 端点，不会再出现 `/push/push`。JSON 字段为 `title`、`body`、`device_key` 和固定分组 `FeedDock`。Device Key 放在 JSON 请求体中，不拼接到 URL，避免反向代理访问日志泄露密钥。
+发送前会统一归一化为一个 `/push` 端点，不会再出现 `/push/push`。未启用加密时，JSON 字段为 `title`、`body`、`device_key` 和固定分组 `FeedDock`。Device Key 放在 JSON 请求体中，不拼接到 URL，避免反向代理访问日志泄露密钥。
+
+#### Bark 推送加密
+
+FeedDock 可按 Bark App 的官方选项手动选择：
+
+- 算法：`AES128`、`AES192`、`AES256`；
+- 模式：`CBC`、`ECB`、`GCM`；
+- 填充：`pkcs7`、`noPadding`；
+- Key 长度分别为 16、24、32 个 ASCII 字符。
+
+先在 Bark App 首页的“推送加密”中设置完全相同的算法、模式、填充和 Key，再在 FeedDock 中启用加密。FeedDock 会把标题、正文、分组、图标和图片序列化为 JSON 后加密，只向 Bark 服务发送 `device_key`、`ciphertext`，以及 CBC/GCM 所需的 `iv`。CBC/GCM 每次推送都会生成新的随机 IV；请求中的 IV 会覆盖 Bark App 内保存的 IV。ECB 不使用 IV。
+
+通常建议选择 `CBC + pkcs7` 或 `GCM + pkcs7`。`CBC/ECB + noPadding` 只有在完整 JSON 字节长度恰好为 16 的倍数时才能发送，否则测试或实际推送会返回明确错误。
 
 ### Webhook
 
@@ -64,7 +77,7 @@ Webhook 接收完整结构化事件，适合接入 Home Assistant、n8n、Node-R
 - 勾选对应“清除”才删除；
 - 小眼睛按钮通过管理员保护接口读取原文；
 - Webhook 地址可能包含签名参数，因此也按密钥处理；
-- 设置、测试响应、WARNING/DEBUG 日志都会隐藏 Token、Device Key、Webhook 地址和请求头值。
+- 设置、测试响应、WARNING/DEBUG 日志都会隐藏 Token、Device Key、Bark 加密 Key、Webhook 地址和请求头值。
 
 ## 5. 完成状态
 

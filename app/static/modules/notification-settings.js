@@ -14,9 +14,26 @@
 
     const form = doc.getElementById('notificationSettingsForm');
     const previewBox = doc.getElementById('notificationTemplatePreview');
+    const barkEncryptionOptions = doc.getElementById('barkEncryptionOptions');
+    const barkEncryptionKeyHint = doc.getElementById('barkEncryptionKeyHint');
+
+    const BARK_KEY_LENGTHS = Object.freeze({ AES128: 16, AES192: 24, AES256: 32 });
+
+    function updateBarkEncryptionFields() {
+      const enabled = form.elements.bark_encryption_enabled.checked;
+      barkEncryptionOptions?.classList.toggle('hidden', !enabled);
+      const algorithm = form.elements.bark_encryption_algorithm.value || 'AES128';
+      const keyLength = BARK_KEY_LENGTHS[algorithm] || 16;
+      if (barkEncryptionKeyHint) barkEncryptionKeyHint.textContent = `${algorithm} 需要 ${keyLength} 个 ASCII 字符。`;
+    }
 
     function valueOrNull(name) {
       return form.elements[name].value.trim() || null;
+    }
+
+    function exactValueOrNull(name) {
+      const value = form.elements[name].value;
+      return value === '' ? null : value;
     }
 
     function payload() {
@@ -33,6 +50,12 @@
         bark_server_url: form.elements.bark_server_url.value.trim() || 'https://api.day.app',
         bark_device_key: valueOrNull('notification_bark_device_key'),
         clear_bark_device_key: form.elements.clear_bark_device_key.checked,
+        bark_encryption_enabled: form.elements.bark_encryption_enabled.checked,
+        bark_encryption_algorithm: form.elements.bark_encryption_algorithm.value,
+        bark_encryption_mode: form.elements.bark_encryption_mode.value,
+        bark_encryption_padding: form.elements.bark_encryption_padding.value,
+        bark_encryption_key: exactValueOrNull('notification_bark_encryption_key'),
+        clear_bark_encryption_key: form.elements.clear_bark_encryption_key.checked,
         webhook_enabled: form.elements.webhook_enabled.checked,
         webhook_url: valueOrNull('notification_webhook_url'),
         clear_webhook_url: form.elements.clear_webhook_url.checked,
@@ -50,6 +73,10 @@
       form.elements.telegram_chat_id.value = data.telegram_chat_id || '';
       form.elements.bark_enabled.checked = Boolean(data.bark_enabled);
       form.elements.bark_server_url.value = data.bark_server_url || 'https://api.day.app';
+      form.elements.bark_encryption_enabled.checked = Boolean(data.bark_encryption_enabled);
+      form.elements.bark_encryption_algorithm.value = data.bark_encryption_algorithm || 'AES128';
+      form.elements.bark_encryption_mode.value = data.bark_encryption_mode || 'CBC';
+      form.elements.bark_encryption_padding.value = data.bark_encryption_padding || 'pkcs7';
       form.elements.webhook_enabled.checked = Boolean(data.webhook_enabled);
 
       const events = new Set(data.events || []);
@@ -58,6 +85,7 @@
       const secrets = [
         ['notification_telegram_bot_token', data.telegram_bot_token_configured, '已保存 Token；留空保留'],
         ['notification_bark_device_key', data.bark_device_key_configured, '已保存 Key；留空保留'],
+        ['notification_bark_encryption_key', data.bark_encryption_key_configured, '已保存加密 Key；留空保留'],
         ['notification_webhook_url', data.webhook_url_configured, '已保存地址；留空保留'],
         ['notification_webhook_headers_json', data.webhook_headers_configured, '已保存请求头；留空保留'],
       ];
@@ -66,8 +94,10 @@
         form.elements[name].type = 'password';
         if (configured) form.elements[name].placeholder = placeholder;
       });
-      ['clear_telegram_bot_token', 'clear_bark_device_key', 'clear_webhook_url', 'clear_webhook_headers']
+      ['clear_telegram_bot_token', 'clear_bark_device_key', 'clear_bark_encryption_key', 'clear_webhook_url', 'clear_webhook_headers']
         .forEach((name) => { form.elements[name].checked = false; });
+
+      updateBarkEncryptionFields();
 
       const channels = (data.configured_channels || []).join('、') || '无';
       doc.getElementById('notificationConfigState').textContent = `${data.enabled ? '已启用' : '未启用'} · 可用渠道：${channels}`;
@@ -103,6 +133,9 @@
     }
 
     function bind() {
+      form.elements.bark_encryption_enabled.addEventListener('change', updateBarkEncryptionFields);
+      form.elements.bark_encryption_algorithm.addEventListener('change', updateBarkEncryptionFields);
+
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
@@ -148,7 +181,7 @@
       });
     }
 
-    return { bind, load, payload, preview, save };
+    return { bind, load, payload, preview, save, updateBarkEncryptionFields };
   }
 
   return { create, DEFAULT_TITLE_TEMPLATE, DEFAULT_BODY_TEMPLATE };

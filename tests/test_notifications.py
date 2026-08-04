@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
+import json
 import unittest
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import padding as crypto_padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -10,7 +14,7 @@ from app.database import Base
 from app.models import FeedItem, Subscription
 from app.notification_config import load_notification_config, save_notification_config
 from app.notifications import send_notification
-from app.notification.channels import normalize_bark_push_url
+from app.notification.channels import encrypt_bark_payload, normalize_bark_push_url
 from app.notification.service import preview_notification
 from app.notification.templates import validate_template
 
@@ -52,12 +56,23 @@ class NotificationTests(unittest.TestCase):
         return save_notification_config(self.db, **values)
 
     def test_public_config_hides_secrets_and_preserves_channels(self):
-        config = self.save_config()
+        config = self.save_config(
+            bark_encryption_enabled=True,
+            bark_encryption_algorithm="AES256",
+            bark_encryption_mode="GCM",
+            bark_encryption_padding="noPadding",
+            bark_encryption_key="12345678901234567890123456789012",
+        )
         public = config.public_dict()
         self.assertNotIn("telegram_bot_token", public)
         self.assertNotIn("bark_device_key", public)
+        self.assertNotIn("bark_encryption_key", public)
         self.assertTrue(public["telegram_bot_token_configured"])
         self.assertTrue(public["bark_device_key_configured"])
+        self.assertTrue(public["bark_encryption_key_configured"])
+        self.assertEqual(public["bark_encryption_algorithm"], "AES256")
+        self.assertEqual(public["bark_encryption_mode"], "GCM")
+        self.assertEqual(public["bark_encryption_padding"], "noPadding")
         self.assertEqual(public["configured_channels"], ["telegram", "bark", "webhook"])
         self.assertEqual(load_notification_config(self.db).webhook_headers["Authorization"], "Bearer secret")
 
@@ -129,6 +144,60 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "http://192.168.1.10:28080/push")
         self.assertEqual(calls[0][1]["json"]["device_key"], "device-secret")
         self.assertNotIn("device-secret", calls[0][0])
+
+    def test_bark_encryption_sends_ciphertext_and_fresh_iv_instead_of_plaintext(self):
+        self.save_config(
+            telegram_enabled=False,
+            webhook_enabled=False,
+            bark_encryption_enabled=True,
+            bark_encryption_algorithm="AES128",
+            bark_encryption_mode="CBC",
+            bark_encryption_padding="pkcs7",
+            bark_encryption_key="1234567890123456",
+        )
+        calls = []
+
+        def fake_post(url, **kwargs):
+            calls.append((url, kwargs))
+            return _Response()
+
+        with patch("app.notifications.external_post", side_effect=fake_post):
+            result = send_notification(self.db, "download_started", "加密标题", "加密正文")
+
+        self.assertTrue(result.ok)
+        payload = calls[0][1]["json"]
+        self.assertEqual(payload["device_key"], "device-secret")
+        self.assertNotIn("title", payload)
+        self.assertNotIn("body", payload)
+        self.assertEqual(len(payload["iv"]), 16)
+        self.assertTrue(payload["ciphertext"])
+
+    def test_bark_cbc_ciphertext_matches_selected_key_padding_and_iv(self):
+        ciphertext, iv = encrypt_bark_payload(
+            {"title": "标题", "body": "正文", "group": "FeedDock"},
+            algorithm="AES128",
+            mode="CBC",
+            padding="pkcs7",
+            key="1234567890123456",
+            iv="abcdefghijklmnop",
+        )
+        self.assertEqual(iv, "abcdefghijklmnop")
+        decryptor = Cipher(
+            algorithms.AES(b"1234567890123456"),
+            modes.CBC(b"abcdefghijklmnop"),
+        ).decryptor()
+        padded = decryptor.update(base64.b64decode(ciphertext)) + decryptor.finalize()
+        unpadder = crypto_padding.PKCS7(algorithms.AES.block_size).unpadder()
+        plaintext = unpadder.update(padded) + unpadder.finalize()
+        self.assertEqual(json.loads(plaintext.decode("utf-8"))["body"], "正文")
+
+    def test_bark_encryption_validates_official_key_lengths(self):
+        with self.assertRaisesRegex(ValueError, "必须为 24 个字符"):
+            self.save_config(
+                bark_encryption_enabled=True,
+                bark_encryption_algorithm="AES192",
+                bark_encryption_key="too-short",
+            )
 
     def test_bark_download_completion_uses_normalized_filename_and_cover(self):
         self.save_config(

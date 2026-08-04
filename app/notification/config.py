@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..models import AppSetting
+from .channels import validate_bark_encryption_options
 from .templates import (
     DEFAULT_BODY_TEMPLATE,
     DEFAULT_TITLE_TEMPLATE,
@@ -31,6 +32,11 @@ _NOTIFICATION_KEYS = {
     "notification_bark_enabled",
     "notification_bark_server_url",
     "notification_bark_device_key",
+    "notification_bark_encryption_enabled",
+    "notification_bark_encryption_algorithm",
+    "notification_bark_encryption_mode",
+    "notification_bark_encryption_padding",
+    "notification_bark_encryption_key",
     "notification_webhook_enabled",
     "notification_webhook_url",
     "notification_webhook_headers_json",
@@ -49,6 +55,11 @@ class NotificationConfig:
     bark_enabled: bool = False
     bark_server_url: str = "https://api.day.app"
     bark_device_key: str = ""
+    bark_encryption_enabled: bool = False
+    bark_encryption_algorithm: str = "AES128"
+    bark_encryption_mode: str = "CBC"
+    bark_encryption_padding: str = "pkcs7"
+    bark_encryption_key: str = ""
     webhook_enabled: bool = False
     webhook_url: str = ""
     webhook_headers_json: str = "{}"
@@ -60,7 +71,8 @@ class NotificationConfig:
         if self.telegram_enabled and self.telegram_bot_token and self.telegram_chat_id:
             channels.append("telegram")
         if self.bark_enabled and self.bark_server_url and self.bark_device_key:
-            channels.append("bark")
+            if not self.bark_encryption_enabled or self.bark_encryption_key:
+                channels.append("bark")
         if self.webhook_enabled and self.webhook_url:
             channels.append("webhook")
         return tuple(channels)
@@ -93,6 +105,11 @@ class NotificationConfig:
             "bark_enabled": self.bark_enabled,
             "bark_server_url": self.bark_server_url,
             "bark_device_key_configured": bool(self.bark_device_key),
+            "bark_encryption_enabled": self.bark_encryption_enabled,
+            "bark_encryption_algorithm": self.bark_encryption_algorithm,
+            "bark_encryption_mode": self.bark_encryption_mode,
+            "bark_encryption_padding": self.bark_encryption_padding,
+            "bark_encryption_key_configured": bool(self.bark_encryption_key),
             "webhook_enabled": self.webhook_enabled,
             "webhook_url_configured": bool(self.webhook_url),
             "webhook_headers_configured": bool(self.webhook_headers),
@@ -160,6 +177,11 @@ def load_notification_config(db: Session) -> NotificationConfig:
             or "https://api.day.app"
         ),
         bark_device_key=rows.get("notification_bark_device_key", ""),
+        bark_encryption_enabled=_as_bool(rows.get("notification_bark_encryption_enabled", "0")),
+        bark_encryption_algorithm=(rows.get("notification_bark_encryption_algorithm", "AES128").strip().upper() or "AES128"),
+        bark_encryption_mode=(rows.get("notification_bark_encryption_mode", "CBC").strip().upper() or "CBC"),
+        bark_encryption_padding=(rows.get("notification_bark_encryption_padding", "pkcs7").strip() or "pkcs7"),
+        bark_encryption_key=rows.get("notification_bark_encryption_key", ""),
         webhook_enabled=_as_bool(rows.get("notification_webhook_enabled", "0")),
         webhook_url=rows.get("notification_webhook_url", "").strip(),
         webhook_headers_json=rows.get("notification_webhook_headers_json", "{}"),
@@ -187,6 +209,12 @@ def save_notification_config(
     clear_webhook_url: bool,
     webhook_headers_json: str | None,
     clear_webhook_headers: bool,
+    bark_encryption_enabled: bool = False,
+    bark_encryption_algorithm: str = "AES128",
+    bark_encryption_mode: str = "CBC",
+    bark_encryption_padding: str = "pkcs7",
+    bark_encryption_key: str | None = None,
+    clear_bark_encryption_key: bool = False,
 ) -> NotificationConfig:
     current = load_notification_config(db)
     normalized_events = _normalize_events(events)
@@ -197,6 +225,9 @@ def save_notification_config(
     )
     device_key = "" if clear_bark_device_key else (
         current.bark_device_key if bark_device_key is None else bark_device_key.strip()
+    )
+    encryption_key = "" if clear_bark_encryption_key else (
+        current.bark_encryption_key if bark_encryption_key is None else bark_encryption_key
     )
     target_webhook_url = "" if clear_webhook_url else (
         current.webhook_url if webhook_url is None else webhook_url.strip()
@@ -212,7 +243,28 @@ def save_notification_config(
         raise ValueError("Telegram Chat ID 过长")
     if len(device_key) > 1000:
         raise ValueError("Bark Device Key 过长")
+    if len(encryption_key) > 1000:
+        raise ValueError("Bark 加密 Key 过长")
     bark_url = _valid_http_url(bark_server_url or "https://api.day.app", "Bark 服务地址", allow_empty=False)
+    normalized_algorithm = str(bark_encryption_algorithm or "AES128").strip().upper()
+    normalized_mode = str(bark_encryption_mode or "CBC").strip().upper()
+    normalized_padding = str(bark_encryption_padding or "pkcs7").strip()
+    if bark_encryption_enabled:
+        normalized_algorithm, normalized_mode, normalized_padding, _ = validate_bark_encryption_options(
+            algorithm=normalized_algorithm,
+            mode=normalized_mode,
+            padding=normalized_padding,
+            key=encryption_key,
+        )
+    else:
+        # Validate the selectors even when encryption is disabled so malformed
+        # imported values cannot be persisted and surprise a later enable.
+        if normalized_algorithm not in {"AES128", "AES192", "AES256"}:
+            raise ValueError("Bark 加密算法必须是 AES128、AES192 或 AES256")
+        if normalized_mode not in {"CBC", "ECB", "GCM"}:
+            raise ValueError("Bark 加密模式必须是 CBC、ECB 或 GCM")
+        if normalized_padding not in {"pkcs7", "noPadding"}:
+            raise ValueError("Bark 加密填充必须是 pkcs7 或 noPadding")
     target_webhook_url = _valid_http_url(target_webhook_url, "Webhook 地址")
     try:
         headers = json.loads(headers_raw)
@@ -248,6 +300,11 @@ def save_notification_config(
         "notification_bark_enabled": "1" if bark_enabled else "0",
         "notification_bark_server_url": bark_url,
         "notification_bark_device_key": device_key,
+        "notification_bark_encryption_enabled": "1" if bark_encryption_enabled else "0",
+        "notification_bark_encryption_algorithm": normalized_algorithm,
+        "notification_bark_encryption_mode": normalized_mode,
+        "notification_bark_encryption_padding": normalized_padding,
+        "notification_bark_encryption_key": encryption_key,
         "notification_webhook_enabled": "1" if webhook_enabled else "0",
         "notification_webhook_url": target_webhook_url,
         "notification_webhook_headers_json": headers_raw,

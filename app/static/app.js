@@ -333,6 +333,25 @@ async function loadDashboard() {
   document.querySelectorAll('#stats strong').forEach((el, i) => { el.textContent = values[i]; });
 }
 
+async function openDashboardStat(target) {
+  if (target === 'enabled') {
+    const search = document.getElementById('subscriptionSearch');
+    const state = document.getElementById('subscriptionStateFilter');
+    if (search) search.value = '';
+    if (state) state.value = 'enabled';
+    showAppView('subscriptions');
+    renderSubscriptions(currentSubscriptions);
+    document.querySelector('[data-panel-id="subscriptions"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  if (['queued', 'skipped', 'error'].includes(target)) {
+    const status = document.getElementById('statusFilter');
+    if (status) status.value = target;
+    showAppView('downloads');
+    await loadItems();
+  }
+}
+
 async function loadConfig() {
   const data = await api('/api/config');
   let qbitState = '未配置';
@@ -1774,6 +1793,7 @@ function initializePasswordToggles() {
     bangumi_access_token: 'bangumi_access_token', proxy_url: 'proxy_url',
     notification_telegram_bot_token: 'notification_telegram_bot_token',
     notification_bark_device_key: 'notification_bark_device_key',
+    notification_bark_encryption_key: 'notification_bark_encryption_key',
     notification_webhook_url: 'notification_webhook_url',
     notification_webhook_headers_json: 'notification_webhook_headers_json',
   };
@@ -2676,6 +2696,9 @@ document.querySelector('.app-brand').addEventListener('keydown', (event) => {
 
 document.getElementById('subscriptionSearch').addEventListener('input', () => renderSubscriptions(currentSubscriptions));
 document.getElementById('subscriptionStateFilter').addEventListener('change', () => renderSubscriptions(currentSubscriptions));
+document.querySelectorAll('[data-stat-target]').forEach((button) => {
+  button.addEventListener('click', () => openDashboardStat(button.dataset.statTarget).catch((error) => showNotice(error.message, false)));
+});
 document.getElementById('subscriptionSortMode').addEventListener('change', (event) => saveSubscriptionSort(event.currentTarget.value));
 document.getElementById('refreshHiddenAnime').addEventListener('click', () => loadHiddenAnimePreferences().catch((error) => showNotice(error.message, false)));
 document.getElementById('toggleManagementMode').addEventListener('click', () => setManagementMode(!subscriptionManagementMode));

@@ -51,8 +51,8 @@
 <main>
 <div class="notice hidden" id="notice"></div><section class="view-heading"><div><span class="view-eyebrow">FeedDock 控制台</span><h2 id="viewTitle">订阅</h2><p id="viewDescription">查看当前订阅、运行状态与最近检查结果。</p></div></section>
 <section class="stats" data-app-view="subscriptions" id="stats">
-<article><strong>–</strong><span>启用订阅</span></article><article><strong>–</strong><span>已推送</span></article>
-<article><strong>–</strong><span>已跳过</span></article><article><strong>–</strong><span>错误</span></article>
+<button aria-label="查看启用订阅" class="stat-card" data-stat-target="enabled" type="button"><strong>–</strong><span>启用订阅</span></button><button aria-label="查看已推送条目" class="stat-card" data-stat-target="queued" type="button"><strong>–</strong><span>已推送</span></button>
+<button aria-label="查看已跳过条目" class="stat-card" data-stat-target="skipped" type="button"><strong>–</strong><span>已跳过</span></button><button aria-label="查看错误条目" class="stat-card" data-stat-target="error" type="button"><strong>–</strong><span>错误</span></button>
 </section>
 <section class="panel hidden" data-app-view="settings-system" data-panel-id="system-actions">
 <div class="panel-head"><div><h2>系统管理</h2><p id="systemActionState">正在读取系统操作状态…</p></div></div>
@@ -199,6 +199,15 @@
 <label class="wide">Bark 服务地址<input name="bark_server_url" placeholder="服务根地址或完整 /push 地址" value="https://api.day.app"/><span class="hint">支持 http://主机:端口 和 http://主机:端口/push；Device Key 通过 JSON 请求体发送。</span></label>
 <label class="wide">Device Key<input autocomplete="new-password" name="notification_bark_device_key" placeholder="留空保留已保存 Key" type="password"/></label>
 <label class="checkbox-label"><input name="clear_bark_device_key" type="checkbox"/>清除 Device Key</label>
+<label class="checkbox-label wide"><input name="bark_encryption_enabled" type="checkbox"/>启用 Bark 推送加密</label>
+<div class="form-grid wide bark-encryption-options hidden" id="barkEncryptionOptions">
+<label>加密算法<select name="bark_encryption_algorithm"><option value="AES128">AES128（16 字符 Key）</option><option value="AES192">AES192（24 字符 Key）</option><option value="AES256">AES256（32 字符 Key）</option></select></label>
+<label>加密模式<select name="bark_encryption_mode"><option value="CBC">CBC</option><option value="ECB">ECB</option><option value="GCM">GCM</option></select></label>
+<label>填充方式<select name="bark_encryption_padding"><option value="pkcs7">pkcs7</option><option value="noPadding">noPadding</option></select></label>
+<label class="wide">加密 Key<input autocomplete="new-password" name="notification_bark_encryption_key" placeholder="与 Bark App 中的加密 Key 完全一致" type="password"/><span class="hint" id="barkEncryptionKeyHint">AES128 需要 16 个 ASCII 字符。</span></label>
+<label class="checkbox-label"><input name="clear_bark_encryption_key" type="checkbox"/>清除加密 Key</label>
+<p class="hint wide">请先在 Bark App 首页 → 推送加密中选择相同的算法、模式、填充和 Key。CBC/GCM 每次推送会生成新的 IV 并随请求发送；ECB 不使用 IV。建议使用 CBC 或 GCM + pkcs7。</p>
+</div>
 </div></fieldset>
 <fieldset class="wide"><legend>通用 Webhook</legend><div class="form-grid">
 <label class="checkbox-label"><input name="webhook_enabled" type="checkbox"/>启用 Webhook</label>

@@ -491,6 +491,12 @@ class NotificationSettingsUpdate(BaseModel):
     bark_server_url: str = Field(default="https://api.day.app", max_length=4000)
     bark_device_key: str | None = Field(default=None, max_length=1000)
     clear_bark_device_key: bool = False
+    bark_encryption_enabled: bool = False
+    bark_encryption_algorithm: str = Field(default="AES128", pattern="^(AES128|AES192|AES256)$")
+    bark_encryption_mode: str = Field(default="CBC", pattern="^(CBC|ECB|GCM)$")
+    bark_encryption_padding: str = Field(default="pkcs7", pattern="^(pkcs7|noPadding)$")
+    bark_encryption_key: str | None = Field(default=None, max_length=1000)
+    clear_bark_encryption_key: bool = False
     webhook_enabled: bool = False
     webhook_url: str | None = Field(default=None, max_length=4000)
     clear_webhook_url: bool = False

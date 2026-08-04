@@ -126,6 +126,8 @@ def _dispatch_bark(
         return 0, None
     if not config.bark_device_key:
         return 0, "Bark 配置不完整"
+    if config.bark_encryption_enabled and not config.bark_encryption_key:
+        return 0, "Bark 加密配置不完整"
     try:
         send_bark(
             post=post,
@@ -136,10 +138,15 @@ def _dispatch_bark(
             body=body,
             icon=cover_url,
             image=cover_url,
+            encryption_enabled=config.bark_encryption_enabled,
+            encryption_algorithm=config.bark_encryption_algorithm,
+            encryption_mode=config.bark_encryption_mode,
+            encryption_padding=config.bark_encryption_padding,
+            encryption_key=config.bark_encryption_key,
         )
         return 1, None
     except Exception as exc:
-        return 0, f"Bark：{safe_channel_error(exc, secrets=[config.bark_device_key])}"
+        return 0, f"Bark：{safe_channel_error(exc, secrets=[config.bark_device_key, config.bark_encryption_key])}"
 
 
 def _dispatch_webhook(
