@@ -126,13 +126,12 @@ def _log_scrape_finish(db: Any, subscription_id: int | None, totals: dict[str, i
     db.commit()
 
 
-def _process_scrape_item(db: Any, item: Any, config: Any, service: MetadataService, totals: dict[str, int]) -> None:
+def _process_scrape_item(db: Any, item: Any, subscription: Subscription | None, config: Any, service: MetadataService, totals: dict[str, int]) -> None:
     from datetime import datetime, timezone
 
     from .scraper import scrape_completed_item
 
     totals["items"] += 1
-    subscription = db.get(Subscription, item.subscription_id)
     if subscription is None:
         totals["errors"] += 1
         item.scrape_status = "error"
@@ -242,9 +241,17 @@ def scrape_completed_media(subscription_id: int | None = None) -> dict[str, Any]
 
             _log_scrape_start(db, subscription_id, target_subscription, items)
 
+            subscription_cache: dict[int, Subscription | None] = {}
+            if subscription_id is not None:
+                subscription_cache[subscription_id] = target_subscription
+
             service = MetadataService(timeout=load_application_preferences(db).rss.timeout_seconds)
             for item in items:
-                _process_scrape_item(db, item, config, service, totals)
+                sub_id = item.subscription_id
+                if sub_id not in subscription_cache:
+                    subscription_cache[sub_id] = db.get(Subscription, sub_id)
+                subscription = subscription_cache[sub_id]
+                _process_scrape_item(db, item, subscription, config, service, totals)
 
             _log_scrape_finish(db, subscription_id, totals)
 
