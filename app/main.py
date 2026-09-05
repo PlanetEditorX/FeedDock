@@ -1444,14 +1444,21 @@ def _hide_deleted_subscriptions(
             continue
     bangumi_id = min(bangumi_ids) if bangumi_ids else 0
 
+    filters = []
+    if identities:
+        filters.append(AnimePreference.canonical_key.in_(identities))
+    if bangumi_ids:
+        filters.append(
+            (AnimePreference.bangumi_id > 0) & AnimePreference.bangumi_id.in_(bangumi_ids)
+        )
+    if aliases:
+        filters.append(
+            (AnimePreference.title_normalized.isnot(None)) & (AnimePreference.title_normalized != "") & AnimePreference.title_normalized.in_(aliases)
+        )
+
     matching_preferences = []
-    for preference in db.scalars(select(AnimePreference)).all():
-        if preference.canonical_key in identities:
-            matching_preferences.append(preference)
-        elif preference.bangumi_id > 0 and preference.bangumi_id in bangumi_ids:
-            matching_preferences.append(preference)
-        elif preference.title_normalized and preference.title_normalized in aliases:
-            matching_preferences.append(preference)
+    if filters:
+        matching_preferences = list(db.scalars(select(AnimePreference).where(or_(*filters))).all())
 
     row = db.get(AnimePreference, key)
     if row is None:
