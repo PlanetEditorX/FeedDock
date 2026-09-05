@@ -105,6 +105,8 @@ _FEED_ITEM_COLUMNS: dict[str, str] = {
 
 
 def _add_missing_columns(table: str, columns: dict[str, str]) -> None:
+    if not table.isidentifier():
+        raise ValueError(f"Invalid table name: {table}")
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
         return
@@ -114,6 +116,8 @@ def _add_missing_columns(table: str, columns: dict[str, str]) -> None:
         return
     with engine.begin() as connection:
         for name, ddl in missing:
+            if not name.isidentifier():
+                raise ValueError(f"Invalid column name: {name}")
             connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {ddl}'))
 
 
