@@ -119,6 +119,32 @@ def _atomic_write(path: Path, content: bytes) -> bool:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+
+        try:
+            mode = path.stat().st_mode & 0o777
+        except OSError:
+            # Safely determine default mode based on umask without modifying it globally
+            # by creating a temporary file and checking its permissions.
+            dummy_fd, dummy_path = tempfile.mkstemp(dir=path.parent)
+            os.close(dummy_fd)
+            try:
+                # To get permissions restricted by umask, we create a normal file
+                # because mkstemp forces 0o600
+                os.unlink(dummy_path)
+                with open(dummy_path, "w") as dummy_file:
+                    pass
+                mode = os.stat(dummy_path).st_mode & 0o777
+            finally:
+                try:
+                    os.unlink(dummy_path)
+                except OSError:
+                    pass
+
+        try:
+            os.chmod(temporary, mode)
+        except OSError:
+            pass
+
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
