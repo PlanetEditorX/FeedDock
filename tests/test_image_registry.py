@@ -19,6 +19,10 @@ class ImageRegistryTests(unittest.TestCase):
         self.assertEqual(pinned.reference, "sha256:0123456789abcdef")
         self.assertIn("@sha256:", pinned.display)
 
+    def test_parse_empty_reference_raises_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "未配置部署镜像"):
+            parse_image_reference("")
+
     def test_parse_docker_hub_shorthand(self) -> None:
         reference = parse_image_reference("python:3.13-slim")
         self.assertEqual(reference.registry, "registry-1.docker.io")
