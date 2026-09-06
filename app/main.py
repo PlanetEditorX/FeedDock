@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, desc, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -47,7 +47,6 @@ from .debug_logging import (
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
-from .mikan_subscription import collect_subscribed_mikan_bangumi_ids
 from .notification_config import (
     load_notification_config,
     reset_notification_config,
@@ -75,13 +74,11 @@ from .subscription_sources import (
     classify_subscription_source,
     get_subscription_source,
     subscription_source_catalog,
-    subscription_source_label,
 )
 from .rss_candidates import search_subscription_rss_candidates
 from .rss_service import (
     add_log,
     calculate_missing_episodes,
-    dispatch_scheduled_downloads,
     preview_subscription,
     refresh_all,
     refresh_subscription,
