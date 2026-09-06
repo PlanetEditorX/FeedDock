@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import secrets
+import sys
 from pathlib import Path
 
 from .build_info import load_build_info
@@ -118,6 +120,18 @@ def load_settings():
     data_dir.mkdir(parents=True, exist_ok=True)
     database_url = _text("DATABASE_URL") or f"sqlite:///{data_dir / 'feeddock.db'}"
 
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_password:
+        admin_password = secrets.token_urlsafe(16)
+        print(
+            f"\n\n=======================================================\n"
+            f" [Security] No ADMIN_PASSWORD provided in environment.\n"
+            f" Generated random default password: {admin_password}\n"
+            f" Please log in and change this password immediately.\n"
+            f"=======================================================\n\n",
+            file=sys.stderr,
+        )
+
     return Settings(
         app_name=_text("APP_NAME", "FeedDock") or "FeedDock",
         app_version=build.version,
@@ -127,7 +141,7 @@ def load_settings():
         data_dir=data_dir,
         database_url=database_url,
         admin_user=_text("ADMIN_USER", "admin") or "admin",
-        admin_password=os.getenv("ADMIN_PASSWORD", "change-this-to-a-strong-password"),
+        admin_password=admin_password,
         session_days=_integer("SESSION_DAYS", 7, minimum=1, maximum=3650),
         cookie_secure=_boolean("COOKIE_SECURE", False),
         allow_system_actions=_boolean("FEEDDOCK_ALLOW_SYSTEM_ACTIONS", False),
