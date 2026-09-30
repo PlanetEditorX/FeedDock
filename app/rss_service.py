@@ -11,7 +11,7 @@ import re
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -269,14 +269,17 @@ def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
         "User-Agent": settings.rss_user_agent,
         "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
     }
-    response = external_get(
-        url,
-        db=db,
-        headers=headers,
-        timeout=(load_application_preferences(db).rss.timeout_seconds if db is not None else settings.request_timeout_seconds),
-    )
-    response.raise_for_status()
-    return parse_feed(response.content)
+    try:
+        timeout = (
+            load_application_preferences(db).rss.timeout_seconds
+            if db is not None
+            else settings.request_timeout_seconds
+        )
+        response = external_get(url, db=db, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return parse_feed(response.content)
+    except Exception as exc:
+        raise RuntimeError(f"请求 {_redact_url(url)} 失败：{exc}") from exc
 
 
 def _load_subscription_entries(subscription: Subscription, db: Session | None = None) -> tuple[list[dict[str, Any]], str]:
@@ -300,6 +303,19 @@ def _load_subscription_entries(subscription: Subscription, db: Session | None = 
     raise RuntimeError(str(primary_error or "RSS 获取失败"))
 
 
+def _redact_url(url: str) -> str:
+    """去掉查询参数，避免把 RSS 订阅 passkey 等敏感信息写进日志。"""
+    try:
+        parts = urlsplit(url)
+        query = parts.query or parts.fragment
+        if query:
+            hint = "…(参数已隐藏)"
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, hint, ""))
+        return url
+    except Exception:
+        return url.split("?", 1)[0]
+
+
 def _network_failure_kind(exc: Exception) -> str | None:
     """Classify a connection-level failure so the advice matches reality.
 
@@ -318,7 +334,7 @@ def _network_failure_kind(exc: Exception) -> str | None:
         if isinstance(item, socket.gaierror) or "Name or service not known" in _err_text(item) or "Temporary failure in name resolution" in _err_text(item):
             return "dns"
         errno = getattr(item, "errno", None)
-        if errno in (101, 113):  # ENETUNREACH / EHOSTUNREACH
+        if errno in (99, 101, 113):  # EADDRNOTAVAIL / ENETUNREACH / EHOSTUNREACH
             return "unreachable"
         if errno == 111:  # ECONNREFUSED
             return "refused"
