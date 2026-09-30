@@ -24,6 +24,11 @@ services:
       - "timeout:2"
       - "attempts:2"
       - "rotate"
+    # Docker 桥接网默认不带 IPv6 路由；禁用容器 IPv6 可避免对含 AAAA 记录的
+    # 域名建连时抛 [Errno 101] Network is unreachable。改后需重建容器。
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     volumes:
       - ./data:/data
       - ./downloads:/media

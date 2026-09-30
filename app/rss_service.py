@@ -4,6 +4,7 @@ import hashlib
 import html
 import os
 import posixpath
+import socket
 from pathlib import Path
 import time
 import re
@@ -299,6 +300,67 @@ def _load_subscription_entries(subscription: Subscription, db: Session | None = 
     raise RuntimeError(str(primary_error or "RSS 获取失败"))
 
 
+def _network_failure_kind(exc: Exception) -> str | None:
+    """Classify a connection-level failure so the advice matches reality.
+
+    Earlier versions always told the user to "re-search the RSS feed", which is
+    misleading when the container cannot reach the network at all (Docker
+    containers commonly lack an IPv6 route, so resolving an AAAA record triggers
+    ``[Errno 101] Network is unreachable`` even though IPv4 is fine).
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        item = stack.pop()
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, socket.gaierror) or "Name or service not known" in _err_text(item) or "Temporary failure in name resolution" in _err_text(item):
+            return "dns"
+        errno = getattr(item, "errno", None)
+        if errno in (101, 113):  # ENETUNREACH / EHOSTUNREACH
+            return "unreachable"
+        if errno == 111:  # ECONNREFUSED
+            return "refused"
+        if errno in (110, 112):  # ETIMEDOUT / EHOSTDOWN
+            return "timeout"
+        text = _err_text(item)
+        if "Network is unreachable" in text or "Host is unreachable" in text:
+            return "unreachable"
+        if "Connection refused" in text:
+            return "refused"
+        if "timed out" in text or "Timeout" in text:
+            return "timeout"
+        cause = getattr(item, "__cause__", None)
+        if cause is not None:
+            stack.append(cause)
+        for arg in item.args:
+            if isinstance(arg, BaseException):
+                stack.append(arg)
+    return None
+
+
+def _err_text(exc: BaseException) -> str:
+    try:
+        return str(exc) or ""
+    except Exception:
+        return ""
+
+
+_NETWORK_ADVICE: dict[str, str] = {
+    "unreachable": (
+        "网络不可达：容器无法访问目标（常见原因：容器无 IPv6 路由，或网关/路由器 DNS 返回了错误地址）。"
+        "请检查 Docker 网络配置、代理设置，或前往“设置 → 网络”运行诊断。"
+    ),
+    "refused": (
+        "连接被拒绝：目标站点拒绝了连接（常见原因：DNS 被代理/劫持返回错误 IP，或站点访问受限）。"
+        "请在路由器或代理中为该域名配置正确的解析，或稍后重试。"
+    ),
+    "timeout": "连接超时：目标站点响应超时，请检查外网链路或稍后重试。",
+    "dns": "DNS 解析失败：容器无法解析该域名，请检查 Docker DNS 配置或网络诊断中的解析结果。",
+}
+
+
 def _rss_load_error_details(subscription: Subscription, exc: Exception) -> str:
     if debug_enabled():
         return format_exception_details(
@@ -312,7 +374,11 @@ def _rss_load_error_details(subscription: Subscription, exc: Exception) -> str:
             },
         )
     message = str(exc).strip() or "RSS 获取失败"
-    advice = "请在订阅卡片点击“更新 RSS”，按当前番剧信息重新搜索 Mikan、ANI.BT 与 Anime Garden。"
+    kind = _network_failure_kind(exc)
+    if kind in _NETWORK_ADVICE:
+        advice = _NETWORK_ADVICE[kind]
+    else:
+        advice = "请在订阅卡片点击“更新 RSS”，按当前番剧信息重新搜索 Mikan、ANI.BT 与 Anime Garden。"
     return (
         f"订阅 ID：{subscription.id}\n"
         f"订阅名称：{subscription.name}\n"
