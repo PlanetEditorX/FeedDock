@@ -1530,7 +1530,9 @@ def mikan_catalog(
 ) -> dict[str, Any]:
     try:
         payload = MikanCacheService(DiscoveryService()).catalog(db, year, season, q)
-        return _apply_mikan_hidden_filters(payload, db, year=year, season=season)
+        filter_year = int(payload.get("year") or year)
+        filter_season = str(payload.get("season") or season)
+        return _apply_mikan_hidden_filters(payload, db, year=filter_year, season=filter_season)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -1553,12 +1555,20 @@ def refresh_mikan_catalog(
         payload = MikanCacheService(DiscoveryService()).catalog(
             db, year, season, q, force_refresh=True
         )
-        result = _apply_mikan_hidden_filters(payload, db, year=year, season=season)
+        filter_year = int(payload.get("year") or year)
+        filter_season = str(payload.get("season") or season)
+        result = _apply_mikan_hidden_filters(payload, db, year=filter_year, season=filter_season)
         if get_app_setting("mikan_preorder_enabled", "0", db) == "1":
-            created = _create_mikan_trials(db, year=year, season=season, payload=payload)
-            for subscription in created:
-                background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-preorder")
-            result["trial_created"] = len(created)
+            # An empty requested quarter may temporarily display the latest
+            # populated previous quarter. Do not create preorder trials from
+            # that fallback data as if they belonged to the requested quarter.
+            if payload.get("fallback_from_empty_season"):
+                result["trial_created"] = 0
+            else:
+                created = _create_mikan_trials(db, year=filter_year, season=filter_season, payload=payload)
+                for subscription in created:
+                    background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-preorder")
+                result["trial_created"] = len(created)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

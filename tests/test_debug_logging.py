@@ -1,6 +1,8 @@
 import unittest
+from datetime import datetime, timezone
 
 from app.debug_logging import format_exception_details, normalize_log_level, safe_json
+from app.schemas import LogOut
 
 
 class DebugLoggingTests(unittest.TestCase):
@@ -28,6 +30,19 @@ class DebugLoggingTests(unittest.TestCase):
         self.assertIn("Traceback:", details)
         self.assertNotIn("secret-token", details)
         self.assertIn('"api_token": "***"', details)
+
+
+    def test_log_schema_restores_utc_timezone_after_sqlite_round_trip(self):
+        payload = LogOut(
+            id=1,
+            level="INFO",
+            message="test",
+            details="",
+            created_at=datetime(2026, 10, 1, 2, 0, 0),
+        )
+        self.assertEqual(payload.created_at.tzinfo, timezone.utc)
+        rendered = payload.model_dump_json()
+        self.assertTrue("Z" in rendered or "+00:00" in rendered)
 
     def test_proxy_credentials_are_redacted(self):
         rendered = safe_json({"proxy_url": "http://user:password@example.test:7890"})

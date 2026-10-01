@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
@@ -354,6 +354,15 @@ class LogOut(BaseModel):
     details: str
     created_at: datetime
 
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at_timezone(cls, value: datetime) -> datetime:
+        # SQLite drops timezone metadata even for DateTime(timezone=True). The
+        # stored value is UTC, so restore that information before JSON output.
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
 
 class LogSettingsUpdate(BaseModel):
     level: str = Field(default="INFO", max_length=16)
@@ -678,6 +687,10 @@ class MikanCatalogOut(BaseModel):
     is_stale: bool = False
     refresh_error: str = ""
     hidden_count: int = 0
+    requested_year: int | None = None
+    requested_season: str = ""
+    fallback_from_empty_season: bool = False
+    fallback_notice: str = ""
 
 
 class MikanWeekdayFilterUpdate(BaseModel):

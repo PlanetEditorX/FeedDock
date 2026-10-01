@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -8,6 +9,7 @@ import re
 import sys
 import traceback
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -32,12 +34,21 @@ def normalize_log_level(value: str | None) -> str:
 def configure_logging(level: str | None = None) -> logging.Logger:
     global _configured
     selected = normalize_log_level(level or getattr(settings, "log_level", "INFO"))
+    # The Docker image's localtime is usually UTC; format log timestamps in the
+    # configured zone so logs match the user's local clock regardless of container TZ.
+    log_zone = ZoneInfo(settings.timezone) if settings.timezone else None
+
+    def _timestamp_converter(ts: float):
+        moment = datetime.fromtimestamp(ts, tz=log_zone) if log_zone else datetime.fromtimestamp(ts)
+        return moment.timetuple()
+
     if not _configured:
         _logger.propagate = False
         formatter = logging.Formatter(
             "%(asctime)s %(levelname)s [%(name)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+        formatter.converter = _timestamp_converter
 
         console = logging.StreamHandler(sys.stdout)
         console.setFormatter(formatter)

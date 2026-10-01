@@ -119,7 +119,90 @@ class MikanCacheTests(unittest.TestCase):
         self.assertEqual(migrated["cache_status"], "cache_migrated")
         self.assertEqual(cached["cache_status"], "cache")
         assert row is not None
-        self.assertEqual(json.loads(row.params_json)["schema_version"], 4)
+        self.assertEqual(json.loads(row.params_json)["schema_version"], 5)
+
+
+    def test_empty_season_falls_back_to_latest_populated_season(self) -> None:
+        class UpAndDown(FakeDiscovery):
+            def __init__(self) -> None:
+                super().__init__()
+                self.empty = set()
+
+            def catalog(self, year: int, season: str, query: str = ""):
+                if season in self.empty:
+                    self.catalog_calls += 1
+                    raise RuntimeError("https://mikan.test: 未解析到番剧")
+                return super().catalog(year, season, query)
+
+        discovery = UpAndDown()
+        discovery.empty.add("秋")
+        service = MikanCacheService(discovery)
+        with self.Session() as db:
+            first = service.catalog(db, 2026, "秋")
+            cached = service.catalog(db, 2026, "秋")
+
+        self.assertEqual(first["cache_status"], "season_fallback")
+        self.assertEqual(first["rows"][0]["items"][0]["bangumi_id"], 100)
+        self.assertEqual(first["year"], 2026)
+        self.assertEqual(first["season"], "夏")
+        # one empty attempt for 秋 + one successful fallback to 夏
+        self.assertEqual(discovery.catalog_calls, 2)
+        self.assertEqual(cached["cache_status"], "season_fallback")
+        self.assertEqual(cached["season"], "夏")
+        self.assertTrue(cached["fallback_from_empty_season"])
+        with self.Session() as db:
+            autumn = db.get(MikanCacheEntry, "mikan:catalog:2026:秋")
+            summer = db.get(MikanCacheEntry, "mikan:catalog:2026:夏")
+            assert autumn is not None and summer is not None
+            self.assertEqual(json.loads(autumn.payload_json)["rows"], [])
+            self.assertEqual(json.loads(autumn.payload_json)["season"], "秋")
+            self.assertEqual(json.loads(summer.payload_json)["season"], "夏")
+
+
+    def test_cached_empty_season_reuses_previous_cached_quarter_without_remote_request(self) -> None:
+        summer = self.discovery.catalog(2026, "夏")
+        self.discovery.catalog_calls = 0
+        with self.Session() as db:
+            db.add_all([
+                MikanCacheEntry(
+                    cache_key="mikan:catalog:2026:秋",
+                    kind="catalog",
+                    params_json=json.dumps({"year": 2026, "season": "秋", "schema_version": 5}),
+                    payload_json=json.dumps({
+                        "provider": "mikan", "year": 2026, "season": "秋", "query": "",
+                        "base_url": "https://mikan.test", "rows": [], "errors": []
+                    }, ensure_ascii=False),
+                    fetched_at=datetime.now(timezone.utc),
+                    last_error="",
+                ),
+                MikanCacheEntry(
+                    cache_key="mikan:catalog:2026:夏",
+                    kind="catalog",
+                    params_json=json.dumps({"year": 2026, "season": "夏", "schema_version": 5}),
+                    payload_json=json.dumps(summer, ensure_ascii=False),
+                    fetched_at=datetime.now(timezone.utc),
+                    last_error="",
+                ),
+            ])
+            db.commit()
+            result = self.service.catalog(db, 2026, "秋")
+
+        self.assertEqual(self.discovery.catalog_calls, 0)
+        self.assertEqual(result["cache_status"], "season_fallback")
+        self.assertEqual(result["season"], "夏")
+        self.assertEqual(result["requested_season"], "秋")
+        self.assertTrue(result["fallback_from_empty_season"])
+
+    def test_previous_season_and_empty_markers(self) -> None:
+        from app.mikan_cache import _is_empty_season, _previous_season
+
+        self.assertEqual(_previous_season(2026, "春"), (2026, "冬"))
+        self.assertEqual(_previous_season(2026, "夏"), (2026, "春"))
+        self.assertEqual(_previous_season(2026, "秋"), (2026, "夏"))
+        self.assertEqual(_previous_season(2026, "冬"), (2025, "秋"))
+        self.assertTrue(_is_empty_season(RuntimeError("site: 未解析到番剧")))
+        self.assertTrue(_is_empty_season(RuntimeError("未找到番剧目录")))
+        self.assertFalse(_is_empty_season(RuntimeError("[Errno 99] Cannot assign requested address")))
 
     def test_force_refresh_replaces_catalog_cache(self) -> None:
         with self.Session() as db:

@@ -26,6 +26,7 @@ let subscriptionSources = subscriptionSourceState.normalizeCatalog([]);
 let activeSubscriptionSource = subscriptionSourceState.getSource(subscriptionSources, 'other');
 let activeCatalogSource = 'mikan';
 let subscriptionSortMode = 'updated';
+let displayTimeZone = 'Asia/Shanghai';
 const mikanWeekdayDrafts = new Map();
 const PANEL_STATE_KEY = 'feeddock.panelState.v1';
 const MIKAN_WEEKDAY_STATE_KEY = 'feeddock.mikanWeekdayState.v1';
@@ -201,7 +202,18 @@ function text(tag, value, className = '') {
 }
 
 function fmtDate(value) {
-  return value ? new Date(value).toLocaleString('zh-CN') : '—';
+  if (!value) return '—';
+  const s = String(value).trim();
+  // Backend timestamps are UTC. SQLite can drop timezone metadata, so values
+  // without an explicit offset are interpreted as UTC. Display them in the
+  // configured FeedDock timezone instead of the browser/device timezone.
+  const date = new Date(/Z|[+-]\d{2}:?\d{2}\s*$/.test(s) ? s : /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) ? `${s}Z` : s);
+  if (Number.isNaN(date.getTime())) return s;
+  try {
+    return date.toLocaleString('zh-CN', { timeZone: displayTimeZone });
+  } catch (_) {
+    return date.toLocaleString('zh-CN');
+  }
 }
 
 function titleWithYear(title, year) {
@@ -354,6 +366,7 @@ async function openDashboardStat(target) {
 
 async function loadConfig() {
   const data = await api('/api/config');
+  displayTimeZone = String(data.timezone || 'Asia/Shanghai').trim() || 'Asia/Shanghai';
   let qbitState = '未配置';
   if (data.qbit_url) qbitState = data.configured ? data.qbit_url : `${data.qbit_url}（配置不完整）`;
   document.getElementById('configSummary').textContent =
@@ -797,6 +810,7 @@ function cacheStatusText(data) {
     cache_migrated: '旧缓存已自动修复',
     legacy_cache_refresh_failed: '旧缓存修复失败，暂时使用旧数据',
     stale_cache_refresh_failed: '更新失败，暂时使用旧缓存',
+    season_fallback: '当前季度为空，已自动回退',
   };
   const parts = [statusLabels[data.cache_status] || '本地缓存'];
   if (data.cached_at) parts.push(`缓存时间 ${fmtDate(data.cached_at)}`);
@@ -1128,7 +1142,8 @@ function renderMikanCatalog(data) {
     : '';
   const sourceLabel = subscriptionSourceState.getSource(subscriptionSources, activeCatalogSource).label;
   const periodSummary = data.period_notice ? ` · ${data.period_notice}` : '';
-  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${periodSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
+  const fallbackSummary = data.fallback_from_empty_season && data.fallback_notice ? ` · ${data.fallback_notice}` : '';
+  state.textContent = `${sourceLabel} · ${data.year} ${data.season} · ${data.rows.length} 个播出日 · 显示 ${visibleCount}/${totalCount} 部${hiddenSummary} · ${cacheStatusText(data)}${fallbackSummary}${periodSummary}${data.attribution ? ` · ${data.attribution}` : ""}`;
   state.className = 'hint';
 
   for (const row of data.rows) {
@@ -1299,8 +1314,16 @@ async function loadMikanCatalog(form, forceRefresh = false) {
       ? (forceRefresh ? `/api/discovery/mikan/catalog/refresh?${params}` : `/api/discovery/mikan/catalog?${params}`)
       : (forceRefresh ? `/api/discovery/catalog/${activeCatalogSource}/refresh?${params}` : `/api/discovery/catalog/${activeCatalogSource}?${params}`);
     const data = await api(path, forceRefresh ? { method: 'POST' } : {});
+    if (data.fallback_from_empty_season) {
+      if (data.year) form.elements.year.value = String(data.year);
+      if (data.season) form.elements.season.value = data.season;
+    }
     renderMikanCatalog(data);
-    if (forceRefresh) showNotice(`${source.label} 番剧周历缓存已更新`);
+    if (data.fallback_from_empty_season) {
+      showNotice(data.fallback_notice || `${year} ${season}季暂无数据，已自动切换到最近有内容的季度`);
+    } else if (forceRefresh) {
+      showNotice(`${source.label} 番剧周历缓存已更新`);
+    }
   } catch (error) {
     if (!document.getElementById('mikanCatalog').children.length) {
       document.getElementById('mikanCatalog').replaceChildren();

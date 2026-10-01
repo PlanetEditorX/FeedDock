@@ -19,7 +19,7 @@ from .models import MikanCacheEntry, SystemLog, utcnow
 
 _CATALOG_KIND = "catalog"
 _DETAIL_KIND = "detail"
-_CATALOG_SCHEMA_VERSION = 4
+_CATALOG_SCHEMA_VERSION = 5
 _DETAIL_SCHEMA_VERSION = 2
 _refresh_lock = threading.Lock()
 _image_lock = threading.Lock()
@@ -59,6 +59,43 @@ def _entry_schema(entry: MikanCacheEntry | None) -> int:
         return int(_loads(entry.params_json).get("schema_version", 0))
     except (TypeError, ValueError, json.JSONDecodeError):
         return 0
+
+
+_SEASON_ORDER = {"冬": 0, "春": 1, "夏": 2, "秋": 3}
+_SEASON_NAMES = {v: k for k, v in _SEASON_ORDER.items()}
+_EMPTY_SEASON_MARKERS = ("未解析到番剧", "未找到番剧目录")
+
+
+def _previous_season(year: int, season: str) -> tuple[int, str]:
+    """Return the immediately preceding season; December rolls back to Autumn of prior year."""
+    index = _SEASON_ORDER[season]
+    if index > 0:
+        return year, _SEASON_NAMES[index - 1]
+    return year - 1, "秋"
+
+
+def _is_empty_season(exc: Exception) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _EMPTY_SEASON_MARKERS)
+
+
+def _catalog_has_items(payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    return any(row.get("items") for row in payload.get("rows", []) if isinstance(row, dict))
+
+
+def _empty_catalog_payload(year: int, season: str, message: str = "") -> dict[str, Any]:
+    return {
+        "provider": "mikan",
+        "year": year,
+        "season": season,
+        "query": "",
+        "base_url": "",
+        "rows": [],
+        "errors": [message] if message else [],
+    }
+
 
 def _filter_catalog(payload: dict[str, Any], query: str) -> dict[str, Any]:
     result = deepcopy(payload)
@@ -172,20 +209,16 @@ class MikanCacheService:
         status = "cache"
         needs_migration = entry is not None and _entry_schema(entry) < _CATALOG_SCHEMA_VERSION
         old_payload = _loads(entry.payload_json) if entry is not None else None
+        payload = old_payload or {}
 
         if entry is None or force_refresh or needs_migration:
             try:
                 # Always cache the full quarter. Search is applied locally so
                 # changing the title filter never creates another remote call.
-                payload = self.discovery.catalog(year, season, "")
-            except Exception as exc:
-                self._remember_error(db, entry, str(exc))
-                if needs_migration and old_payload is not None:
-                    payload = old_payload
-                    status = "legacy_cache_refresh_failed"
-                else:
-                    raise
-            else:
+                fetched = self.discovery.catalog(year, season, "")
+                if not _catalog_has_items(fetched):
+                    raise RuntimeError("未解析到番剧")
+                payload = fetched
                 entry = self._store(
                     db,
                     cache_key=key,
@@ -203,11 +236,100 @@ class MikanCacheService:
                     status = "cache_migrated"
                 else:
                     status = "cache_miss_fetched"
-        else:
-            payload = old_payload or {}
+            except Exception as exc:
+                if _is_empty_season(exc):
+                    # Keep an explicit empty marker for the requested season so
+                    # repeated page opens do not hit Mikan again until the normal
+                    # cache refresh interval. Do not store another season's data
+                    # under this key; that made empty-quarter caches ambiguous.
+                    entry = self._store(
+                        db,
+                        cache_key=key,
+                        kind=_CATALOG_KIND,
+                        params={
+                            "year": year,
+                            "season": season,
+                            "schema_version": _CATALOG_SCHEMA_VERSION,
+                        },
+                        payload=_empty_catalog_payload(year, season, str(exc)),
+                    )
+                    fallback = self._catalog_with_fallback(db, year, season)
+                    if fallback is None:
+                        self._remember_error(db, entry, str(exc))
+                        raise
+                    payload, _ = fallback
+                    status = "season_fallback"
+                elif old_payload is not None and _catalog_has_items(old_payload):
+                    payload = old_payload
+                    status = "legacy_cache_refresh_failed" if needs_migration else "stale_cache_refresh_failed"
+                    self._remember_error(db, entry, str(exc))
+                else:
+                    self._remember_error(db, entry, str(exc))
+                    raise
+        elif not _catalog_has_items(payload):
+            # Older releases could persist an empty current-quarter cache. Reuse
+            # the latest populated previous quarter without requiring the user to
+            # manually switch from e.g. 秋 to 夏.
+            fallback = self._catalog_with_fallback(db, year, season)
+            if fallback is not None:
+                payload, _ = fallback
+                status = "season_fallback"
 
         filtered = _filter_catalog(payload, query)
+        if status == "season_fallback":
+            filtered["requested_year"] = year
+            filtered["requested_season"] = season
+            filtered["fallback_from_empty_season"] = True
+            filtered["fallback_notice"] = (
+                f"{year} {season}季暂无番剧，已自动切换到 "
+                f"{filtered.get('year', year)} {filtered.get('season', season)}季"
+            )
         return self._metadata(filtered, entry, cache_status=status)
+
+    def _catalog_with_fallback(
+        self,
+        db: Session,
+        year: int,
+        season: str,
+    ) -> tuple[dict[str, Any], MikanCacheEntry] | None:
+        """Return the latest populated catalog before ``year/season``.
+
+        Existing previous-quarter caches are preferred, avoiding another Mikan
+        request when the user already opened that quarter. Missing caches are
+        fetched and stored under their own quarter key.
+        """
+        candidate_year, candidate_season = year, season
+        for _ in range(4):
+            candidate_year, candidate_season = _previous_season(candidate_year, candidate_season)
+            candidate_key = _catalog_key(candidate_year, candidate_season)
+            cached = db.get(MikanCacheEntry, candidate_key)
+            if cached is not None:
+                try:
+                    cached_payload = _loads(cached.payload_json)
+                except (ValueError, json.JSONDecodeError):
+                    cached_payload = {}
+                if _catalog_has_items(cached_payload):
+                    return cached_payload, cached
+
+            try:
+                fetched = self.discovery.catalog(candidate_year, candidate_season, "")
+            except Exception:
+                continue
+            if not _catalog_has_items(fetched):
+                continue
+            stored = self._store(
+                db,
+                cache_key=candidate_key,
+                kind=_CATALOG_KIND,
+                params={
+                    "year": candidate_year,
+                    "season": candidate_season,
+                    "schema_version": _CATALOG_SCHEMA_VERSION,
+                },
+                payload=fetched,
+            )
+            return fetched, stored
+        return None
 
     def detail(
         self,
