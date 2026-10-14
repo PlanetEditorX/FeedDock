@@ -85,6 +85,13 @@ def reset_monitor_state_for_changes(
     def changed(field: str) -> bool:
         return field in changes and changes[field] != getattr(subscription, field)
 
+    # A former connectivity error describes the OLD feed, not the new URLs.
+    # Invalidate it immediately; the next actual check can report a fresh error.
+    if changed("rss_url") or changed("backup_rss_url"):
+        subscription.last_error = ""
+        subscription.last_checked_at = None
+        subscription.last_rss_source = ""
+
     if changed("total_episodes"):
         subscription.completion_notified_at = None
         subscription.last_missing_signature = ""

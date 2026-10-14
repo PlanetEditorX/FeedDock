@@ -126,6 +126,7 @@ class Subscription(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_rss_source: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     items: Mapped[list[FeedItem]] = relationship(

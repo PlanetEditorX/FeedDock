@@ -44,6 +44,7 @@ _SUBSCRIPTION_COLUMNS: dict[str, str] = {
     "primary_rss_name": "VARCHAR(200) NOT NULL DEFAULT ''",
     "backup_rss_name": "VARCHAR(200) NOT NULL DEFAULT ''",
     "backup_rss_url": "TEXT NOT NULL DEFAULT ''",
+    "last_rss_source": "VARCHAR(16) NOT NULL DEFAULT ''",
     "episode_group": "INTEGER NOT NULL DEFAULT 0",
     "episode_offset": "INTEGER NOT NULL DEFAULT 0",
     "total_episodes": "INTEGER NOT NULL DEFAULT 0",

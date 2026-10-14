@@ -1,0 +1,8 @@
+# Override the official remote image with this locally patched build.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps feeddock
+services:
+  feeddock:
+    image: feeddock:rssfix
+    pull_policy: never
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"

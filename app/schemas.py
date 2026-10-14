@@ -275,6 +275,7 @@ class SubscriptionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_checked_at: datetime | None
+    last_rss_source: str = ""
     last_error: str
     missing_episodes: list[int] = Field(default_factory=list)
     canonical_title: str = ""

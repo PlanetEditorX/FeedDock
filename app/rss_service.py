@@ -282,12 +282,12 @@ def _fetch_entries(url: str, db: Session | None = None) -> list[dict[str, Any]]:
         raise RuntimeError(f"请求 {_redact_url(url)} 失败：{exc}") from exc
 
 
-def _load_subscription_entries(subscription: Subscription, db: Session | None = None) -> tuple[list[dict[str, Any]], str]:
+def _load_subscription_entries(subscription: Subscription, db: Session | None = None) -> tuple[list[dict[str, Any]], str, str]:
     primary_error: Exception | None = None
     try:
         entries = _fetch_entries(subscription.rss_url, db)
         if entries:
-            return entries, subscription.primary_rss_name or "主 RSS"
+            return entries, subscription.primary_rss_name or "主 RSS", "primary"
         primary_error = ValueError("主 RSS 没有条目")
     except Exception as exc:
         primary_error = exc
@@ -296,7 +296,7 @@ def _load_subscription_entries(subscription: Subscription, db: Session | None = 
         try:
             entries = _fetch_entries(subscription.backup_rss_url, db)
             if entries:
-                return entries, subscription.backup_rss_name or "备用 RSS"
+                return entries, subscription.backup_rss_name or "备用 RSS", "backup"
             raise ValueError("备用 RSS 没有条目")
         except Exception as backup_error:
             raise RuntimeError(f"主 RSS 失败：{primary_error}；备用 RSS 失败：{backup_error}") from backup_error
@@ -1022,12 +1022,16 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     _refresh_total_episodes_if_due(db, subscription)
     _sync_metadata_if_due(db, subscription)
     try:
-        entries, source_name = _load_subscription_entries(subscription, db)
+        loaded = _load_subscription_entries(subscription, db)
+        entries, source_name = loaded[:2]
+        # Two-field mocks from older integrations remain supported.
+        source_kind = loaded[2] if len(loaded) > 2 else "primary"
     except Exception as exc:
         subscription.last_checked_at = datetime.now(timezone.utc)
         error_message = str(exc).strip() or "RSS 获取失败"
         if "没有条目" in error_message:
             error_message = f"{error_message}；请点击“更新 RSS”重新搜索字幕组"
+        subscription.last_rss_source = ""
         subscription.last_error = error_message[:1000]
         add_log(
             db,
@@ -1060,6 +1064,7 @@ def process_subscription(db: Session, subscription: Subscription) -> dict[str, i
     if subscription.subscription_mode == "trial" and _trial_download_exists(db, subscription):
         subscription.enabled = False
     subscription.last_checked_at = now
+    subscription.last_rss_source = source_kind
     subscription.last_error = ""
     add_log(
         db,

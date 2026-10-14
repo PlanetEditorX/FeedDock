@@ -271,6 +271,11 @@ function resetSubscriptionForm() {
   document.getElementById('saveRssOnly').classList.add('hidden');
   document.getElementById('saveRssOnly').textContent = '仅保存 RSS';
   document.getElementById('saveRssAndRefresh').classList.add('hidden');
+  document.getElementById('testPrimaryRss').classList.add('hidden');
+  document.getElementById('testBackupRss').classList.add('hidden');
+  const rssFeedback = document.getElementById('rssSettingsFeedback');
+  rssFeedback.textContent = '备用 RSS 仅在主 RSS 失败或没有条目时启用。';
+  rssFeedback.classList.remove('error-text');
   subscriptionForm.elements.rss_url.closest('details').open = false;
   subscriptionPreviewBox.textContent = '尚未预览。';
   subscriptionPreviewBox.className = 'preview-box muted';
@@ -1363,6 +1368,11 @@ function populateSubscriptionForm(sub, { focusRss = false } = {}) {
   saveRssOnly.classList.remove('hidden');
   saveRssOnly.textContent = sub.last_error ? '保存 RSS 并立即检查' : '仅保存 RSS';
   saveRssAndRefresh.classList.toggle('hidden', Boolean(sub.last_error));
+  document.getElementById('testPrimaryRss').classList.remove('hidden');
+  document.getElementById('testBackupRss').classList.toggle('hidden', !sub.backup_rss_url);
+  const feedback = document.getElementById('rssSettingsFeedback');
+  feedback.classList.remove('error-text');
+  feedback.textContent = sub.last_error ? '上次 RSS 检查失败。修改地址并保存后会清除旧异常，并重新检查。' : '备用 RSS 仅在主 RSS 失败或无条目时接管，可分别独立测试。';
   const rssDetails = subscriptionForm.elements.rss_url.closest('details');
   rssDetails.open = focusRss;
   subscriptionPreviewBox.textContent = '请点击“预览规则和路径”确认修改后的结果。';
@@ -1408,8 +1418,9 @@ function createSubscriptionCard(sub) {
   titleRow.append(text('h3', sub.canonical_title || sub.name));
   if (Number(sub.metadata_rating || 0) > 0) titleRow.append(text('span', `★ ${Number(sub.metadata_rating).toFixed(1)}`, 'rating-badge'));
   const isTrial = sub.subscription_mode === 'trial';
-  const stateLabel = sub.last_error ? '异常' : isTrial ? '已试看' : sub.enabled ? '启用' : '停用';
-  titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : sub.enabled ? 'queued' : 'skipped'}`));
+  const awaitingRssCheck = !sub.last_checked_at && sub.enabled && !isTrial;
+  const stateLabel = sub.last_error ? '异常' : isTrial ? '已试看' : awaitingRssCheck ? '待检查' : sub.enabled ? '启用' : '停用';
+  titleRow.append(text('span', stateLabel, `badge ${sub.last_error ? 'error' : awaitingRssCheck ? 'skipped' : sub.enabled ? 'queued' : 'skipped'}`));
   content.append(titleRow);
   if (sub.metadata_overview) content.append(text('p', sub.metadata_overview, 'subscription-overview'));
   const details = document.createElement('details');
@@ -1432,8 +1443,14 @@ function createSubscriptionCard(sub) {
   meta.append(text('span', `下载根目录：${sub.custom_download_path || currentDownloadRoot} · 模板：${sub.save_path_template}`));
   meta.append(text('span', `命名：${sub.rename_enabled ? sub.file_name_template : '关闭'} · 完结自动停用：${sub.auto_disable_when_complete ? '开启' : '关闭'} · 未更新告警：${sub.stale_days ? `${sub.stale_days} 天` : '关闭'}`));
   meta.append(text('span', `主 RSS：${sub.primary_rss_name || '未命名'} · ${sub.rss_url}`));
+  meta.append(text('span', sub.backup_rss_url
+    ? `备用 RSS：${sub.backup_rss_name || '未命名'} · ${sub.backup_rss_url}（主源失败或无条目才使用）`
+    : '备用 RSS：未配置'));
+  if (sub.last_rss_source && !sub.last_error) {
+    meta.append(text('span', `最近一次成功读取：${sub.last_rss_source === 'backup' ? '备用 RSS（已接管）' : '主 RSS'}`));
+  }
   details.append(meta);
-  details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${fmtDate(sub.last_checked_at)}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
+  details.append(text('p', `上次元数据同步：${fmtDate(sub.metadata_last_synced_at)} ｜ 上次检查：${sub.last_checked_at ? fmtDate(sub.last_checked_at) : '待检查'}${sub.last_error ? ` ｜ ${sub.last_error}` : ''}`, `${sub.last_error ? 'error-text' : 'muted'} subscription-activity`));
   content.append(details);
   const controls = document.createElement('div');
   controls.className = 'card-actions';
@@ -2298,17 +2315,36 @@ function rssCandidatePatch(candidate) {
   return patch;
 }
 
-function applyRssCandidateToForm(candidate, target = 'primary') {
-  if (target === 'backup') {
-    setFormValue(subscriptionForm, 'backup_rss_name', candidate.rss_name || `${candidate.source_label} · ${candidate.group_name}`);
-    setFormValue(subscriptionForm, 'backup_rss_url', candidate.rss_url);
-    showNotice('已填入备用 RSS，请保存订阅');
-    return;
+async function applyRssCandidateToForm(candidate, target = 'primary') {
+  if (!rssCandidateSubscription) throw new Error('请先选择订阅');
+  const isBackup = target === 'backup';
+  const patch = isBackup ? {
+    backup_rss_name: candidate.rss_name || `${candidate.source_label} · ${candidate.group_name}`,
+    backup_rss_url: candidate.rss_url,
+  } : rssCandidatePatch(candidate);
+  const id = rssCandidateSubscription.id;
+  // Save immediately: the modal used to only fill the invisible edit form.
+  const saved = await api(`/api/subscriptions/${id}`, {
+    method: 'PATCH', body: JSON.stringify(patch),
+  });
+  rssCandidateSubscription = saved;
+  populateSubscriptionForm(saved, { focusRss: true });
+  closeRssCandidateModal();
+  await loadSubscriptions();
+  const label = isBackup ? '备用 RSS' : '主 RSS';
+  let refreshMessage = '订阅已停用，不会自动检查';
+  if (saved.enabled) {
+    try {
+      const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+      refreshMessage = result.message || '已启动 RSS 检查';
+      watchSubscriptionRefresh(id);
+    } catch (error) { refreshMessage = `RSS 已保存，但立即检查未启动：${error.message}`; }
   }
-  const patch = rssCandidatePatch(candidate);
-  Object.entries(patch).forEach(([key, value]) => setFormValue(subscriptionForm, key, value));
-  renderSubscriptionSourceContext(subscriptionSourceState.getSource(subscriptionSources, candidate.source_id));
-  showNotice('已填入主 RSS，请保存或立即检查');
+  const message = isBackup
+    ? `${label}已保存。仅主 RSS 失败或无条目时自动接管；${refreshMessage || '已开始检查'}`
+    : `${label}已保存，${refreshMessage || '已开始检查'}`;
+  document.getElementById('rssSettingsFeedback').textContent = message;
+  showNotice(message);
 }
 
 async function saveRssCandidateAndRefresh(candidate) {
@@ -2363,10 +2399,17 @@ function renderRssCandidates(payload) {
       info.append(text('span', `${candidate.match_reason}${candidate.recent_count ? ` · 最近资源 ${candidate.recent_count} 条` : ''}`, 'muted'));
       const actions = document.createElement('div');
       actions.className = 'card-actions';
-      const primary = text('button', '填入主 RSS', 'small secondary');
-      primary.type = 'button'; primary.addEventListener('click', () => applyRssCandidateToForm(candidate, 'primary'));
-      const backup = text('button', '填入备用 RSS', 'small secondary');
-      backup.type = 'button'; backup.addEventListener('click', () => applyRssCandidateToForm(candidate, 'backup'));
+      const primary = text('button', '设为主 RSS 并保存', 'small secondary');
+      const backup = text('button', '设为备用 RSS 并保存', 'small secondary');
+      for (const [button, target] of [[primary, 'primary'], [backup, 'backup']]) {
+        button.type = 'button';
+        button.addEventListener('click', async () => {
+          primary.disabled = true;
+          backup.disabled = true;
+          try { await applyRssCandidateToForm(candidate, target); }
+          catch (error) { showNotice(error.message, false); primary.disabled = false; backup.disabled = false; }
+        });
+      }
       const save = text('button', '保存并检查', 'small');
       save.type = 'button'; save.addEventListener('click', async () => {
         save.disabled = true;
@@ -2434,16 +2477,70 @@ async function saveRssFields({ refresh = false } = {}) {
   const id = Number(subscriptionForm.elements.subscription_id.value || 0);
   if (!id) throw new Error('请先保存订阅，再单独更新 RSS');
   const previous = currentSubscriptions.find((row) => row.id === id);
-  const shouldRefresh = refresh || Boolean(previous?.last_error);
-  const saved = await api(`/api/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(quickRssPayload()) });
+  const payload = quickRssPayload();
+  const rssChanged = !previous || String(previous.rss_url || '') !== String(payload.rss_url || '')
+    || String(previous.backup_rss_url || '') !== String(payload.backup_rss_url || '');
+  const shouldRefresh = refresh || Boolean(previous?.last_error) || rssChanged;
+  const saved = await api(`/api/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
   populateSubscriptionForm(saved, { focusRss: true });
-  if (shouldRefresh) {
-    const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
-    showNotice(result.message || 'RSS 已保存，当前订阅检查已启动');
+  if (shouldRefresh && saved.enabled) {
+    try {
+      const result = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+      watchSubscriptionRefresh(id);
+      showNotice(result.message || 'RSS 已保存，当前订阅检查已启动');
+    } catch (error) { showNotice(`RSS 已保存，但立即检查未启动：${error.message}`, false); }
   } else {
-    showNotice('RSS 已保存');
+    showNotice(saved.enabled ? 'RSS 已保存，可点击“保存 RSS 并立即检查”' : 'RSS 已保存；订阅停用中，未开始检查');
   }
+  document.getElementById('rssSettingsFeedback').textContent = saved.backup_rss_url
+    ? '备用 RSS 已保存：主 RSS 无法访问或没有条目时自动接管。可分别测试主、备 RSS。'
+    : '主 RSS 已保存，当前未配置备用 RSS。';
   await loadSubscriptions();
+}
+
+// A refresh endpoint queues a background task; update the card again once it
+// finishes, rather than leaving a stale "待检查" until the next page reload.
+const rssRefreshWatchIds = new Set();
+async function watchSubscriptionRefresh(id) {
+  if (!id || rssRefreshWatchIds.has(id)) return;
+  const previous = currentSubscriptions.find(sub => sub.id === id);
+  const previousCheck = previous?.last_checked_at || null;
+  rssRefreshWatchIds.add(id);
+  try {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await new Promise(resolve => window.setTimeout(resolve, 2500));
+      const rows = await api('/api/subscriptions');
+      const updated = rows.find(sub => sub.id === id);
+      if (!updated || (updated.last_checked_at && updated.last_checked_at !== previousCheck)) {
+        await loadSubscriptions();
+        if (updated?.last_error) showNotice(`RSS 检查失败：${updated.name}（可查看订阅详情）`, false);
+        return;
+      }
+    }
+    await loadSubscriptions();
+  } catch (error) {
+    // A later manual refresh can still show the actual persisted result.
+  } finally { rssRefreshWatchIds.delete(id); }
+}
+
+async function testSavedRssSource(source) {
+  const id = Number(subscriptionForm.elements.subscription_id.value || 0);
+  if (!id) throw new Error('请先保存订阅');
+  const button = document.getElementById(source === 'backup' ? 'testBackupRss' : 'testPrimaryRss');
+  const feedback = document.getElementById('rssSettingsFeedback');
+  button.disabled = true;
+  feedback.textContent = `正在测试${source === 'backup' ? '备用' : '主'} RSS（只读取条目，不会推送下载）…`;
+  try {
+    const result = await api(`/api/subscriptions/${id}/rss/test?source=${source}`, { method: 'POST' });
+    feedback.textContent = result.message;
+    feedback.classList.toggle('error-text', !result.ok);
+    showNotice(result.message, result.ok);
+  } finally { button.disabled = false; }
+}
+for (const source of ['primary', 'backup']) {
+  document.getElementById(source === 'backup' ? 'testBackupRss' : 'testPrimaryRss').addEventListener('click', async () => {
+    try { await testSavedRssSource(source); } catch (error) { showNotice(error.message, false); }
+  });
 }
 
 document.getElementById('saveRssOnly').addEventListener('click', async () => {
@@ -2468,17 +2565,22 @@ subscriptionForm.addEventListener('submit', async (event) => {
       String(previous.rss_url || '') !== String(payload.rss_url || '')
       || String(previous.backup_rss_url || '') !== String(payload.backup_rss_url || '')
     );
-    const refreshAfterSave = Boolean(previous?.last_error && rssChanged);
+    const refreshAfterSave = Boolean(previous && rssChanged && payload.enabled);
     const saved = await api(path, { method, body: JSON.stringify(payload) });
     let refreshResult = null;
     if (refreshAfterSave) {
-      refreshResult = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+      try {
+        refreshResult = await api(`/api/subscriptions/${id}/refresh`, { method: 'POST' });
+        watchSubscriptionRefresh(Number(id));
+      } catch (error) {
+        refreshResult = { message: `订阅已保存，但立即检查未启动：${error.message}` };
+      }
     }
     formElement.reset();
     resetSubscriptionForm();
     showNotice(
       refreshAfterSave
-        ? (refreshResult?.message || 'RSS 已更新，异常订阅已立即刷新一次')
+        ? (refreshResult?.message || 'RSS 已更新，已启动当前订阅检查')
         : (id ? '订阅已更新' : '订阅已保存，正在自动刷新一次'),
     );
     await reloadAll();
@@ -2669,7 +2771,28 @@ function renderNetworkDiagnostics(data) {
   }
 }
 
-document.getElementById('testProxy').addEventListener('click',async()=>{try{const r=await api('/api/proxy/test',{method:'POST'});if(r.dns)renderNetworkDiagnostics(r.dns);showNotice(r.message,r.ok);}catch(e){showNotice(e.message,false);}});
+document.getElementById('testProxy').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const resultBox = document.getElementById('proxyTestResults');
+  button.disabled = true;
+  resultBox.textContent = '正在使用当前已保存的代理配置测试 Bangumi 与 Google…';
+  try {
+    const result = await api('/api/proxy/test', { method: 'POST' });
+    resultBox.replaceChildren();
+    resultBox.classList.toggle('network-ok', Boolean(result.ok));
+    resultBox.classList.toggle('network-error', !result.ok);
+    resultBox.append(text('strong', result.message));
+    resultBox.append(text('p', result.proxy_enabled ? '使用已启用的代理配置（遵循不使用代理规则）' : '当前未启用代理，使用直连', 'hint'));
+    const list = document.createElement('ul');
+    (result.checks || []).forEach((check) => list.append(text('li', `${check.ok ? '✓' : '✕'} ${check.name}：${check.message}`)));
+    resultBox.append(list);
+    if (result.dns) renderNetworkDiagnostics(result.dns);
+    showNotice(result.message, result.ok);
+  } catch (error) {
+    resultBox.textContent = `访问测试失败：${error.message}`;
+    showNotice(error.message, false);
+  } finally { button.disabled = false; }
+});
 document.getElementById('runNetworkDiagnostics').addEventListener('click',async()=>{try{const r=await api('/api/network/diagnostics');renderNetworkDiagnostics(r);showNotice(r.summary,r.ok);}catch(e){showNotice(e.message,false);}});
 document.getElementById('restoreProxy').addEventListener('click',async()=>{await api('/api/proxy/settings',{method:'DELETE'});await loadProxySettings();showNotice('已恢复 Compose 代理设置');});
 document.getElementById('closeMetadataReview').addEventListener('click', closeMetadataReview);

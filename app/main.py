@@ -1119,17 +1119,41 @@ def network_diagnostics() -> dict[str, Any]:
 
 @app.post("/api/proxy/test", dependencies=[Depends(require_admin)])
 def test_proxy(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Test application outbound access, including Google, using saved proxy rules."""
     dns = diagnose_dns()
-    try:
-        response = external_get("https://api.bgm.tv/v0/calendar", db=db, timeout=settings.request_timeout_seconds, headers={"User-Agent": settings.rss_user_agent})
-        return {
-            "ok": response.status_code == 200,
-            "message": f"外部请求测试 HTTP {response.status_code}",
-            "dns": dns,
-        }
-    except Exception as exc:
-        prefix = "容器 DNS 解析失败" if not dns["ok"] else "外部请求失败"
-        return {"ok": False, "message": f"{prefix}：{exc}", "dns": dns}
+    proxy_config = load_proxy_config(db)
+    checks: list[dict[str, Any]] = []
+    # Google's 204 endpoint is specifically designed for connectivity checks.
+    targets = (
+        ("Bangumi", "https://api.bgm.tv/v0/calendar", 200),
+        ("Google", "https://www.google.com/generate_204", 204),
+    )
+    for name, url, expected_status in targets:
+        try:
+            response = external_get(
+                url, db=db, timeout=min(settings.request_timeout_seconds, 12),
+                headers={"User-Agent": settings.rss_user_agent},
+            )
+            ok = response.status_code == expected_status
+            checks.append({
+                "name": name, "ok": ok, "status_code": response.status_code,
+                "message": ("连接成功" if ok else f"返回 HTTP {response.status_code}，期望 {expected_status}"),
+            })
+        except Exception as exc:
+            # Avoid putting the proxy URL (including any password) in the UI.
+            checks.append({
+                "name": name, "ok": False, "status_code": None,
+                "message": f"{type(exc).__name__}：连接失败，请检查代理与网络设置",
+            })
+    ok = all(check["ok"] for check in checks)
+    summary = "；".join(f"{check['name']} {'成功' if check['ok'] else '失败'}" for check in checks)
+    return {
+        "ok": ok,
+        "message": f"外部访问测试：{summary}",
+        "checks": checks,
+        "proxy_enabled": bool(proxy_config.configured),
+        "dns": dns,
+    }
 
 
 @app.get("/api/secrets/{secret_name}", dependencies=[Depends(require_admin)])
@@ -2049,6 +2073,34 @@ def search_subscription_rss(
     else:
         result["message"] = f"已找到 {len(result['candidates'])} 个相关 RSS"
     return result
+
+
+@app.post("/api/subscriptions/{subscription_id}/rss/test", dependencies=[Depends(require_admin)])
+def test_subscription_rss_source(
+    subscription_id: int,
+    source: str = Query(default="primary", pattern="^(primary|backup)$"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Inspect a saved feed without triggering any episode downloads."""
+    from .rss_service import _fetch_entries
+
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    url = subscription.backup_rss_url if source == "backup" else subscription.rss_url
+    label = "备用 RSS" if source == "backup" else "主 RSS"
+    if not url:
+        return {"ok": False, "source": source, "count": 0, "message": f"未配置{label}"}
+    try:
+        entries = _fetch_entries(url, db)
+        count = len(entries)
+        return {
+            "ok": count > 0, "source": source, "count": count,
+            "message": (f"{label}连接成功，读取到 {count} 条资源" if count else f"{label}可以访问，但没有资源条目"),
+        }
+    except Exception as exc:
+        # _fetch_entries already redacts feed passkeys from the requested URL.
+        return {"ok": False, "source": source, "count": 0, "message": f"{label}测试失败：{exc}"}
 
 
 @app.post("/api/subscriptions/{subscription_id}/refresh", dependencies=[Depends(require_admin)])
