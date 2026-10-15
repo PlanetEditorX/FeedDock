@@ -11,9 +11,38 @@ from .debug_logging import log_exception
 from .download_cleanup import cleanup_completed_torrent_records
 from .mikan_cache import refresh_due_mikan_catalogs
 from .postprocess import cleanup_internal_qbittorrent_tags, normalize_pending_items
-from .rss_service import dispatch_scheduled_downloads, refresh_all
-from .runtime_config import load_automation_config, load_rss_poll_config, mark_automation_run
+from .rss_service import dispatch_scheduled_downloads, refresh_all, refresh_subscription
+from .runtime_config import get_app_setting, load_automation_config, load_rss_poll_config, mark_automation_run
 from .settings_config import load_application_preferences
+
+
+def _handle_mikan_preorder_refresh(year: int, season: str, payload: dict[str, object]) -> None:
+    """Create preorder trials after a scheduled Mikan catalog refresh."""
+
+    try:
+        with SessionLocal() as db:
+            if get_app_setting("mikan_preorder_enabled", "0", db) != "1":
+                return
+            # Imported lazily to avoid the main -> scheduler import cycle during
+            # application startup. The scheduler thread runs only after startup.
+            from .main import _create_mikan_trials
+
+            created = _create_mikan_trials(
+                db,
+                year=year,
+                season=season,
+                payload=payload,
+            )
+            subscription_ids = [subscription.id for subscription in created]
+        for subscription_id in subscription_ids:
+            refresh_subscription(subscription_id, trigger="mikan-preorder")
+    except Exception as exc:
+        log_exception(
+            "Mikan 新番预定异常",
+            exc,
+            stage="scheduler.mikan-preorder",
+            context={"year": year, "season": season},
+        )
 
 
 class PollScheduler:
@@ -105,7 +134,7 @@ class PollScheduler:
                 log_exception("每日自动任务异常", exc, stage="scheduler.daily-automation")
 
             try:
-                refresh_due_mikan_catalogs()
+                refresh_due_mikan_catalogs(on_refreshed=_handle_mikan_preorder_refresh)
             except Exception as exc:
                 log_exception("Mikan 后台缓存刷新异常", exc, stage="scheduler.mikan-refresh")
 

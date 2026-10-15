@@ -254,6 +254,29 @@ class MikanCacheTests(unittest.TestCase):
             assert refreshed is not None
             self.assertIn("缓存番剧 #1", refreshed.payload_json)
 
+    def test_background_refresh_calls_preorder_hook_for_refreshed_catalog(self) -> None:
+        with self.Session() as db:
+            self.service.catalog(db, 2026, "夏")
+            row = db.get(MikanCacheEntry, "mikan:catalog:2026:夏")
+            assert row is not None
+            row.fetched_at = datetime.now(timezone.utc) - timedelta(days=2)
+            db.commit()
+
+        replacement = FakeDiscovery()
+        refreshed_catalogs = []
+        with patch.object(mikan_cache_module, "SessionLocal", self.Session), patch.object(
+            mikan_cache_module, "DiscoveryService", return_value=replacement
+        ):
+            result = refresh_due_mikan_catalogs(
+                limit=4,
+                on_refreshed=lambda year, season, payload: refreshed_catalogs.append((year, season, payload)),
+            )
+
+        self.assertEqual(result, {"checked": 1, "refreshed": 1, "failed": 0})
+        self.assertEqual(len(refreshed_catalogs), 1)
+        self.assertEqual(refreshed_catalogs[0][0:2], (2026, "夏"))
+        self.assertTrue(refreshed_catalogs[0][2]["rows"])
+
     def test_cover_bytes_are_persisted_on_disk(self) -> None:
         class FakeImageDiscovery:
             def __init__(self) -> None:

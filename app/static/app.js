@@ -2882,7 +2882,12 @@ document.getElementById('mikanPreorderToggle').addEventListener('click', async (
   try {
     const data = await api(`/api/discovery/mikan/preorder?enabled=${nextEnabled ? 'true' : 'false'}`, { method: 'PUT' });
     renderMikanPreorderState(Boolean(data.enabled));
-    showNotice(data.enabled ? '已开启预定新番；定期更新季度目录时会自动加入试看' : '已关闭预定新番');
+    if (data.enabled) {
+      showNotice('已开启预定新番；正在检查当前季度，之后每次定期更新也会自动加入新番试看');
+      await loadMikanCatalog(document.getElementById('mikanCatalogForm'), true);
+    } else {
+      showNotice('已关闭预定新番');
+    }
   } catch (error) {
     showNotice(error.message, false);
   } finally { button.disabled = false; }

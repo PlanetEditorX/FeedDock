@@ -6,7 +6,7 @@ import threading
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -381,7 +381,11 @@ class MikanCacheService:
         return self._metadata(payload, entry, cache_status=status)
 
 
-def refresh_due_mikan_catalogs(*, limit: int = 4) -> dict[str, int]:
+def refresh_due_mikan_catalogs(
+    *,
+    limit: int = 4,
+    on_refreshed: Callable[[int, str, dict[str, Any]], None] | None = None,
+) -> dict[str, int]:
     """Refresh stale catalog entries without creating request bursts.
 
     Only catalog pages are refreshed automatically. Detail pages are cached on
@@ -440,6 +444,8 @@ def refresh_due_mikan_catalogs(*, limit: int = 4) -> dict[str, int]:
                         payload=payload,
                     )
                     refreshed += 1
+                    if on_refreshed is not None:
+                        on_refreshed(int(params["year"]), str(params["season"]), deepcopy(payload))
                 except Exception as exc:
                     service._remember_error(db, entry, str(exc))
                     failed += 1
