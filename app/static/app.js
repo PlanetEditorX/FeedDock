@@ -1324,6 +1324,9 @@ async function loadMikanCatalog(form, forceRefresh = false) {
       if (data.season) form.elements.season.value = data.season;
     }
     renderMikanCatalog(data);
+    if (Number(data.trial_created || 0) > 0) {
+      await Promise.all([loadSubscriptions(), loadDashboard()]);
+    }
     if (data.fallback_from_empty_season) {
       showNotice(data.fallback_notice || `${year} ${season}季暂无数据，已自动切换到最近有内容的季度`);
     } else if (forceRefresh) {
@@ -2832,8 +2835,12 @@ document.querySelectorAll('[data-subscription-source]').forEach((button) => {
 
 document.addEventListener('feeddock:viewchange', (event) => {
   const { view, management } = event.detail;
-  if (view === 'subscriptions') setManagementMode(management);
-  else if (subscriptionManagementMode) setManagementMode(false);
+  if (view === 'subscriptions') {
+    setManagementMode(management);
+    loadSubscriptions().catch((error) => showNotice(error.message, false));
+  } else if (subscriptionManagementMode) {
+    setManagementMode(false);
+  }
 });
 
 document.querySelector('.app-brand').addEventListener('keydown', (event) => {

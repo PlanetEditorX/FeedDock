@@ -1581,18 +1581,20 @@ def refresh_mikan_catalog(
         )
         filter_year = int(payload.get("year") or year)
         filter_season = str(payload.get("season") or season)
-        result = _apply_mikan_hidden_filters(payload, db, year=filter_year, season=filter_season)
+        trial_created = 0
         if get_app_setting("mikan_preorder_enabled", "0", db) == "1":
             # An empty requested quarter may temporarily display the latest
             # populated previous quarter. Do not create preorder trials from
             # that fallback data as if they belonged to the requested quarter.
-            if payload.get("fallback_from_empty_season"):
-                result["trial_created"] = 0
-            else:
+            if not payload.get("fallback_from_empty_season"):
                 created = _create_mikan_trials(db, year=filter_year, season=filter_season, payload=payload)
                 for subscription in created:
                     background_tasks.add_task(refresh_subscription, subscription.id, trigger="mikan-preorder")
-                result["trial_created"] = len(created)
+                trial_created = len(created)
+        # Re-decorate after preorder creation so the response immediately
+        # reflects newly-created trial subscriptions (trialed/subscriptions).
+        result = _apply_mikan_hidden_filters(payload, db, year=filter_year, season=filter_season)
+        result["trial_created"] = trial_created
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

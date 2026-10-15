@@ -20,6 +20,7 @@ from app.main import (
     export_subscriptions,
     import_subscriptions,
     list_hidden_anime_preferences,
+    refresh_mikan_catalog,
     start_trial_subscription,
     start_trial_subscription_manual,
     system_status,
@@ -526,6 +527,8 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertNotIn('.nav-menu > summary::after', styles)
         self.assertIn("writing-mode: horizontal-tb", styles)
         self.assertIn("isTrial ? '已试看'", app_js)
+        self.assertIn("if (Number(data.trial_created || 0) > 0)", app_js)
+        self.assertIn("loadSubscriptions().catch((error) => showNotice(error.message, false));", app_js)
         self.assertNotIn("已试看（已停用）", app_js)
         self.assertNotIn("删除并隐藏", app_js)
         self.assertIn("/trial/start", app_js)
@@ -587,6 +590,45 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertEqual(created_again, [])
         self.assertEqual(subscription.poster_url, "/api/discovery/mikan/image?cover=100-new")
         self.assertEqual(subscription.metadata_overview, "更新后的目录简介")
+
+
+    def test_mikan_preorder_refresh_response_reflects_new_trial(self) -> None:
+        payload = {
+            "year": 2026,
+            "season": "秋",
+            "rows": [{
+                "weekday": "星期四",
+                "items": [{
+                    "bangumi_id": 321,
+                    "title": "预定动画",
+                    "base_url": "https://mikan.test",
+                }],
+            }],
+        }
+        detail = {
+            "groups": [{"preset": {
+                "name": "预定动画",
+                "source_type": "mikan",
+                "source_anime_id": "321",
+                "primary_rss_name": "Mikan · 测试组",
+                "rss_url": "https://mikan.test/RSS/Bangumi?bangumiId=321&subgroupid=1",
+            }}],
+        }
+        with (
+            patch("app.main.get_app_setting", return_value="1"),
+            patch("app.main.MikanCacheService") as cache_service,
+        ):
+            cache_service.return_value.catalog.return_value = payload
+            cache_service.return_value.detail.return_value = detail
+            result = refresh_mikan_catalog(
+                BackgroundTasks(), year=2026, season="秋", q="", db=self.db
+            )
+
+        self.assertEqual(result["trial_created"], 1)
+        item = result["rows"][0]["items"][0]
+        self.assertTrue(item["trialed"])
+        self.assertEqual(item["subscription_badge"], "已试看")
+        self.assertEqual(len(item["subscriptions"]), 1)
 
     def test_native_catalog_trials_copy_catalog_card_data(self) -> None:
         catalog = {
