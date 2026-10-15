@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .image_registry import RegistryImageClient, RegistryImageMetadata
 from .models import AppSetting
-from .outbound import external_client
 
 
 _CACHE_KEY = "update_registry_cache_json"
@@ -348,9 +347,14 @@ class UpdateService:
                 "在线更新需要 Watchtower HTTP API；请按部署说明配置 WATCHTOWER_URL 和 WATCHTOWER_TOKEN",
             )
         try:
-            with external_client(
-                f"{self.watchtower_url}/v1/update",
+            # Watchtower is an internal Docker service. It must never inherit the
+            # application's outbound proxy configuration: routing
+            # ``http://watchtower:8080`` through an Internet proxy can cause the
+            # proxy to close the connection before returning an HTTP response.
+            with httpx.Client(
                 timeout=max(self.timeout, 30),
+                follow_redirects=False,
+                trust_env=False,
             ) as client:
                 response = client.post(
                     f"{self.watchtower_url}/v1/update",
@@ -360,5 +364,15 @@ class UpdateService:
                 body = response.text.strip()[:300]
                 return False, f"更新服务返回 HTTP {response.status_code}{f'：{body}' if body else ''}"
             return True, "已触发 Watchtower 检查远端镜像；digest 变化时会拉取镜像并重建 FeedDock"
+        except httpx.RemoteProtocolError as exc:
+            # Some Watchtower builds close /v1/update without sending an HTTP
+            # response after accepting/executing the update request. Do not
+            # report this specific transport behaviour as a definite failure.
+            return (
+                True,
+                "更新请求已发送，但 Watchtower 未返回 HTTP 响应；部分版本会在执行后直接断开连接。"
+                "请稍后重新检查镜像版本或查看 updater 日志确认更新结果"
+                f"（{exc}）",
+            )
         except httpx.HTTPError as exc:
             return False, f"调用更新服务失败：{exc}"

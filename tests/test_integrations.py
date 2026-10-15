@@ -1,6 +1,7 @@
 import json
 import threading
 import unittest
+from unittest.mock import MagicMock, patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sqlalchemy import create_engine
@@ -249,6 +250,34 @@ class IntegrationTests(unittest.TestCase):
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)
         self.assertIn("Watchtower", message)
+
+    def test_update_trigger_bypasses_proxy_and_accepts_empty_watchtower_reply(self):
+        service = UpdateService(
+            image=self.registry_image,
+            current_version="1.18.0",
+            current_revision="local-revision",
+            watchtower_url="http://watchtower:8080",
+            watchtower_token="updater-token",
+            timeout=3,
+        )
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.__exit__.return_value = False
+        client.post.side_effect = __import__("httpx").RemoteProtocolError(
+            "Server disconnected without sending a response."
+        )
+        with patch("app.update_service.httpx.Client", return_value=client) as client_cls:
+            ok, message = service.trigger_update()
+        self.assertTrue(ok)
+        self.assertIn("更新请求已发送", message)
+        self.assertIn("未返回 HTTP 响应", message)
+        kwargs = client_cls.call_args.kwargs
+        self.assertFalse(kwargs.get("trust_env"))
+        self.assertNotIn("proxy", kwargs)
+        client.post.assert_called_once_with(
+            "http://watchtower:8080/v1/update",
+            headers={"Authorization": "Bearer updater-token"},
+        )
 
     def test_same_revision_with_newer_image_version_is_still_an_update(self):
         service = UpdateService(
