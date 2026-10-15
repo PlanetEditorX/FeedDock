@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY docker-entrypoint.py /usr/local/bin/feeddock-entrypoint
 # Persist build metadata inside the image. Unlike container environment values,
-# this file cannot be inherited from the previous container by Watchtower.
+# this file cannot be inherited from the previous container configuration.
 RUN printf '{"version":"%s","revision":"%s","created_at":"%s"}\n' \
       "$APP_VERSION" "$APP_REVISION" "$APP_CREATED_AT" \
       > /app/.feeddock-build.json

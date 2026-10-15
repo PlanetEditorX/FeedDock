@@ -4,5 +4,3 @@ services:
   feeddock:
     image: feeddock:rssfix
     pull_policy: never
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"

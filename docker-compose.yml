@@ -11,8 +11,9 @@ services:
       UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"
       UPDATE_REGISTRY_USERNAME: "${UPDATE_REGISTRY_USERNAME:-}"
       UPDATE_REGISTRY_TOKEN: "${UPDATE_REGISTRY_TOKEN:-}"
-      WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"
-      WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"
+      FEEDDOCK_UPDATER_URL: "${FEEDDOCK_UPDATER_URL:-http://updater:8090}"
+      FEEDDOCK_UPDATER_TOKEN: "${FEEDDOCK_UPDATER_TOKEN:-}"
+      FEEDDOCK_UPDATER_TOKEN_FILE: "${FEEDDOCK_UPDATER_TOKEN_FILE:-/run/feeddock-updater/token}"
     ports:
       - "${APP_PORT:-7789}:8000"
     # Override Docker's inherited resolver. Recreate the container after changing DNS.
@@ -32,8 +33,10 @@ services:
     volumes:
       - ./data:/data
       - ./downloads:/media
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
+      - feeddock-updater-state:/run/feeddock-updater:ro
+    depends_on:
+      updater:
+        condition: service_healthy
     networks:
       - feeddock-net
 
@@ -55,37 +58,32 @@ services:
     volumes:
       - ./qbit-config:/config
       - ./downloads:/media
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
     networks:
       - feeddock-net
 
-  watchtower:
-    image: containrrr/watchtower:latest
+  updater:
+    build:
+      context: ./updater
     container_name: feeddock-updater
-    profiles: ["updater"]
     restart: unless-stopped
     environment:
-      WATCHTOWER_HTTP_API_UPDATE: "true"
-      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN:-}"
-      WATCHTOWER_LABEL_ENABLE: "true"
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
-    dns:
-      - "${FEEDDOCK_DNS_PRIMARY:-223.5.5.5}"
-      - "${FEEDDOCK_DNS_SECONDARY:-119.29.29.29}"
-      - "${FEEDDOCK_DNS_TERTIARY:-1.1.1.1}"
-    dns_opt:
-      - "timeout:2"
-      - "attempts:2"
-      - "rotate"
+      UPDATER_TOKEN: "${FEEDDOCK_UPDATER_TOKEN:-}"
+      UPDATER_TOKEN_FILE: "/state/token"
+      UPDATER_COMPOSE_FILE: "/workspace/docker-compose.yml"
+      UPDATER_PROJECT_DIR: "/workspace"
+      UPDATER_ENV_FILE: "/workspace/.env"
+      UPDATER_SERVICE: "feeddock"
+      UPDATER_CONTAINER: "feeddock"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
+      - ./:/workspace:ro
+      - feeddock-updater-state:/state
     networks:
       - feeddock-net
 
 networks:
   feeddock-net:
     driver: bridge
+
+volumes:
+  feeddock-updater-state:

@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 from sqlalchemy import select
@@ -148,8 +149,9 @@ class UpdateService:
         current_revision: str | None = None,
         current_build_source: str | None = None,
         current_created_at: str | None = None,
-        watchtower_url: str | None = None,
-        watchtower_token: str | None = None,
+        updater_url: str | None = None,
+        updater_token: str | None = None,
+        updater_token_file: str | Path | None = None,
         timeout: int | None = None,
         registry_scheme: str = "https",
         registry_username: str | None = None,
@@ -169,8 +171,12 @@ class UpdateService:
             if current_created_at is None
             else current_created_at.strip()
         )
-        self.watchtower_url = settings.watchtower_url if watchtower_url is None else watchtower_url.rstrip("/")
-        self.watchtower_token = settings.watchtower_token if watchtower_token is None else watchtower_token
+        self.updater_url = settings.updater_url if updater_url is None else updater_url.rstrip("/")
+        self.updater_token = settings.updater_token if updater_token is None else updater_token
+        if updater_token_file is None:
+            self.updater_token_file = settings.updater_token_file
+        else:
+            self.updater_token_file = Path(updater_token_file) if updater_token_file else None
         self.timeout = timeout or settings.request_timeout_seconds
         self.registry_username = (
             settings.update_registry_username
@@ -190,9 +196,20 @@ class UpdateService:
             token=self.registry_token,
         )
 
+    def _resolved_updater_token(self) -> str:
+        if self.updater_token:
+            return self.updater_token
+        path = self.updater_token_file
+        if path is None:
+            return ""
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
     @property
     def updater_configured(self) -> bool:
-        return bool(self.watchtower_url and self.watchtower_token)
+        return bool(self.updater_url and self._resolved_updater_token())
 
     @property
     def image_is_pinned(self) -> bool:
@@ -293,7 +310,7 @@ class UpdateService:
         if self.image_is_pinned:
             result.message += "；当前使用 digest 固定镜像，需修改 FEEDDOCK_IMAGE 后才能更新"
         elif result.update_available and not self.updater_configured:
-            result.message += "；配置 Watchtower 后可在线更新"
+            result.message += "；启动 FeedDock 专用更新器后可在线更新"
         if message_suffix:
             result.message += f"；{message_suffix}"
         return result
@@ -340,38 +357,38 @@ class UpdateService:
 
     def trigger_update(self) -> tuple[bool, str]:
         if self.image_is_pinned:
-            return False, "当前 FEEDDOCK_IMAGE 使用 digest 固定，Watchtower 无法将其更新到新标签"
-        if not self.updater_configured:
+            return False, "当前 FEEDDOCK_IMAGE 使用 digest 固定，无法自动更新到新标签"
+        token = self._resolved_updater_token()
+        if not self.updater_url or not token:
             return (
                 False,
-                "在线更新需要 Watchtower HTTP API；请按部署说明配置 WATCHTOWER_URL 和 WATCHTOWER_TOKEN",
+                "在线更新需要 FeedDock 专用更新器；请确认 updater 服务正在运行并可读取共享 Token",
             )
         try:
-            # Watchtower is an internal Docker service. It must never inherit the
-            # application's outbound proxy configuration: routing
-            # ``http://watchtower:8080`` through an Internet proxy can cause the
-            # proxy to close the connection before returning an HTTP response.
+            # The updater is an internal Docker service. Never route this request
+            # through the application's Internet proxy settings.
             with httpx.Client(
                 timeout=max(self.timeout, 30),
                 follow_redirects=False,
                 trust_env=False,
             ) as client:
                 response = client.post(
-                    f"{self.watchtower_url}/v1/update",
-                    headers={"Authorization": f"Bearer {self.watchtower_token}"},
+                    f"{self.updater_url}/v1/update",
+                    headers={"Authorization": f"Bearer {token}"},
                 )
-            if response.status_code not in {200, 204}:
+            if response.status_code == 409:
+                return True, "FeedDock 更新任务已在执行，请稍后重新打开页面确认版本"
+            if response.status_code not in {200, 202, 204}:
                 body = response.text.strip()[:300]
                 return False, f"更新服务返回 HTTP {response.status_code}{f'：{body}' if body else ''}"
-            return True, "已触发 Watchtower 检查远端镜像；digest 变化时会拉取镜像并重建 FeedDock"
+            return True, "已启动 FeedDock 在线更新；专用更新器会拉取新镜像并只重建 FeedDock 容器"
         except httpx.RemoteProtocolError as exc:
-            # Some Watchtower builds close /v1/update without sending an HTTP
-            # response after accepting/executing the update request. Do not
-            # report this specific transport behaviour as a definite failure.
+            # Legacy updater implementations may close the connection as the
+            # FeedDock container is being replaced. The request was already sent.
             return (
                 True,
-                "更新请求已发送，但 Watchtower 未返回 HTTP 响应；部分版本会在执行后直接断开连接。"
-                "请稍后重新检查镜像版本或查看 updater 日志确认更新结果"
+                "更新请求已发送，但更新器在返回响应前断开连接；FeedDock 可能正在被重建。"
+                "请稍后重新打开页面确认版本"
                 f"（{exc}）",
             )
         except httpx.HTTPError as exc:

@@ -9,7 +9,7 @@
 - 远端镜像查询失败时使用数据库缓存，不再回退到 `update.json` 或 GitHub Release；
 - GitHub Actions 从远端 `latest` 镜像标签读取上一镜像版本，自动递增补丁版本；
 - GitHub Release 仅作为可选发布记录，创建失败不会影响镜像发布；
-- Watchtower 继续负责实际拉取镜像和重建容器。
+- FeedDock 专用 updater sidecar 负责实际拉取镜像和重建容器。
 
 ## 自动化测试
 
@@ -28,7 +28,7 @@
 - revision 相同但本地版本来自旧容器环境变量时，不误报更新并给出重建提示；
 - 镜像内构建信息文件优先级高于残留的 APP_VERSION/APP_REVISION 环境变量；
 - Registry 查询缓存、过期缓存与错误降级；
-- digest 固定镜像禁止 Watchtower 标签更新；
+- digest 固定镜像禁止在线更新；
 - 发布版本由远端镜像版本递增，`VERSION` 只作为 major/minor 人工提升下限；
 - 重要文件路径检测，不因纯文档或纯测试变更发布镜像；
 - 项目中不存在 `update.json`，更新服务不调用 GitHub Release API。
@@ -43,11 +43,11 @@
 - Dockerfile 写入 OCI 标准标签与 `/app/.feeddock-build.json`，不再把版本元数据作为最终镜像 ENV；
 - HTML 静态资源缓存键由运行镜像 revision 动态生成；
 - Compose 已提供 `UPDATE_REGISTRY_USERNAME`、`UPDATE_REGISTRY_TOKEN` 可选配置；
-- Watchtower API 保持 Docker 内部网络访问，不映射宿主机端口。
+- 专用 updater API 保持 Docker 内部网络访问，不映射宿主机端口。
 
 ## 判断边界
 
-FeedDock 不挂载 Docker Socket，因此运行中的容器不能直接读取 Docker Engine 保存的本地 RepoDigest。当前方案使用镜像构建时写入的 source revision 与远端 OCI revision 做稳定比较，并展示远端 root digest 和当前平台 digest。实际更新时，Watchtower 会再按镜像 digest 判断是否需要拉取和重建。
+FeedDock 不挂载 Docker Socket，因此运行中的容器不能直接读取 Docker Engine 保存的本地 RepoDigest。当前方案使用镜像构建时写入的 source revision 与远端 OCI revision 做稳定比较，并展示远端 root digest 和当前平台 digest。实际更新时，专用 updater 会拉取部署标签并仅重建 FeedDock 服务。
 
 此设计避免把 `/var/run/docker.sock` 暴露给主应用。旧镜像没有 `/app/.feeddock-build.json` 时会显示“容器环境变量（兼容）”；安装新镜像后切换为“镜像构建文件”，版本与 revision 均来自当前镜像文件系统。
 

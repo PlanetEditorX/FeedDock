@@ -14,7 +14,7 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertIn('"${APP_PORT:-7789}:8000"', compose)
         self.assertIn('"host.docker.internal:host-gateway"', compose)
         self.assertIn('"${FEEDDOCK_DATA_PATH:-/vol1/1000/应用/feeddock/data}:/data"', compose)
-        self.assertNotIn("build:", compose)
+        self.assertNotIn("    build:", compose.split("  updater:", 1)[0])
         self.assertNotIn("./downloads:/downloads", compose)
 
     def test_workflow_validates_both_fnos_volume_mounts(self) -> None:
@@ -269,20 +269,21 @@ class DeploymentFileTests(unittest.TestCase):
         self.assertNotIn("reloadAll().then(() => loadUpdateStatus", script)
         self.assertTrue(script.rstrip().endswith("reloadAll();"))
 
-    def test_fnos_update_check_uses_registry_image_and_optional_watchtower(self) -> None:
+    def test_fnos_update_check_uses_registry_image_and_dedicated_updater(self) -> None:
         compose = (ROOT / "docker-compose.fnos.yml").read_text(encoding="utf-8")
         self.assertNotIn('UPDATE_MANIFEST_URLS:', compose)
         self.assertNotIn('UPDATE_REPOSITORY:', compose)
         self.assertNotIn('UPDATE_API_URL:', compose)
         self.assertIn('UPDATE_CHECK_CACHE_HOURS: "${UPDATE_CHECK_CACHE_HOURS:-6}"', compose)
         self.assertIn('FEEDDOCK_IMAGE: "${FEEDDOCK_IMAGE:-ghcr.io/planeteditorx/feeddock:latest}"', compose)
-        self.assertIn('WATCHTOWER_URL: "${WATCHTOWER_URL:-http://watchtower:8080}"', compose)
-        self.assertIn('WATCHTOWER_TOKEN: "${WATCHTOWER_TOKEN:-}"', compose)
-        self.assertIn("  watchtower:", compose)
-        self.assertIn('profiles: ["updater"]', compose)
-        self.assertIn('WATCHTOWER_HTTP_API_UPDATE: "true"', compose)
+        self.assertIn('FEEDDOCK_UPDATER_URL: "${FEEDDOCK_UPDATER_URL:-http://updater:8090}"', compose)
+        self.assertIn("  updater:", compose)
+        self.assertNotIn("  watchtower:", compose)
+        self.assertIn('context: ./updater', compose)
         self.assertIn('/var/run/docker.sock:/var/run/docker.sock', compose)
-        self.assertIn('com.centurylinklabs.watchtower.enable: "true"', compose)
+        self.assertIn('feeddock-updater-state:/run/feeddock-updater:ro', compose)
+        self.assertIn('feeddock-updater-state:/state', compose)
+        self.assertNotIn('profiles: ["updater"]', compose)
 
     def test_documentation_is_grouped_by_purpose(self) -> None:
         root_markdown = {path.name for path in ROOT.glob("*.md")}

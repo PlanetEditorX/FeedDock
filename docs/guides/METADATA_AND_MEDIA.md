@@ -333,14 +333,9 @@ UPDATE_CHECK_CACHE_HOURS=6
 
 ## 在线更新
 
-网页会显示“在线更新”或“配置在线更新”。真正替换 Docker 镜像需要 Watchtower HTTP API：
+网页会显示专用更新器状态。真正替换 Docker 镜像由 Compose 中的 `updater` sidecar 完成；FeedDock 主容器本身不挂载 Docker Socket。
 
-```dotenv
-WATCHTOWER_URL=http://watchtower:8080
-WATCHTOWER_TOKEN=至少32位随机字符串
-```
-
-未配置 Watchtower 时，FeedDock 仍能检查远端镜像版本、revision 和 digest，但不会直接修改正在运行的容器。
+Updater 默认内部地址为 `http://updater:8090`，共享 Token 默认自动生成到 `feeddock-updater-state` volume。点击“在线更新”后，updater 只拉取并重建 `feeddock` 服务。
 
 ## 下载路径映射
 

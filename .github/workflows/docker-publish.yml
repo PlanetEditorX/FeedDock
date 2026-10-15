@@ -121,14 +121,14 @@ jobs:
           for compose_path in (Path("docker-compose.yml"), Path("docker-compose.fnos.yml")):
               payload = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
               feeddock = payload["services"]["feeddock"]
-              watchtower = payload["services"]["watchtower"]
+              updater = payload["services"]["updater"]
 
               assert "ghcr.io/planeteditorx/feeddock:latest" in str(feeddock.get("image", ""))
-              assert feeddock["environment"]["WATCHTOWER_URL"] == "${WATCHTOWER_URL:-http://watchtower:8080}"
-              assert "updater" in (watchtower.get("profiles") or [])
-              assert "/var/run/docker.sock:/var/run/docker.sock" in (watchtower.get("volumes") or [])
-              assert watchtower["environment"]["WATCHTOWER_HTTP_API_UPDATE"] == "true"
-              assert watchtower["environment"]["WATCHTOWER_HTTP_API_TOKEN"] == "${WATCHTOWER_TOKEN:-}"
+              assert feeddock["environment"]["FEEDDOCK_UPDATER_URL"] == "${FEEDDOCK_UPDATER_URL:-http://updater:8090}"
+              assert updater["build"]["context"] == "./updater"
+              assert "/var/run/docker.sock:/var/run/docker.sock" in (updater.get("volumes") or [])
+              assert "feeddock-updater-state:/state" in (updater.get("volumes") or [])
+              assert "updater" not in (updater.get("profiles") or [])
 
           fnos = yaml.safe_load(Path("docker-compose.fnos.yml").read_text(encoding="utf-8"))
           service = fnos["services"]["feeddock"]

@@ -232,13 +232,13 @@ class IntegrationTests(unittest.TestCase):
         with SessionLocal() as db:
             reset_qbittorrent_config(db)
 
-    def test_update_check_reads_registry_metadata_and_triggers_watchtower(self):
+    def test_update_check_reads_registry_metadata_and_triggers_dedicated_updater(self):
         service = UpdateService(
             image=self.registry_image,
             current_version="1.18.0",
             current_revision="local-revision-123456",
-            watchtower_url=self.base_url,
-            watchtower_token="updater-token",
+            updater_url=self.base_url,
+            updater_token="updater-token",
             timeout=3,
         )
         status = service.check(force=True)
@@ -249,15 +249,15 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(status.update_available)
         ok, message = service.trigger_update()
         self.assertTrue(ok, message)
-        self.assertIn("Watchtower", message)
+        self.assertIn("专用更新器", message)
 
-    def test_update_trigger_bypasses_proxy_and_accepts_empty_watchtower_reply(self):
+    def test_update_trigger_bypasses_proxy_and_accepts_empty_updater_reply(self):
         service = UpdateService(
             image=self.registry_image,
             current_version="1.18.0",
             current_revision="local-revision",
-            watchtower_url="http://watchtower:8080",
-            watchtower_token="updater-token",
+            updater_url="http://updater:8090",
+            updater_token="updater-token",
             timeout=3,
         )
         client = MagicMock()
@@ -270,12 +270,12 @@ class IntegrationTests(unittest.TestCase):
             ok, message = service.trigger_update()
         self.assertTrue(ok)
         self.assertIn("更新请求已发送", message)
-        self.assertIn("未返回 HTTP 响应", message)
+        self.assertIn("返回响应前断开连接", message)
         kwargs = client_cls.call_args.kwargs
         self.assertFalse(kwargs.get("trust_env"))
         self.assertNotIn("proxy", kwargs)
         client.post.assert_called_once_with(
-            "http://watchtower:8080/v1/update",
+            "http://updater:8090/v1/update",
             headers={"Authorization": "Bearer updater-token"},
         )
 

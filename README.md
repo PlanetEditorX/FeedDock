@@ -20,8 +20,8 @@ FeedDock 是面向自托管环境的 RSS 订阅、qBittorrent 下载编排、规
 ```bash
 cp .env.example .env
 # 编辑管理员密码、qBittorrent 和媒体路径
-docker compose pull
-docker compose up -d
+docker compose pull feeddock
+docker compose up -d --build
 ```
 
 需要内置 qBittorrent：
@@ -36,44 +36,30 @@ docker compose --profile with-qbit up -d
 
 ```bash
 cp .env.fnos.example .env
-docker compose -f docker-compose.fnos.yml pull
-docker compose -f docker-compose.fnos.yml up -d
+docker compose -f docker-compose.fnos.yml pull feeddock
+docker compose -f docker-compose.fnos.yml up -d --build
 ```
 
 宿主机目录、权限和路径映射见 [飞牛 OS 部署说明](docs/deployment/FNOS_DEPLOY.md)。
 
 ## 在线更新
 
-两个 Compose 文件都内置可选 Watchtower HTTP API。先生成 Token：
+两份 Compose 都内置 FeedDock 专用 updater sidecar。它不是通用容器监控器，只接受带授权的 `/v1/update` 请求，并固定执行：
 
-```bash
-openssl rand -hex 32
+```text
+docker compose pull feeddock
+docker compose up -d --no-deps feeddock
 ```
 
-将结果写入 `.env`：
+因此只会更新 FeedDock，不会扫描或更新 qBittorrent 等其他容器。Updater 默认随 `docker compose up -d` 启动，8090 仅在 Docker 内部网络可见，不映射到宿主机。
+
+共享 Token 默认由 updater 首次启动时自动生成到 `feeddock-updater-state` named volume，FeedDock 只读挂载该 Token，无需手工生成。需要固定 Token 时可在 `.env` 设置：
 
 ```dotenv
-FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
-WATCHTOWER_URL=http://watchtower:8080
-WATCHTOWER_TOKEN=替换为生成的Token
-# 公开镜像保持为空；私有 GHCR 包填写 packages:read 凭据
-UPDATE_REGISTRY_USERNAME=
-UPDATE_REGISTRY_TOKEN=
+FEEDDOCK_UPDATER_TOKEN=至少32位随机字符串
 ```
 
-“检查镜像更新”直接读取 `FEEDDOCK_IMAGE` 的远端 OCI 元数据。公开 GHCR 镜像无需 Registry 凭据。
-
-启动更新服务：
-
-```bash
-# 通用 Compose
-docker compose --profile updater up -d
-
-# 飞牛 Compose
-docker compose -f docker-compose.fnos.yml --profile updater up -d
-```
-
-Watchtower 只在 Docker 内部网络监听，Compose 没有把 8080 端口映射到宿主机。FeedDock 容器标签允许更新，qBittorrent 和 Watchtower 自身默认不由该实例更新。
+“检查镜像更新”仍直接读取 `FEEDDOCK_IMAGE` 的远端 OCI 元数据；点击“在线更新”后由专用 updater 拉取新镜像并重建 FeedDock。
 
 ## 容器镜像自动发布
 
@@ -98,5 +84,5 @@ FeedDock 的“检查镜像更新”直接比较当前镜像内置 revision 与�
 - `/data` 保存 SQLite、设置、缓存和日志，升级时不得删除。
 - FeedDock 不提供、托管或审核第三方种子与媒体内容。
 - qBittorrent 延迟清理固定保留下载文件。
-- Watchtower 挂载 Docker Socket，应只在受信任的内部网络使用。
+- 只有专用 updater 挂载 Docker Socket；FeedDock 主容器不挂载 Docker Socket。
 - 修改 Compose 的 DNS、环境变量、标签或卷后，应重新创建容器，而不是只重启进程。

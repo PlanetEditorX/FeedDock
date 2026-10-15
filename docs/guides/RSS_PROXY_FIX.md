@@ -28,7 +28,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps
 docker compose -f docker-compose.fnos.yml -f docker-compose.local.yml up -d --no-deps feeddock
 ```
 
-`docker-compose.local.yml` 将目标镜像设为 `feeddock:rssfix`、禁止自动拉取覆盖，且关闭此实例的 Watchtower 自动更新。部署后强制刷新浏览器，核对保存的订阅数据是否正常。此过程只修改 FeedDock 服务，不主动重建 qBittorrent。数据库新增的 `last_rss_source` 字段通过启动时的兼容迁移自动创建；请保留迁移前的数据库备份。
+`docker-compose.local.yml` 将目标镜像设为 `feeddock:rssfix` 并禁止远端镜像自动拉取覆盖；本地调试时不要从网页触发在线更新。部署后强制刷新浏览器，核对保存的订阅数据是否正常。此过程只修改 FeedDock 服务，不主动重建 qBittorrent。数据库新增的 `last_rss_source` 字段通过启动时的兼容迁移自动创建；请保留迁移前的数据库备份。
 
 ## 验收方式
 

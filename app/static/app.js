@@ -381,7 +381,7 @@ async function loadConfig() {
   // fetched after the user explicitly clicks the check button.
   document.getElementById('currentVersion').textContent = data.app_version || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
-  document.getElementById('updaterState').textContent = data.updater_configured ? '在线更新已启用' : '需配置 Watchtower';
+  document.getElementById('updaterState').textContent = data.updater_configured ? '专用更新器已就绪' : '专用更新器未就绪';
   const catalogState = document.getElementById('mikanCatalogState');
   if (catalogState && !document.getElementById('mikanCatalog').children.length) {
     catalogState.textContent = `首次没有缓存时会请求所选站点的目录数据；之后页面优先读取持久化缓存，已浏览季度默认每 ${data.mikan_cache_hours || 6} 小时后台更新一次。`;
@@ -722,7 +722,7 @@ async function loadUpdateStatus(showResult = false) {
   document.getElementById('latestDigest').title = data.latest_digest || '';
   document.getElementById('imagePlatform').textContent = data.image_platform || '—';
   document.getElementById('deployedImage').textContent = data.deployed_image || '—';
-  document.getElementById('updaterState').textContent = data.updater_configured ? '在线更新已启用' : '需配置 Watchtower';
+  document.getElementById('updaterState').textContent = data.updater_configured ? '专用更新器已就绪' : '专用更新器未就绪';
   document.getElementById('versionSummary').textContent = data.message || '未获取到镜像信息';
 
   const releaseLink = document.getElementById('releaseLink');
@@ -2675,7 +2675,7 @@ document.getElementById('checkUpdate').addEventListener('click', async (event) =
 });
 
 document.getElementById('applyUpdate').addEventListener('click', async () => {
-  if (!window.confirm('确认执行在线更新？已配置 Watchtower 时会拉取新镜像并重启 FeedDock。')) return;
+  if (!window.confirm('确认执行在线更新？专用更新器会拉取新镜像并只重建 FeedDock 容器。')) return;
   try {
     const result = await api('/api/update/apply', { method: 'POST' });
     showNotice(result.message, result.ok);

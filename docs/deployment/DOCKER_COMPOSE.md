@@ -7,14 +7,14 @@
 | `docker-compose.yml` | 通用 Docker / Linux / NAS |
 | `docker-compose.fnos.yml` | 飞牛 OS 默认路径和权限 |
 
-两份 Compose 都使用 `ghcr.io/planeteditorx/feeddock:latest`，都包含可选的 Watchtower HTTP API，并使用 `updater` profile 控制是否启动更新服务。
+两份 Compose 都使用 `ghcr.io/planeteditorx/feeddock:latest`，并默认启动 FeedDock 专用 updater sidecar。Updater 只允许更新 `feeddock` 服务，不扫描其他容器。
 
 ## 通用部署
 
 ```bash
 cp .env.example .env
-docker compose pull
-docker compose up -d
+docker compose pull feeddock
+docker compose up -d --build
 ```
 
 启用示例 qBittorrent：
@@ -23,57 +23,38 @@ docker compose up -d
 docker compose --profile with-qbit up -d
 ```
 
-启用在线更新：
+在线更新默认已经启用；无需额外 profile。启用内置 qBittorrent 时仍使用：
 
 ```bash
-openssl rand -hex 32
-# 将输出写入 .env 的 WATCHTOWER_TOKEN
-docker compose --profile updater up -d
-```
-
-同时启用 qBittorrent 和在线更新：
-
-```bash
-docker compose --profile with-qbit --profile updater up -d
+docker compose --profile with-qbit up -d
 ```
 
 ## 飞牛部署
 
 ```bash
 cp .env.fnos.example .env
-docker compose -f docker-compose.fnos.yml up -d
+docker compose -f docker-compose.fnos.yml up -d --build
 ```
 
-启用在线更新：
-
-```bash
-docker compose -f docker-compose.fnos.yml --profile updater up -d
-```
+在线更新默认随 FeedDock 一起启动，无需额外 profile。
 
 详细说明见 [飞牛 OS 部署](FNOS_DEPLOY.md)。
 
-## Watchtower 参数
+## 专用 updater
+
+默认内部地址：
 
 ```dotenv
-FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
-WATCHTOWER_URL=http://watchtower:8080
-WATCHTOWER_TOKEN=随机共享Token
-# 公开 GHCR 镜像无需填写；私有包才需要 packages:read 凭据
-UPDATE_REGISTRY_USERNAME=
-UPDATE_REGISTRY_TOKEN=
+FEEDDOCK_UPDATER_URL=http://updater:8090
 ```
 
-FeedDock 的“检查镜像更新”会直接读取 `FEEDDOCK_IMAGE` 标签的 OCI manifest。公开镜像可匿名查询；私有镜像需要填写 Registry 用户名与 Token。
+默认 Token 由 updater 自动生成并保存在 named volume `feeddock-updater-state`。如需固定 Token，可设置：
 
-`WATCHTOWER_URL` 是 Docker 内部服务地址。两份 Compose 都没有给 Watchtower 配置 `ports`，外部浏览器无法直接访问该 API。
-
-Watchtower 只处理带有以下标签的 FeedDock 容器：
-
-```yaml
-com.centurylinklabs.watchtower.enable: "true"
+```dotenv
+FEEDDOCK_UPDATER_TOKEN=至少32位随机字符串
 ```
 
-qBittorrent 和 Watchtower 自身的标签为 `false`。
+Updater 不映射宿主机端口，只挂载 Docker Socket、当前 Compose 目录的只读副本以及 Token 状态卷。更新请求固定只针对 `feeddock` 服务执行 `pull` 和 `up -d --no-deps`。
 
 ## 本地开发镜像
 
@@ -87,7 +68,7 @@ docker build -t feeddock:local .
 
 ```dotenv
 FEEDDOCK_IMAGE=feeddock:local
-WATCHTOWER_TOKEN=
+FEEDDOCK_UPDATER_TOKEN=
 ```
 
 本地镜像没有远程仓库来源，网页在线更新应视为不可用。
@@ -99,10 +80,10 @@ WATCHTOWER_TOKEN=
 - DNS；
 - 环境变量；
 - 卷挂载；
-- Watchtower Token；
+- 专用 updater Token（仅在手工固定 Token 时）；
 - 容器标签；
 - profile 或服务定义。
 
 ```bash
-docker compose --profile updater up -d --force-recreate
+docker compose up -d --build --force-recreate
 ```

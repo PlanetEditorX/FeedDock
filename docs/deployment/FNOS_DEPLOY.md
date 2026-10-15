@@ -1,6 +1,6 @@
 # 飞牛 OS 部署
 
-本文对应仓库根目录的 `docker-compose.fnos.yml`。默认使用已发布镜像，并通过 `.env` 覆盖宿主机路径、账号、DNS、qBittorrent 和 Watchtower Token。
+本文对应仓库根目录的 `docker-compose.fnos.yml`。默认使用已发布镜像，并通过 `.env` 覆盖宿主机路径、账号、DNS、qBittorrent 等参数；在线更新由专用 updater sidecar 完成。
 
 ## 1. 准备目录与配置
 
@@ -33,7 +33,7 @@ FEEDDOCK_MEDIA_PATH=/vol2/1000/影视
 
 ```bash
 docker compose -f docker-compose.fnos.yml pull
-docker compose -f docker-compose.fnos.yml up -d
+docker compose -f docker-compose.fnos.yml up -d --build
 ```
 
 默认访问地址：
@@ -70,48 +70,34 @@ FeedDock：   /media/番剧名称 (2026)/Season 01
 
 详细规则见 [元数据、命名与媒体目录](../guides/METADATA_AND_MEDIA.md)。
 
-## 4. 配置在线更新
+## 4. 在线更新
 
-`docker-compose.fnos.yml` 已包含可选的 `watchtower` 服务，服务位于 `updater` profile，不会默认启动，也不会把 8080 端口映射到宿主机。
+`docker-compose.fnos.yml` 默认启动 `updater` 服务，无需 `--profile updater`。Updater 只在 Docker 内部网络监听 8090，不映射宿主机端口，并固定只更新 `feeddock` 服务。
 
-生成共享 Token：
-
-```bash
-openssl rand -hex 32
-```
-
-将结果写入 `.env`：
+首次启动时会在 `feeddock-updater-state` named volume 自动生成共享 Token，FeedDock 以只读方式读取，因此通常无需在 `.env` 手工配置 Token。若需要固定 Token，可设置：
 
 ```dotenv
-FEEDDOCK_IMAGE=ghcr.io/planeteditorx/feeddock:latest
-WATCHTOWER_URL=http://watchtower:8080
-WATCHTOWER_TOKEN=替换为生成的Token
-# 公开 GHCR 镜像保持为空；私有包填写 packages:read 凭据
-UPDATE_REGISTRY_USERNAME=
-UPDATE_REGISTRY_TOKEN=
+FEEDDOCK_UPDATER_TOKEN=至少32位随机字符串
 ```
 
-FeedDock 会直接查询 `FEEDDOCK_IMAGE` 的远端 manifest、revision 和 digest。私有 GHCR 包未配置凭据时只能执行 Watchtower 更新，页面无法读取远端镜像元数据。
-
-启动 FeedDock 与更新服务：
+启动或重建：
 
 ```bash
-docker compose -f docker-compose.fnos.yml --profile updater pull
-docker compose -f docker-compose.fnos.yml --profile updater up -d
+docker compose -f docker-compose.fnos.yml up -d --build
 ```
-
-两边读取同一个 `WATCHTOWER_TOKEN`。Token 不一致时，在线更新会返回 HTTP 401。Watchtower 挂载 `/var/run/docker.sock`，因此只能运行在可信的内部 Docker 网络，禁止自行增加公网端口映射。
 
 检查状态：
 
 ```bash
-docker compose -f docker-compose.fnos.yml --profile updater ps
-docker compose -f docker-compose.fnos.yml logs --tail=100 watchtower
+docker compose -f docker-compose.fnos.yml ps
+docker compose -f docker-compose.fnos.yml logs --tail=100 updater
 ```
+
+只有 updater 挂载 `/var/run/docker.sock`；FeedDock 主容器不直接获得 Docker Engine 权限。
 
 ## 5. DNS 与网络
 
-Compose 默认为 FeedDock 和 Watchtower 设置：
+Compose 默认为 FeedDock 设置：
 
 ```text
 223.5.5.5
@@ -122,7 +108,7 @@ Compose 默认为 FeedDock 和 Watchtower 设置：
 修改 DNS、环境变量、卷、标签或服务定义后，必须重新创建容器：
 
 ```bash
-docker compose -f docker-compose.fnos.yml --profile updater up -d --force-recreate
+docker compose -f docker-compose.fnos.yml up -d --build --force-recreate
 ```
 
 普通重启不会更新容器的 `/etc/resolv.conf`。完整排障见 [网络与 DNS 排障](NETWORK_TROUBLESHOOTING.md)。
@@ -144,11 +130,11 @@ TMDB、Bangumi、AniList 和代理参数可以写入 `.env`，网页保存值优
 手动升级镜像：
 
 ```bash
-docker compose -f docker-compose.fnos.yml --profile updater pull
-docker compose -f docker-compose.fnos.yml --profile updater up -d
+docker compose -f docker-compose.fnos.yml pull feeddock
+docker compose -f docker-compose.fnos.yml up -d --build
 ```
 
-迁移实例前，可在“设置 → 系统管理 → 配置备份与恢复”导出 JSON。该备份不包含 Compose 的端口、卷、DNS、PUID/PGID、Watchtower 和 Docker Socket 权限，这些内容仍需单独迁移。
+迁移实例前，可在“设置 → 系统管理 → 配置备份与恢复”导出 JSON。该备份不包含 Compose 的端口、卷、DNS、PUID/PGID、专用 updater 和 Docker Socket 权限，这些内容仍需单独迁移。
 
 ## 8. 常见问题
 
@@ -169,11 +155,11 @@ docker compose -f docker-compose.fnos.yml exec feeddock getent hosts anibt.net
 
 确认：
 
-1. `.env` 中的 `WATCHTOWER_TOKEN` 不是空值；
-2. 使用 `--profile updater` 启动了 Watchtower；
-3. FeedDock 容器已重新创建并读取新环境变量；
-4. `FEEDDOCK_IMAGE` 是远程镜像，而不是 `feeddock:local`。
+1. `updater` 容器处于 healthy；
+2. FeedDock 已挂载 `feeddock-updater-state:/run/feeddock-updater:ro`；
+3. updater 已挂载同一状态卷到 `/state`；
+4. 如手工设置了 `FEEDDOCK_UPDATER_TOKEN`，两边读取的是同一值。
 
 ### 在线更新返回 401
 
-FeedDock 与 Watchtower 使用的 Token 不一致。重新创建两个容器，确保它们读取同一个 `.env`。
+如手工固定 Token，FeedDock 与 updater 的 Token 不一致。重新创建两个容器并确保读取同一个 `FEEDDOCK_UPDATER_TOKEN`；未手工设置时应让两边使用共享状态卷中的自动 Token。

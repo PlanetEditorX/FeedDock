@@ -5,6 +5,7 @@ app/**
 src/**
 Dockerfile
 docker-entrypoint.py
+updater/**
 requirements.txt
 pyproject.toml
 poetry.lock

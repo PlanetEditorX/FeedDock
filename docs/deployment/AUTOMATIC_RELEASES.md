@@ -94,7 +94,7 @@ org.opencontainers.image.created
 /app/.feeddock-build.json
 ```
 
-运行中的 FeedDock 优先读取该文件。这样即使 Watchtower 或旧 Compose 保留了上一个容器的 `APP_VERSION`、`APP_REVISION` 环境变量，新镜像也不会显示旧版本。源码运行和测试环境没有该文件时，才回退读取环境变量。
+运行中的 FeedDock 优先读取该文件。这样即使旧 Compose 保留了上一个容器的 `APP_VERSION`、`APP_REVISION` 环境变量，新镜像也不会显示旧版本。源码运行和测试环境没有该文件时，才回退读取环境变量。
 
 前端 HTML 中的静态资源版本参数也由当前 revision 动态生成，不再硬编码仓库中的版本号。
 

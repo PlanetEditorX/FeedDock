@@ -33,7 +33,7 @@
 
 不含敏感值的备份以替换模式恢复时，当前实例已经保存的密码与 Token 会保留，避免无意清空凭据。
 
-Compose 环境变量、卷挂载、端口、DNS、Watchtower 和容器权限必须继续在 Compose 中维护，JSON 导入不会修改容器定义。
+Compose 环境变量、卷挂载、端口、DNS、专用 updater 和容器权限必须继续在 Compose 中维护，JSON 导入不会修改容器定义。
 
 ## 仅订阅导入导出
 

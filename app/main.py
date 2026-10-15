@@ -815,7 +815,7 @@ def get_config(db: Session = Depends(get_db)) -> dict[str, Any]:
         **qbit.public_dict(),
         "timezone": settings.timezone,
         "app_revision": settings.app_revision,
-        "updater_configured": bool(settings.watchtower_url and settings.watchtower_token),
+        "updater_configured": UpdateService().updater_configured,
         "deployed_image": settings.deployed_image,
         "mikan_cache_hours": settings.mikan_cache_hours,
         "metadata_auto_sync_hours": settings.metadata_auto_sync_hours,

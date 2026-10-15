@@ -110,8 +110,9 @@ class Settings:
     update_registry_username: str
     update_registry_token: str
     deployed_image: str
-    watchtower_url: str
-    watchtower_token: str
+    updater_url: str
+    updater_token: str
+    updater_token_file: Path | None
 
 
 def load_settings():
@@ -192,8 +193,19 @@ def load_settings():
         update_registry_token=os.getenv("UPDATE_REGISTRY_TOKEN", "").strip(),
         deployed_image=_text("FEEDDOCK_IMAGE", "ghcr.io/planeteditorx/feeddock:latest")
         or "ghcr.io/planeteditorx/feeddock:latest",
-        watchtower_url=_text("WATCHTOWER_URL", "http://watchtower:8080").rstrip("/"),
-        watchtower_token=os.getenv("WATCHTOWER_TOKEN", "").strip(),
+        updater_url=(
+            _text("FEEDDOCK_UPDATER_URL")
+            or _text("WATCHTOWER_URL")
+            or "http://updater:8090"
+        ).rstrip("/"),
+        updater_token=(
+            os.getenv("FEEDDOCK_UPDATER_TOKEN", "").strip()
+            or os.getenv("WATCHTOWER_TOKEN", "").strip()
+        ),
+        updater_token_file=_optional_path(
+            "FEEDDOCK_UPDATER_TOKEN_FILE",
+            "/run/feeddock-updater/token",
+        ),
     )
 
 
