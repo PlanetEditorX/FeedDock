@@ -10,3 +10,4 @@ downloads/
 qbit-config/
 .DS_Store
 venv/
+.workbuddy
