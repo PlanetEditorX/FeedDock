@@ -540,7 +540,8 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("available_seasons", app_js)
         self.assertIn("inferSeasonFromTitle", app_js)
         self.assertIn("/api/metadata/detail", app_js)
-        self.assertIn("if (isTrial) controls.append(start, remove);", app_js)
+        self.assertIn("if (isTrial) controls.append(start, ...retryAction, remove);", app_js)
+        self.assertIn("const retryAction = sub.last_error ? [retry] : [];", app_js)
 
     def test_mikan_trials_create_a_trial_subscription(self) -> None:
         payload = {

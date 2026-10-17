@@ -18,6 +18,7 @@ button { border: 0; border-radius: 8px; background: var(--accent); color: #08111
 button:hover { filter: brightness(1.08); }
 button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
 button.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+button.warning { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
 button.small { padding: 6px 9px; font-size: 12px; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -373,6 +374,23 @@ body.subscription-management-mode .subscription-card { padding-left: 46px; }
 .login-settings span { display: block; color: var(--muted); }
 .login-settings strong { display: block; margin-top: 3px; font-size: 18px; }
 .compact-modal { width: min(680px, 100%); }
+.provider-badge.retry-badge { color: var(--bad); }
+.retry-dialog { display: grid; gap: 12px; padding: 18px 20px; }
+.retry-error-kind { margin: 0; font-weight: 700; color: var(--bad); }
+.retry-advice { margin: 0; }
+.retry-actions { margin-top: 0; }
+.retry-output { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding: 12px 14px; }
+.retry-output p { margin: 0; }
+.retry-output-line { word-break: break-all; }
+.retry-diagnostics-list { display: grid; gap: 4px; }
+.retry-diagnostics-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.retry-diagnostics-host { flex: 0 0 auto; }
+.retry-diagnostics-row span:last-child { text-align: right; word-break: break-all; }
+.retry-diagnostics-ok { color: var(--good); }
+.retry-raw { border-top: 1px solid var(--line); padding-top: 10px; }
+.retry-raw summary { cursor: pointer; color: var(--muted); }
+.retry-raw pre { margin: 10px 0 0; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; max-height: 180px; overflow: auto; }
+.retry-raw p { margin: 8px 0 0; font-size: 12px; }
 .import-body { display: grid; gap: 14px; padding: 20px; }
 .import-body label { display: grid; gap: 6px; color: var(--muted); }
 .import-body textarea { min-height: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }

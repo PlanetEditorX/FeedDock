@@ -46,6 +46,7 @@ from .debug_logging import (
 )
 from .downloader import QBittorrentClient
 from .discovery import DiscoveryService
+from .error_advisor import describe_error
 from .mikan_cache import MikanCacheService, fetch_cached_mikan_image
 from .notification_config import (
     load_notification_config,
@@ -2119,6 +2120,45 @@ def refresh_single_subscription(
         "ok": True,
         "subscription_id": subscription_id,
         "message": f"RSS 已保存，正在检查订阅：{subscription.name}",
+    }
+
+
+@app.get("/api/subscriptions/{subscription_id}/error-detail", dependencies=[Depends(require_admin)])
+def subscription_error_detail(
+    subscription_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Classify the persisted subscription error and attach runnable solutions.
+
+    The subscription card only shows an ``异常`` badge; this endpoint powers
+    the retry dialog so the user sees what failed (RSS/SSL/DNS/HTTP status …)
+    and gets one-click actions instead of a dead end.
+    """
+    subscription = db.get(Subscription, subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    error = (subscription.last_error or "").strip()
+    detail = describe_error(error) if error else {
+        "kind": "",
+        "label": "当前没有异常",
+        "advice": "该订阅最近一次检查已成功，无需处理。",
+        "actions": [],
+    }
+    return {
+        "ok": True,
+        "subscription_id": subscription.id,
+        "name": subscription.name,
+        "error": error,
+        "checked_at": subscription.last_checked_at,
+        "enabled": subscription.enabled,
+        "subscription_mode": subscription.subscription_mode,
+        "primary_rss_name": subscription.primary_rss_name or "",
+        "rss_url": subscription.rss_url,
+        "backup_rss_url": subscription.backup_rss_url or "",
+        "kind": detail["kind"],
+        "label": detail["label"],
+        "advice": detail["advice"],
+        "actions": detail["actions"],
     }
 
 

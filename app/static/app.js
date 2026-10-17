@@ -1491,6 +1491,8 @@ function createSubscriptionCard(sub) {
     openMetadataReview(sub, { action: 'start-trial', required: true });
     document.getElementById('reviewSearch').click();
   });
+  const retry = text('button', '重试', 'warning');
+  retry.addEventListener('click', () => openSubscriptionRetry(sub));
   const remove = text('button', '删除', 'danger');
   remove.addEventListener('click', async () => {
     if (!window.confirm(`确定删除“${sub.name}”及其历史记录吗？`)) return;
@@ -1502,8 +1504,11 @@ function createSubscriptionCard(sub) {
     await reloadAll();
     await refreshCatalogAfterSubscriptionDeletion();
   });
-  if (isTrial) controls.append(start, remove);
-  else controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, remove);
+  // 异常状态下补一个「重试」入口：展示错误类型并可直接重新选择 RSS / 重试检查，
+  // 而不是只剩启动（试看）或删除两条路。
+  const retryAction = sub.last_error ? [retry] : [];
+  if (isTrial) controls.append(start, ...retryAction, remove);
+  else controls.append(edit, updateRss, ...(sub.trial_bulk ? [] : [sync, scrape]), toggle, ...retryAction, remove);
   content.append(controls);
   card.append(content);
   return card;
@@ -2461,6 +2466,125 @@ async function openRssCandidateSearch(subscription = null) {
   await runRssCandidateSearch();
 }
 
+// 订阅异常重试弹窗：展示后端分类出的错误类型与处理建议，并提供可一键执行的操作。
+let retrySubscription = null;
+function closeSubscriptionRetryModal() {
+  document.getElementById('subscriptionRetryModal').classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  retrySubscription = null;
+}
+
+async function openSubscriptionRetry(sub) {
+  retrySubscription = sub;
+  document.getElementById('subscriptionRetryTitle').textContent = `订阅异常：${sub.name}`;
+  const kindLabel = document.getElementById('retryErrorKind');
+  const advice = document.getElementById('retryAdvice');
+  const actions = document.getElementById('retryActions');
+  const output = document.getElementById('retryOutput');
+  kindLabel.textContent = '正在读取错误详情…';
+  kindLabel.dataset.kind = '';
+  advice.textContent = '';
+  actions.replaceChildren();
+  output.replaceChildren();
+  output.classList.add('hidden');
+  document.getElementById('retryRawError').textContent = '';
+  document.getElementById('retryCheckedAt').textContent = '';
+  document.getElementById('subscriptionRetryModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  try {
+    const detail = await api(`/api/subscriptions/${sub.id}/error-detail`);
+    kindLabel.textContent = `错误类型：${detail.label || 'RSS 检查失败'}`;
+    kindLabel.dataset.kind = detail.kind || 'unknown';
+    advice.textContent = detail.advice || '';
+    document.getElementById('retryRawError').textContent = detail.error || '（无错误详情）';
+    document.getElementById('retryCheckedAt').textContent = detail.checked_at
+      ? `上次检查：${fmtDate(detail.checked_at)}`
+      : '尚未完成过一次检查';
+    for (const action of detail.actions || []) {
+      const button = text('button', action.label, action.id === 'reselect-rss' ? '' : 'secondary');
+      button.type = 'button';
+      button.addEventListener('click', () => runSubscriptionRetryAction(action.id, detail));
+      actions.append(button);
+    }
+  } catch (error) {
+    kindLabel.textContent = '错误详情读取失败';
+    advice.textContent = error.message;
+  }
+}
+
+async function runSubscriptionRetryAction(action, detail) {
+  const sub = retrySubscription;
+  if (!sub) return;
+  const output = document.getElementById('retryOutput');
+  if (action === 'reselect-rss') {
+    closeSubscriptionRetryModal();
+    populateSubscriptionForm(sub, { focusRss: true });
+    openRssCandidateSearch(sub).catch((error) => showNotice(error.message, false));
+    return;
+  }
+  if (action === 'edit') {
+    closeSubscriptionRetryModal();
+    populateSubscriptionForm(sub);
+    showAppView('add-subscription');
+    return;
+  }
+  if (action === 'retry') {
+    try {
+      const result = await api(`/api/subscriptions/${sub.id}/refresh`, { method: 'POST' });
+      showNotice(result.message || '已开始重新检查订阅');
+      watchSubscriptionRefresh(sub.id);
+      closeSubscriptionRetryModal();
+    } catch (error) { showNotice(error.message, false); }
+    return;
+  }
+  if (action === 'test-rss') {
+    output.classList.remove('hidden');
+    output.replaceChildren(text('p', '正在测试 RSS（只读取条目，不会推送下载）…', 'muted'));
+    try {
+      const sources = detail.backup_rss_url ? ['primary', 'backup'] : ['primary'];
+      const lines = [];
+      for (const source of sources) {
+        const result = await api(`/api/subscriptions/${sub.id}/rss/test?source=${source}`, { method: 'POST' });
+        lines.push(`${source === 'backup' ? '备用 RSS' : '主 RSS'}：${result.message}`);
+      }
+      output.replaceChildren(...lines.map((line) => text('p', line, 'retry-output-line')));
+    } catch (error) {
+      output.replaceChildren(text('p', `测试失败：${error.message}`, 'error-text'));
+    }
+    return;
+  }
+  if (action === 'network-diagnostics') {
+    output.classList.remove('hidden');
+    output.replaceChildren(text('p', '正在运行网络诊断…', 'muted'));
+    try {
+      const data = await api('/api/network/diagnostics');
+      renderRetryDiagnostics(output, data);
+    } catch (error) {
+      output.replaceChildren(text('p', `诊断失败：${error.message}`, 'error-text'));
+    }
+  }
+}
+
+function renderRetryDiagnostics(container, data) {
+  container.replaceChildren();
+  container.append(text('p', data.summary || '诊断完成', data.ok ? 'retry-diagnostics-ok' : 'error-text'));
+  const list = document.createElement('div');
+  list.className = 'retry-diagnostics-list';
+  for (const check of data.checks || []) {
+    const row = document.createElement('div');
+    row.className = 'retry-diagnostics-row';
+    row.append(text('span', check.label || check.host || '', 'retry-diagnostics-host'));
+    row.append(text('span', check.ok
+      ? `解析成功：${(check.addresses || []).join(', ')}`
+      : `失败：${check.message}`, check.ok ? 'muted' : 'error-text'));
+    list.append(row);
+  }
+  container.append(list);
+  const nameservers = (data.resolver || {}).nameservers || [];
+  if (nameservers.length) container.append(text('p', `DNS：${nameservers.join('、')}`, 'muted'));
+  for (const tip of data.remediation || []) container.append(text('p', `· ${tip}`, 'muted'));
+}
+
 function quickRssPayload() {
   const rssInput = subscriptionForm.elements.rss_url;
   if (!rssInput.reportValidity()) throw new Error('请填写有效的主 RSS 地址');
@@ -2965,6 +3089,8 @@ document.getElementById('confirmSystemBackupImport').addEventListener('click', a
 document.getElementById('searchRssCandidates').addEventListener('click', () => openRssCandidateSearch().catch((error) => showNotice(error.message, false)));
 document.getElementById('closeRssCandidate').addEventListener('click', closeRssCandidateModal);
 document.querySelector('[data-close-rss-candidate]').addEventListener('click', closeRssCandidateModal);
+document.getElementById('closeSubscriptionRetry').addEventListener('click', closeSubscriptionRetryModal);
+document.querySelector('[data-close-subscription-retry]').addEventListener('click', closeSubscriptionRetryModal);
 document.getElementById('runRssCandidateSearch').addEventListener('click', () => runRssCandidateSearch().catch((error) => showNotice(error.message, false)));
 document.getElementById('rssCandidateQuery').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') { event.preventDefault(); runRssCandidateSearch().catch((error) => showNotice(error.message, false)); }
