@@ -542,6 +542,9 @@ class SubscriptionManagementTests(unittest.TestCase):
         self.assertIn("/api/metadata/detail", app_js)
         self.assertIn("if (isTrial) controls.append(start, ...retryAction, remove);", app_js)
         self.assertIn("const retryAction = sub.last_error ? [retry] : [];", app_js)
+        # 季度不匹配警告必须区分「可切换」与「条目没有该季」两种死路
+        self.assertIn("const hasInferredSeason = seasons.some(row => Number(row.season_number) === inferredSeason);", app_js)
+        self.assertIn("没有第 ${inferredSeason} 季的数据。请返回候选列表选择对应季度的条目", app_js)
 
     def test_mikan_trials_create_a_trial_subscription(self) -> None:
         payload = {

@@ -2066,7 +2066,18 @@ function renderTrialMetadataConfirmation(candidate, detail, inferredSeason) {
   body.append(facts);
 
   if (inferredSeason > 0 && detail.media_type !== 'movie' && resolvedSeason !== inferredSeason) {
-    body.append(text('p', `⚠ 订阅标题看起来是第 ${inferredSeason} 季，但当前元数据匹配为第 ${resolvedSeason} 季。请切换到正确季度后再启动。`, 'metadata-season-warning'));
+    // 两种死路要分开引导：下拉里能切到目标季 → 让用户切；
+    // 条目里根本没有目标季（TMDB 后续季多为独立条目）→ 让用户换条目/换来源，
+    // 否则「请切换到正确季度」在没有该季的下拉框前是一条死路。
+    const hasInferredSeason = seasons.some(row => Number(row.season_number) === inferredSeason);
+    const availableSummary = seasons
+      .filter(row => Number(row.season_number) > 0)
+      .map(row => `第 ${row.season_number} 季`)
+      .join('、');
+    const warning = hasInferredSeason
+      ? `⚠ 订阅标题看起来是第 ${inferredSeason} 季，但当前元数据匹配为第 ${resolvedSeason} 季。请切换到正确季度后再启动。`
+      : `⚠ 订阅标题看起来是第 ${inferredSeason} 季，但该条目只包含${availableSummary || '其它季度'}，没有第 ${inferredSeason} 季的数据。请返回候选列表选择对应季度的条目，或切换来源重试（TMDB 的后续季通常是独立条目，Bangumi / AniList 更常合并为一个条目）。`;
+    body.append(text('p', warning, 'metadata-season-warning'));
   }
 
   if (seasons.length && detail.media_type !== 'movie') {
